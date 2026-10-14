@@ -1,0 +1,8 @@
+config/paths.env
+generated/library.json
+.DS_Store
+build/
+__pycache__/
+*.pyc
+config/setup.json
+marosi-me-tesla/

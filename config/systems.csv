@@ -1,0 +1,15 @@
+system,extensions
+nes,nes|zip
+snes,sfc|smc|zip
+gb,gb|zip
+gbc,gbc|zip
+gba,gba|zip
+n64,n64|z64|v64|zip
+gc,iso|gcz|rvz
+wii,iso|wbfs|rvz
+psx,cue|chd|m3u|pbp
+ps2,iso|chd
+psp,iso|cso
+megadrive,md|bin|zip
+segacd,cue|chd|m3u
+dreamcast,cdi|gdi|chd

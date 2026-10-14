@@ -1,0 +1,5 @@
+system,filename,notes
+psx,scph1001.bin,PCSX ReARMed US example; alternatives depend on region/core
+dreamcast,dc/dc_boot.bin,Flycast optional Dreamcast BIOS; see core documentation
+dreamcast,dc/dc_flash.bin,Flycast flash; see core documentation
+segacd,bios_CD_U.bin,Genesis Plus GX US BIOS; other regions use different names
