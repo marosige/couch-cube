@@ -23,38 +23,51 @@ func rounded(_ rect: NSRect, _ radius: CGFloat, _ fill: NSColor) {
 func drawIcon() {
     NSGraphicsContext.saveGraphicsState()
     NSAffineTransform(transform: AffineTransform(m11: 1, m12: 0, m21: 0, m22: -1, tX: 0, tY: 1024)).concat()
-    rounded(NSRect(x: 16, y: 16, width: 992, height: 992), 218, color(0x28334B))
-    rounded(NSRect(x: 206, y: 245, width: 612, height: 590), 148, color(0x1C2538))
-    rounded(NSRect(x: 206, y: 189, width: 612, height: 590), 148, color(0x8FD9CC))
-    rounded(NSRect(x: 242, y: 215, width: 540, height: 126), 100, color(0xB6EBDD))
-    rounded(NSRect(x: 206, y: 291, width: 612, height: 488), 122, color(0x8FD9CC))
-    let ink = color(0x28334B)
-    rounded(NSRect(x: 310, y: 420, width: 190, height: 64), 20, ink)
-    rounded(NSRect(x: 373, y: 357, width: 64, height: 190), 20, ink)
-    rounded(NSRect(x: 597, y: 382, width: 70, height: 70), 35, ink)
-    rounded(NSRect(x: 681, y: 466, width: 70, height: 70), 35, ink)
-    rounded(NSRect(x: 337, y: 652, width: 222, height: 18), 9, color(0x4B9D94))
-    rounded(NSRect(x: 674, y: 646, width: 30, height: 30), 15, color(0xF4F7EE))
-    if CommandLine.arguments.contains("--portable") || CommandLine.arguments.contains("--installer") {
-        rounded(NSRect(x: 648, y: 680, width: 292, height: 250), 70, color(0x28334B))
-        rounded(NSRect(x: 670, y: 702, width: 248, height: 206), 52, color(0xF4F7EE))
-        if CommandLine.arguments.contains("--portable") {
-            rounded(NSRect(x: 719, y: 752, width: 150, height: 100), 24, ink)
-            rounded(NSRect(x: 739, y: 812, width: 66, height: 10), 5, color(0x8FD9CC))
-            rounded(NSRect(x: 832, y: 809, width: 16, height: 16), 8, color(0x8FD9CC))
-        } else {
-            rounded(NSRect(x: 780, y: 740, width: 28, height: 82), 10, ink)
-            let arrow = NSBezierPath()
-            arrow.move(to: NSPoint(x: 744, y: 790))
-            arrow.line(to: NSPoint(x: 794, y: 840))
-            arrow.line(to: NSPoint(x: 844, y: 790))
-            arrow.lineWidth = 28
-            arrow.lineJoinStyle = .round
-            arrow.lineCapStyle = .round
-            ink.setStroke()
-            arrow.stroke()
-            rounded(NSRect(x: 737, y: 862, width: 114, height: 12), 6, ink)
-        }
+    let silhouette = NSBezierPath(roundedRect: NSRect(x: 16, y: 16, width: 992, height: 992), xRadius: 218, yRadius: 218)
+    color(0x718C91).setFill()
+    silhouette.fill()
+    silhouette.addClip()
+
+    rounded(NSRect(x: -160, y: -130, width: 840, height: 462), 42, color(0x242A2D))
+    rounded(NSRect(x: -144, y: -114, width: 808, height: 424), 28, color(0x10191E))
+    rounded(NSRect(x: -100, y: 310, width: 742, height: 8), 4, color(0x424D52))
+
+    color(0x9C704E).setFill()
+    NSRect(x: 16, y: 730, width: 992, height: 278).fill()
+    color(0xB88B62).setFill()
+    NSRect(x: 16, y: 730, width: 992, height: 30).fill()
+    rounded(NSRect(x: 175, y: 732, width: 708, height: 49), 24, color(0x815B41))
+    rounded(NSRect(x: 250, y: 712, width: 552, height: 44), 22, color(0x303638))
+
+    rounded(NSRect(x: 192, y: 455, width: 640, height: 286), 82, color(0xBCC3C8))
+    rounded(NSRect(x: 192, y: 345, width: 640, height: 300), 82, color(0xE6E9EB))
+    rounded(NSRect(x: 225, y: 625, width: 574, height: 6), 3, color(0xCED4D8))
+    for x in [CGFloat(321), CGFloat(429)] {
+        rounded(NSRect(x: x + 21.5, y: 638.5, width: 21, height: 64), 10, color(0x424B52))
+        rounded(NSRect(x: x + 29.5, y: 648.5, width: 5, height: 44), 2.5, color(0x202A30))
+    }
+    rounded(NSRect(x: 556, y: 657, width: 27, height: 27), 13.5, color(0x424B52))
+    rounded(NSRect(x: 774, y: 663, width: 13, height: 13), 6.5, color(0xF7FAF8))
+    if CommandLine.arguments.contains("--portable") {
+        let cable = NSBezierPath()
+        cable.move(to: NSPoint(x: 353, y: 670))
+        cable.curve(to: NSPoint(x: 276, y: 829),
+                    controlPoint1: NSPoint(x: 355, y: 774),
+                    controlPoint2: NSPoint(x: 186, y: 772))
+        cable.curve(to: NSPoint(x: 440, y: 849),
+                    controlPoint1: NSPoint(x: 308, y: 854),
+                    controlPoint2: NSPoint(x: 390, y: 849))
+        cable.lineWidth = 18
+        cable.lineCapStyle = .round
+        color(0x303A3E).setStroke()
+        cable.stroke()
+        rounded(NSRect(x: 337, y: 647, width: 32, height: 58), 7, color(0x303A3E))
+        rounded(NSRect(x: 434, y: 838, width: 36, height: 24), 6, color(0x303A3E))
+        rounded(NSRect(x: 455, y: 886, width: 400, height: 48), 23, color(0x815B41))
+        rounded(NSRect(x: 455, y: 805, width: 400, height: 105), 28, color(0x35464E))
+        rounded(NSRect(x: 455, y: 790, width: 400, height: 86), 28, color(0x526771))
+        rounded(NSRect(x: 482, y: 804, width: 346, height: 8), 4, color(0x748890))
+        rounded(NSRect(x: 798, y: 859, width: 16, height: 12), 6, color(0xA7DED4))
     }
     NSGraphicsContext.restoreGraphicsState()
 }

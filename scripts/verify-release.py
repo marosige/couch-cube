@@ -64,7 +64,7 @@ with tempfile.TemporaryDirectory(prefix="mac-console-release-") as directory:
         assert not (mount / "Start Here.txt").exists()
         assert (mount / "README.md").is_file()
         assert (mount / ".VolumeIcon.icns").is_file()
-        assert (mount / ".VolumeIcon.icns").read_bytes() != (app / "Contents/Resources/Console.icns").read_bytes()
+        assert (mount / ".VolumeIcon.icns").read_bytes() == (app / "Contents/Resources/Console.icns").read_bytes()
         local_icon = (app / "Contents/Resources/Console.icns").read_bytes()
         installer_icon = (mount / ".VolumeIcon.icns").read_bytes()
         flags = run(["/usr/bin/xcrun", "GetFileInfo", "-aC", str(mount)], stdout=subprocess.PIPE)

@@ -67,6 +67,161 @@ struct ConsoleSystem: Decodable {
     let requirement: String
 }
 
+enum ConsoleArtwork {
+    static let groups: [(title: String, systems: [String])] = [
+        ("Nintendo home consoles", ["nes", "snes", "n64", "gc", "wii", "wiiu", "switch"]),
+        ("Nintendo handhelds", ["gb", "gbc", "gba"]),
+        ("PlayStation", ["psx", "ps2", "psp", "ps3"]),
+        ("SEGA", ["megadrive", "segacd", "dreamcast"])
+    ]
+
+    static func image(for id: String) -> NSImage {
+        // Original hardware-inspired drawings, without manufacturer logos.
+        NSImage(size: NSSize(width: 32, height: 32), flipped: true) { _ in
+            func box(_ x: CGFloat, _ y: CGFloat, _ w: CGFloat, _ h: CGFloat, _ radius: CGFloat = 2) {
+                NSBezierPath(roundedRect: NSRect(x: x, y: y, width: w, height: h),
+                             xRadius: radius, yRadius: radius).stroke()
+            }
+            func line(_ points: [NSPoint]) {
+                let path = NSBezierPath()
+                if let first = points.first {
+                    path.move(to: first)
+                    for point in points.dropFirst() { path.line(to: point) }
+                }
+                path.stroke()
+            }
+            func stroke(_ x: CGFloat, _ y: CGFloat, _ endX: CGFloat, _ endY: CGFloat) {
+                line([NSPoint(x: x, y: y), NSPoint(x: endX, y: endY)])
+            }
+            func dot(_ x: CGFloat, _ y: CGFloat, _ size: CGFloat = 2) {
+                NSBezierPath(ovalIn: NSRect(x: x, y: y, width: size, height: size)).fill()
+            }
+            func disc(_ x: CGFloat, _ y: CGFloat, _ size: CGFloat) {
+                NSBezierPath(ovalIn: NSRect(x: x, y: y, width: size, height: size)).stroke()
+            }
+            func pad(_ x: CGFloat, _ y: CGFloat) {
+                stroke(x - 2, y, x + 2, y)
+                stroke(x, y - 2, x, y + 2)
+            }
+            NSGraphicsContext.saveGraphicsState()
+            defer { NSGraphicsContext.restoreGraphicsState() }
+            NSColor.white.setStroke()
+            NSColor.white.setFill()
+            let previousLineWidth = NSBezierPath.defaultLineWidth
+            NSBezierPath.defaultLineWidth = 1.6
+            defer { NSBezierPath.defaultLineWidth = previousLineWidth }
+            switch id {
+            case "nes":
+                box(3, 7, 26, 18)
+                stroke(3, 18, 29, 18)
+                box(15, 10, 10, 5, 0)
+                stroke(7, 22, 11, 22)
+                dot(25, 21)
+            case "snes":
+                box(3, 9, 26, 16, 5)
+                box(9, 7, 14, 9)
+                stroke(12, 11, 20, 11)
+                box(8, 19, 5, 3, 1)
+                box(19, 19, 5, 3, 1)
+            case "n64":
+                line([NSPoint(x: 3, y: 24), NSPoint(x: 5, y: 13), NSPoint(x: 10, y: 10),
+                      NSPoint(x: 22, y: 10), NSPoint(x: 27, y: 13), NSPoint(x: 29, y: 24),
+                      NSPoint(x: 3, y: 24)])
+                stroke(11, 13, 21, 13)
+                for x in [7, 12, 18, 23] { dot(CGFloat(x), 20) }
+            case "gc":
+                box(6, 10, 20, 18, 3)
+                box(11, 4, 10, 6, 2)
+                disc(10, 12, 12)
+                dot(10, 25)
+                dot(20, 25)
+            case "wii":
+                line([NSPoint(x: 8, y: 27), NSPoint(x: 10, y: 5), NSPoint(x: 23, y: 3),
+                      NSPoint(x: 23, y: 27), NSPoint(x: 8, y: 27)])
+                stroke(19, 8, 19, 22)
+                dot(12, 8)
+                stroke(6, 29, 26, 29)
+            case "wiiu":
+                box(6, 4, 22, 9, 3)
+                stroke(14, 8, 25, 8)
+                box(2, 16, 28, 13, 4)
+                box(9, 19, 14, 7, 1)
+                pad(5, 22)
+                dot(26, 21)
+            case "switch":
+                box(2, 7, 28, 18, 5)
+                box(9, 9, 14, 14, 1)
+                stroke(8, 8, 8, 24)
+                stroke(24, 8, 24, 24)
+                dot(4, 11, 2.5)
+                dot(26, 18, 2.5)
+            case "gb", "gbc":
+                box(7, 2, 18, 28, id == "gb" ? 2 : 5)
+                box(10, 5, 12, id == "gb" ? 10 : 11, 1)
+                pad(12, 22)
+                dot(19, 21)
+                dot(22, 19)
+                if id == "gb" { stroke(16, 27, 20, 27) }
+                else { stroke(17, 26, 21, 25); stroke(17, 28, 21, 27) }
+            case "gba":
+                box(1, 7, 30, 18, 7)
+                box(10, 10, 12, 12, 1)
+                pad(5, 16)
+                dot(25, 16)
+                dot(28, 13)
+            case "psx":
+                box(2, 7, 28, 19, 3)
+                disc(9, 9, 14)
+                dot(5, 11, 3)
+                dot(25, 11, 3)
+                box(7, 23, 6, 2, 0)
+                box(19, 23, 6, 2, 0)
+            case "ps2":
+                box(8, 3, 15, 26, 1)
+                stroke(18, 3, 18, 29)
+                for y in [8, 12, 16, 20] { stroke(10, CGFloat(y), 16, CGFloat(y)) }
+                stroke(21, 7, 21, 20)
+                stroke(5, 29, 27, 29)
+            case "psp":
+                box(1, 8, 30, 16, 7)
+                box(10, 10, 12, 12, 1)
+                pad(5, 16)
+                for point in [(26, 12), (24, 15), (28, 15), (26, 18)] {
+                    dot(CGFloat(point.0), CGFloat(point.1), 1.5)
+                }
+                dot(5, 20, 1.5)
+            case "ps3":
+                box(6, 3, 20, 26, 7)
+                stroke(20, 5, 20, 27)
+                stroke(23, 10, 23, 21)
+                stroke(10, 25, 16, 25)
+            case "megadrive":
+                box(2, 8, 28, 18, 6)
+                disc(9, 10, 14)
+                stroke(12, 13, 20, 13)
+                box(5, 22, 7, 3, 1)
+                box(20, 22, 7, 3, 1)
+            case "segacd":
+                box(2, 4, 28, 14, 4)
+                disc(11, 6, 10)
+                box(2, 20, 28, 9, 2)
+                box(13, 22, 14, 5, 1)
+                dot(6, 24)
+            case "dreamcast":
+                box(3, 5, 26, 23, 4)
+                disc(8, 7, 16)
+                stroke(11, 9, 21, 9)
+                for x in [7, 12, 18, 23] { dot(CGFloat(x), 25) }
+            default:
+                box(4, 6, 24, 20, 4)
+                pad(11, 16)
+                dot(22, 15)
+            }
+            return true
+        }
+    }
+}
+
 struct PairedController {
     let name: String
     let address: String
@@ -117,6 +272,35 @@ final class SettingsSidebarCell: NSTableCellView {
 
 typealias SetupActionButton = NSButton
 
+final class StorageChoiceButton: NSButton {
+    private var hovered = false
+    private var hoverArea: NSTrackingArea?
+
+    override func updateTrackingAreas() {
+        if let area = hoverArea { removeTrackingArea(area) }
+        let area = NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect],
+                                  owner: self, userInfo: nil)
+        addTrackingArea(area)
+        hoverArea = area
+        super.updateTrackingAreas()
+    }
+
+    override func mouseEntered(with event: NSEvent) { hovered = true; needsDisplay = true }
+    override func mouseExited(with event: NSEvent) { hovered = false; needsDisplay = true }
+
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        super.hitTest(point) == nil ? nil : self
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        if isEnabled && (hovered || isHighlighted) {
+            NSColor.controlAccentColor.withAlphaComponent(isHighlighted ? 0.14 : 0.07).setFill()
+            NSBezierPath(roundedRect: bounds, xRadius: 8, yRadius: 8).fill()
+        }
+        super.draw(dirtyRect)
+    }
+}
+
 final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTableViewDataSource, NSTableViewDelegate, CBCentralManagerDelegate {
     private var window: NSWindow!
     private var mainWindow: NSWindow!
@@ -124,9 +308,14 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
     private let mainDetail = SettingsBackgroundView()
     private let sidebar = NSTableView()
     private var selectingPage = false
-    private let sidebarPages = [-1, 0, 3, 6, -1, 1, 7, 8, 5, -1, 2]
-    private let sidebarTitles = ["Your console", "Play", "Setup", "Game library", "Games & devices", "Apps", "Consoles", "Controllers", "Steam setup", "This Mac", "Settings"]
-    private let sidebarSymbols = ["", "play.fill", "checklist", "externaldrive.fill", "", "square.grid.2x2.fill", "gamecontroller.fill", "gamecontroller", "tv.fill", "", "gearshape.fill"]
+    private let sidebarPages = [9, -1, 0, 3, 6, -1, 1, 7, 8, 5, -1, 2]
+    private let sidebarTitles = ["General", "Your console", "Play", "Setup", "Game library", "Games & devices", "Apps", "Consoles", "Controllers", "Steam setup", "This Mac", "Settings"]
+    private let sidebarSymbols = ["gearshape", "", "play.fill", "checklist", "externaldrive.fill", "", "square.grid.2x2.fill", "gamecontroller.fill", "gamecontroller", "tv.fill", "", "gearshape.fill"]
+    private let generalRows = NSStackView()
+    private let generalSummary = NSTextField(wrappingLabelWithString: "Checking this Mac...")
+    private let inspectorRows = NSStackView()
+    private let inspectorTitle = NSTextField(labelWithString: "")
+    private var inspectorParent = 1
     private let activeControllerRows = NSStackView()
     private let pairedControllerRows = NSStackView()
     private let controllerStatus = NSTextField(wrappingLabelWithString: "")
@@ -387,12 +576,17 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
         updateButton.action = #selector(openUpdate)
         updateButton.isEnabled = false
         updateButton.bezelStyle = .rounded
+        let storageChoices = column([
+            choice("This Mac", "Keep your game folders on this Mac.", symbol: "macmini", action: #selector(chooseLocal)),
+            separator(),
+            choice("External SSD", "Keep your game folders on an external drive.", symbol: "externaldrive", action: #selector(choosePortable))
+        ])
+        storageChoices.spacing = 0
         addPage("Welcome", content: column([
             pageHeading("Set up your console", "Choose a home for your games. Everything stays here in the sidebar."),
             card("Game storage", subtitle: "No games are moved. Steam keeps its current library unless you change it.", views: [
                 setupFolderStatus,
-                row([choice("This Mac", "Built-in storage", symbol: "desktopcomputer", action: #selector(chooseLocal)),
-                     choice("External SSD", "More space for games", symbol: "externaldrive.fill", action: #selector(choosePortable))])
+                storageChoices
             ]),
             card("TV menu & emulators", subtitle: nil, views: [
                 settingsRow("Choose your consoles", subtitle: "Switch on only the systems you want. We'll show which emulator each needs.", symbol: "gamecontroller.fill", color: .systemPurple,
@@ -492,6 +686,23 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
             ]),
             text("Pairing and Forget This Device are confirmed in macOS Bluetooth settings. Switch a controller on to reconnect; USB controllers do not need pairing. Configure game buttons in Steam or your emulator.", size: 12, secondary: true)
         ]))
+        generalRows.orientation = .vertical
+        generalRows.alignment = .leading
+        generalRows.spacing = 0
+        addPage("General", content: column([
+            pageHeading("General", "How close this Mac is to your couch console."),
+            card("Your Couch Cube", subtitle: nil, views: [generalSummary, generalRows]),
+            text("App presence and connections can be checked. Steam sign-in, installed games, BIOS, firmware and in-game controller mapping still need your own check.", size: 12, secondary: true),
+            button("Refresh status", #selector(refreshGeneral))
+        ]))
+        inspectorTitle.font = .systemFont(ofSize: 22, weight: .bold)
+        inspectorRows.orientation = .vertical
+        inspectorRows.alignment = .leading
+        inspectorRows.spacing = 12
+        addPage("Details", content: column([
+            button("Back", #selector(closeInspector)), inspectorTitle,
+            card("Details", subtitle: nil, views: [inspectorRows])
+        ]))
         navigationBar.orientation = .vertical
         navigationBar.alignment = .leading
         let brandImage = NSImageView(image: NSImage(contentsOf: Bundle.main.resourceURL!.appendingPathComponent("Console.icns"))!)
@@ -543,7 +754,7 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
         for view in stack.arrangedSubviews where view !== tabs {
             view.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
         }
-        selectPage(3)
+        selectPage(9)
         mainWindow.center()
         window.center()
         window.makeKeyAndOrderFront(nil)
@@ -634,23 +845,45 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
     }
 
     private func choice(_ title: String, _ description: String, symbol: String, action: Selector) -> NSView {
-        let choose = button(title, action)
-        choose.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)
-        choose.imagePosition = .imageLeading
-        choose.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 18, weight: .regular)
-        choose.bezelStyle = .recessed
-        choose.showsBorderOnlyWhileMouseInside = true
-        choose.contentTintColor = .controlAccentColor
-        choose.controlSize = .large
+        let choose = StorageChoiceButton(title: "", target: self, action: action)
+        choose.isBordered = false
+        choose.setButtonType(.momentaryChange)
+        choose.focusRingType = .exterior
+        actions.append(choose)
+        let icon = NSImageView(image: NSImage(systemSymbolName: symbol, accessibilityDescription: nil)!)
+        icon.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 28, weight: .regular)
+        icon.contentTintColor = .secondaryLabelColor
+        icon.widthAnchor.constraint(equalToConstant: 40).isActive = true
+        icon.heightAnchor.constraint(equalToConstant: 36).isActive = true
+        let heading = text(title)
+        heading.font = .systemFont(ofSize: 13, weight: .medium)
+        let labels = column([heading, text(description, size: 12, secondary: true)])
+        labels.spacing = 4
+        let arrow = NSImageView(image: NSImage(systemSymbolName: "chevron.right", accessibilityDescription: nil)!)
+        arrow.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 11, weight: .semibold)
+        arrow.contentTintColor = .tertiaryLabelColor
+        arrow.widthAnchor.constraint(equalToConstant: 12).isActive = true
+        let content = row([icon, labels, arrow])
+        content.distribution = .fill
+        content.spacing = 12
+        content.translatesAutoresizingMaskIntoConstraints = false
+        choose.addSubview(content)
+        NSLayoutConstraint.activate([
+            content.leadingAnchor.constraint(equalTo: choose.leadingAnchor, constant: 10),
+            content.trailingAnchor.constraint(equalTo: choose.trailingAnchor, constant: -12),
+            content.topAnchor.constraint(equalTo: choose.topAnchor, constant: 12),
+            content.bottomAnchor.constraint(equalTo: choose.bottomAnchor, constant: -12),
+            choose.heightAnchor.constraint(greaterThanOrEqualToConstant: 68)
+        ])
         choose.setAccessibilityLabel(title + ". " + description.replacingOccurrences(of: "\n", with: " "))
-        return card("", subtitle: nil, views: [choose, text(description, secondary: true)])
+        return choose
     }
 
     @objc private func chooseLocal() { chooseMode("local") }
     @objc private func choosePortable() { chooseMode("portable") }
 
     private func chooseMode(_ mode: String) {
-        guard task == nil else { return }
+        guard task == nil else { status.stringValue = "Wait for the current operation before changing storage."; return }
         preferredMode = mode
         didRouteInitialLibrary = true
         preparationResult.isHidden = true
@@ -800,6 +1033,7 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
 
     @objc private func controllerConnectionChanged() {
         DispatchQueue.main.async {
+            self.renderGeneral()
             if self.tabs.selectedTabViewItem === self.tabs.tabViewItems[8] { self.refreshControllers() }
         }
     }
@@ -926,6 +1160,7 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
     }
 
     private func updateSetupSummary() {
+        defer { renderGeneral() }
         clearRows(libraryHealth)
         guard let report = report, let drive = selected else {
             libraryHealth.addArrangedSubview(statusIndicator(selected == nil ? "No storage selected" : "Checking library", color: .systemYellow))
@@ -951,6 +1186,81 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
             ? "Local Steam games stay in Steam's existing library. No storage change needed."
             : "For Steam games on the SSD, add its SteamLibrary in Steam → Settings → Storage."
         playAction.isEnabled = task == nil && foldersReady && (steamInstalled || retroInstalled)
+    }
+
+    private func renderGeneral() {
+        clearRows(generalRows)
+        let ready = report?.state == "valid layout" && report?.issues.isEmpty == true
+        let frontend = report.map { !$0.missing.contains("steam") ? "Steam Big Picture" :
+            !$0.missing.contains("es-de") ? "ES-DE" : nil } ?? nil
+        let controllerCount = GCController.controllers().count
+        let essentials = [ready, frontend != nil, controllerCount > 0].filter { $0 }.count
+        generalSummary.stringValue = ready && frontend != nil && controllerCount > 0
+            ? "3 of 3 essentials detected. Check a game and its controller mapping before settling in."
+            : "\(essentials) of 3 essentials detected: game storage, a TV menu and an active controller."
+        func add(_ title: String, _ note: String, _ state: String, _ color: NSColor, _ symbol: String, _ action: Selector) {
+            if !generalRows.arrangedSubviews.isEmpty {
+                let line = separator()
+                generalRows.addArrangedSubview(line)
+                line.widthAnchor.constraint(equalTo: generalRows.widthAnchor).isActive = true
+            }
+            let view = settingsRow(title, subtitle: note, symbol: symbol, color: .systemBlue,
+                                   trailing: row([statusIndicator(state, color: color), button("View", action)]))
+            generalRows.addArrangedSubview(view)
+            view.widthAnchor.constraint(equalTo: generalRows.widthAnchor).isActive = true
+        }
+        add("Game storage", selected?.root ?? "Choose storage in Setup.",
+            ready ? "Ready" : report == nil ? "Not checked" : report?.issues.isEmpty == true ? "Setup needed" : "Needs attention",
+            ready ? .systemGreen : report?.issues.isEmpty == false ? .systemRed : .systemYellow,
+            "externaldrive.fill", #selector(backToChoices))
+        add("TV menu", frontend ?? "Install Steam or ES-DE to browse your games.",
+            frontend == nil ? "Setup needed" : "Installed", frontend == nil ? .systemYellow : .systemGreen,
+            "tv.fill", #selector(showPlayers))
+        add("Controllers", controllerCount == 0 ? "Connect a controller by USB or Bluetooth." : "\(controllerCount) recognized by macOS.",
+            controllerCount == 0 ? "Not connected" : "Active", controllerCount == 0 ? .systemYellow : .systemGreen,
+            "gamecontroller.fill", #selector(showControllers))
+        let enabled = consoleSystems.filter { $0.enabled }
+        let missing = Set(enabled.filter { report?.missing.contains($0.package) == true }.map { $0.package })
+        add("Retro consoles", consoleSystems.isEmpty ? "Open Consoles to check your selection." :
+            enabled.isEmpty ? "Optional. No retro consoles selected." : "\(enabled.count) selected; \(missing.count) required emulator apps missing.",
+            consoleSystems.isEmpty ? "Not checked" : enabled.isEmpty ? "Optional" : missing.isEmpty ? "Apps present" : "Apps needed",
+            enabled.isEmpty ? .secondaryLabelColor : missing.isEmpty ? .systemGreen : .systemYellow,
+            "gamecontroller", #selector(showConsoles))
+        add("Automatic console mode", autoLaunchLoaded ? autoLaunchStatus.stringValue : "Check whether console mode starts after login.",
+            autoLaunchLoaded ? autoLaunchToggle.state == .on ? "On" : "Off" : "Not checked",
+            autoLaunchLoaded && autoLaunchToggle.state == .on ? .systemGreen : .secondaryLabelColor,
+            "power", #selector(openSettings))
+    }
+
+    @objc private func refreshGeneral() {
+        guard task == nil else { status.stringValue = "Wait for the current operation, then refresh status."; return }
+        consoleSystems = []
+        autoLaunchLoaded = false
+        refresh()
+    }
+
+    private func loadGeneralDetails() {
+        guard task == nil else { return }
+        guard report?.state == "valid layout", let drive = selected else {
+            consoleSystems = []
+            loadAutoLaunch()
+            return
+        }
+        execute(["systems", "--root", drive.root], capture: true) { code, data in
+            if code == 0 {
+                do {
+                    self.consoleSystems = try JSONDecoder().decode([ConsoleSystem].self, from: data)
+                    self.renderSystems()
+                } catch {
+                    self.status.stringValue = "Couldn't read console status: \(error.localizedDescription)"
+                    self.append(self.status.stringValue + "\n")
+                }
+            } else {
+                self.status.stringValue = "Couldn't read console status. Open Details for the error."
+            }
+            self.renderGeneral()
+            self.loadAutoLaunch()
+        }
     }
 
     private func text(_ value: String, size: CGFloat = 13, secondary: Bool = false) -> NSTextField {
@@ -1033,7 +1343,7 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
         stack.spacing = 16
         stack.distribution = .fill
         for view in views {
-            if view is NSButton {
+            if view is NSButton && !(view is StorageChoiceButton) {
                 view.widthAnchor.constraint(lessThanOrEqualTo: stack.widthAnchor).isActive = true
             } else {
                 view.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
@@ -1082,8 +1392,8 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
     }
 
     private func settingsRow(_ title: String, subtitle: String, symbol: String, color: NSColor,
-                             trailing: NSView) -> NSView {
-        let icon = NSImageView(image: NSImage(systemSymbolName: symbol, accessibilityDescription: nil)!)
+                             trailing: NSView, artwork: NSImage? = nil) -> NSView {
+        let icon = NSImageView(image: artwork ?? NSImage(systemSymbolName: symbol, accessibilityDescription: nil)!)
         icon.contentTintColor = .white
         icon.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 15, weight: .medium)
         let tile = NSView()
@@ -1098,6 +1408,11 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
             icon.centerXAnchor.constraint(equalTo: tile.centerXAnchor),
             icon.centerYAnchor.constraint(equalTo: tile.centerYAnchor)
         ])
+        if artwork != nil {
+            icon.widthAnchor.constraint(equalToConstant: 24).isActive = true
+            icon.heightAnchor.constraint(equalToConstant: 24).isActive = true
+            icon.imageScaling = .scaleProportionallyUpOrDown
+        }
         let labels = column([text(title, size: 13), text(subtitle, size: 11, secondary: true)])
         labels.spacing = 4
         labels.setContentHuggingPriority(.defaultLow, for: .horizontal)
@@ -1158,7 +1473,8 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
         storageNext.isHidden = index != 4
         storageNext.keyEquivalent = index == 4 ? "\r" : ""
         playAction.keyEquivalent = index == 0 ? "\r" : ""
-        if let selected = sidebarPages.firstIndex(of: index == 4 ? 3 : index), sidebar.selectedRow != selected {
+        let sidebarPage = index == 4 ? 3 : index == 10 ? inspectorParent : index
+        if let selected = sidebarPages.firstIndex(of: sidebarPage), sidebar.selectedRow != selected {
             sidebar.selectRowIndexes(IndexSet(integer: selected), byExtendingSelection: false)
         }
         controllerTimer?.invalidate()
@@ -1169,6 +1485,7 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
                 controllerTimer = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak self] _ in self?.refreshControllers() }
             }
         }
+        if index == 9 { renderGeneral() }
     }
 
     func numberOfRows(in tableView: NSTableView) -> Int { sidebarTitles.count }
@@ -1188,7 +1505,7 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
             return view
         }
         label.font = .systemFont(ofSize: 13)
-        let colors: [NSColor] = [.systemGray, .systemGreen, .systemGray, .systemOrange, .systemGray, .systemBlue, .systemPurple, .systemBlue, .systemIndigo, .systemGray, .systemGray]
+        let colors: [NSColor] = [.systemGray, .systemGray, .systemGreen, .systemGray, .systemOrange, .systemGray, .systemBlue, .systemPurple, .systemBlue, .systemIndigo, .systemGray, .systemGray]
         let cell = SettingsSidebarCell()
         cell.textField = label
         let image = NSImageView(image: NSImage(systemSymbolName: sidebarSymbols[row], accessibilityDescription: nil)!)
@@ -1227,6 +1544,7 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
         if page == 2 { loadAutoLaunch() }
         if page == 1 { loadApps() }
         if page == 7 { loadSystems() }
+        if page == 9 { refreshGeneral() }
     }
 
     @objc private func openSettings() {
@@ -1289,34 +1607,13 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
             if app.id == "steam" { addSectionHeading("TV menus", to: appRows) }
             if app.id == "retroarch-metal" { addSectionHeading("Retro games", to: appRows) }
             if app.id == "porting-kit" { addSectionHeading("Windows games", to: appRows) }
-            let action = button(app.installed ? "Installed" : app.manual ? "Get app..." : "Install", #selector(appAction(_:)))
+            let action = button("Details...", #selector(showAppDetails(_:)))
             action.tag = index
-            let controls = row([
-                statusIndicator(app.installed ? (app.update == nil ? "Installed" : "Update available") : "Not installed",
-                                color: app.installed && app.update == nil ? .systemGreen : .systemYellow), action
-            ])
-            if let update = app.update, !update.isEmpty {
-                let upgrade = button("Update", #selector(updateApp(_:)))
-                upgrade.tag = index
-                controls.addArrangedSubview(upgrade)
-            }
-            let note = app.installed
-                ? "Version \(app.version)" + (app.managed ? " · Homebrew" : " · Manual install") + (app.update.map { " · Update: \($0)" } ?? "")
-                : app.id == "switch" ? "Bring your own compatible macOS emulator (Ryujinx.app). No bundled download." :
-                    app.id == "cemu-wiiu" ? "Wii U · Manual download from cemu.info (not the CEmu calculator cask)." :
-                    app.id == "rpcs3" ? "PS3 · Manual download from rpcs3.net; install Sony firmware in RPCS3." :
-                    app.id == "pcsx2" ? "PS2 · Your own BIOS required; Homebrew build may require Rosetta." :
-                    app.id == "es-de" ? "Your retro TV menu; games also need emulators." :
-                    app.id == "steam" ? "Steam games & Big Picture TV menu." :
-                    app.id == "dolphin" ? "GameCube & Wii." :
-                    app.id == "retroarch-metal" ? "PS1 and classic systems; install only for consoles that need it." :
-                    "Compatible Windows-game wrappers; not macOS Proton."
+            let note = app.installed ? (app.update == nil ? "Installed · \(app.version)" : "Update available") :
+                app.manual ? "Manual installation" : "Not installed"
             let line = settingsRow(app.name, subtitle: note, symbol: app.id == "steam" ? "gamecontroller.fill" : "app.fill",
-                                   color: .systemBlue, trailing: controls)
+                                   color: .systemBlue, trailing: action)
             if app.installed {
-                let open = button("Open", #selector(openManagedApp(_:)))
-                open.tag = index
-                controls.insertArrangedSubview(open, at: 0)
                 let icon = NSImageView(image: NSWorkspace.shared.icon(forFile: app.path))
                 icon.widthAnchor.constraint(equalToConstant: 32).isActive = true
                 icon.heightAnchor.constraint(equalToConstant: 32).isActive = true
@@ -1335,6 +1632,72 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
         }
     }
 
+    @objc private func closeInspector() {
+        clearRows(inspectorRows)
+        selectPage(inspectorParent)
+    }
+
+    @objc private func showAppDetails(_ sender: NSButton) {
+        guard appStates.indices.contains(sender.tag) else { return }
+        let app = appStates[sender.tag]
+        inspectorParent = 1
+        inspectorTitle.stringValue = app.name
+        clearRows(inspectorRows)
+        inspectorRows.addArrangedSubview(statusIndicator(app.installed ? "Installed · \(app.version)" : "Not installed",
+                                                       color: app.installed ? .systemGreen : .systemYellow))
+        let purposes = [
+            "steam": "Steam games and Big Picture TV menu. Sign in and install your games in Steam.",
+            "es-de": "Your retro TV menu. Games also need their own emulators.",
+            "retroarch-metal": "PlayStation and classic systems. Install the required cores and your own BIOS where needed.",
+            "dolphin": "GameCube and Wii. Configure your controllers in Dolphin.",
+            "pcsx2": "PlayStation 2. Your own PS2 BIOS is required. The Homebrew build may require Rosetta.",
+            "rpcs3": "PlayStation 3. Install the macOS app from rpcs3.net, then Sony firmware in RPCS3. Compatibility varies.",
+            "cemu-wiiu": "Wii U. Install the macOS app from cemu.info, not the unrelated CEmu calculator cask.",
+            "switch": "Bring your own compatible Ryujinx-based macOS build as Ryujinx.app. Configure your own legally obtained keys, firmware and games. No verified automatic download is provided.",
+            "porting-kit": "Windows-game wrappers, not macOS Proton. Each supported game needs a working wrapper."
+        ]
+        let explanation = text(purposes[app.id] ?? app.name, secondary: true)
+        inspectorRows.addArrangedSubview(explanation)
+        explanation.widthAnchor.constraint(equalTo: inspectorRows.widthAnchor).isActive = true
+        if app.installed {
+            let open = button("Open \(app.name)", #selector(openManagedApp(_:)))
+            open.tag = sender.tag
+            inspectorRows.addArrangedSubview(open)
+            if let update = app.update, !update.isEmpty {
+                let upgrade = button("Update to \(update)", #selector(updateApp(_:)))
+                upgrade.tag = sender.tag
+                inspectorRows.addArrangedSubview(upgrade)
+            }
+        }
+        let action = button(app.installed ? "Remove app..." : app.manual ? "Get app..." : "Install...", #selector(inspectorAppAction(_:)))
+        action.tag = sender.tag
+        inspectorRows.addArrangedSubview(action)
+        selectPage(10)
+    }
+
+    @objc private func inspectorAppAction(_ sender: NSButton) {
+        closeInspector()
+        appAction(sender)
+    }
+
+    @objc private func showConsoleDetails(_ sender: NSButton) {
+        guard consoleSystems.indices.contains(sender.tag) else { return }
+        let system = consoleSystems[sender.tag]
+        inspectorParent = 7
+        inspectorTitle.stringValue = system.name
+        clearRows(inspectorRows)
+        let requirement = text(system.requirement, secondary: true)
+        inspectorRows.addArrangedSubview(requirement)
+        requirement.widthAnchor.constraint(equalTo: inspectorRows.widthAnchor).isActive = true
+        inspectorRows.addArrangedSubview(button("Manage emulator in Apps", #selector(inspectorApps)))
+        selectPage(10)
+    }
+
+    @objc private func inspectorApps() {
+        clearRows(inspectorRows)
+        showPlayers()
+    }
+
     @objc private func openManagedApp(_ sender: NSButton) {
         guard appStates.indices.contains(sender.tag) else { return }
         let app = appStates[sender.tag]
@@ -1350,7 +1713,7 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
         guard task == nil, appStates.indices.contains(sender.tag) else { return }
         let app = appStates[sender.tag]
         if app.installed && NSWorkspace.shared.runningApplications.contains(where: { $0.bundleURL?.path == app.path }) {
-            appsStatus.stringValue = "Quit \(app.name) first, then choose Installed to remove it."
+            appsStatus.stringValue = "Quit \(app.name) first, then choose Remove app in its details."
             return
         }
         if !app.installed && app.manual {
@@ -1424,6 +1787,7 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
             do {
                 self.consoleSystems = try JSONDecoder().decode([ConsoleSystem].self, from: data)
                 self.renderSystems()
+                self.renderGeneral()
                 self.consoleStatus.stringValue = "Switch on your systems. Required apps are installed separately in Apps."
             } catch {
                 self.consoleStatus.stringValue = "Couldn't read consoles: \(error.localizedDescription)"
@@ -1435,17 +1799,15 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
     private func renderSystems() {
         clearRows(consoleRows)
         systemSwitches = []
-        let order = ["gc", "wii", "wiiu", "switch", "nes", "snes", "gb", "gbc", "gba", "n64",
-                     "psx", "ps2", "ps3", "psp", "megadrive", "segacd", "dreamcast"]
+        let order = ConsoleArtwork.groups.flatMap { $0.systems }
         consoleSystems.sort {
             (order.firstIndex(of: $0.id) ?? 100) < (order.firstIndex(of: $1.id) ?? 100)
         }
         let playerNames = ["retroarch-metal": "RetroArch", "cemu-wiiu": "Cemu", "switch": "Switch emulator",
                            "pcsx2": "PCSX2", "rpcs3": "RPCS3", "dolphin": "Dolphin"]
         var previousGroup = ""
-        for system in consoleSystems {
-            let group = ["psx", "ps2", "ps3", "psp"].contains(system.id) ? "PlayStation" :
-                ["megadrive", "segacd", "dreamcast"].contains(system.id) ? "SEGA" : "Nintendo"
+        for (index, system) in consoleSystems.enumerated() {
+            let group = ConsoleArtwork.groups.first { $0.systems.contains(system.id) }?.title ?? "Other systems"
             if group != previousGroup {
                 addSectionHeading(group, to: consoleRows)
                 previousGroup = group
@@ -1462,12 +1824,15 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
             toggle.action = #selector(toggleSystem(_:))
             toggle.setAccessibilityLabel(system.name)
             systemSwitches.append(toggle)
-            let needsApp = report?.missing.contains(system.package) == true
-            let state = system.enabled ? (needsApp ? "Needs emulator" : "Enabled") : "Off"
-            let controls = row([statusIndicator(state, color: system.enabled ? (needsApp ? .systemYellow : .systemGreen) : .tertiaryLabelColor), toggle])
+            let info = button("", #selector(showConsoleDetails(_:)))
+            info.image = NSImage(systemSymbolName: "info.circle", accessibilityDescription: "Details for \(system.name)")
+            info.isBordered = false
+            info.tag = index
+            let controls = row([info, toggle])
             let line = settingsRow(system.name,
-                subtitle: "\(playerNames[system.package] ?? system.package) · \(system.requirement)",
-                symbol: "gamecontroller.fill", color: .systemPurple, trailing: controls)
+                subtitle: playerNames[system.package] ?? system.package,
+                symbol: "gamecontroller.fill", color: .systemPurple, trailing: controls,
+                artwork: ConsoleArtwork.image(for: system.id))
             consoleRows.addArrangedSubview(line)
             line.widthAnchor.constraint(equalTo: consoleRows.widthAnchor).isActive = true
             line.heightAnchor.constraint(greaterThanOrEqualToConstant: 58).isActive = true
@@ -1523,6 +1888,7 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
 
     private func loadAutoLaunch() {
         autoLaunchLoaded = false
+        defer { renderGeneral() }
         execute(["login-status"], capture: true) { code, data in
             guard code == 0 else {
                 self.autoLaunchStatus.stringValue = "Cannot read login settings. Open Details for the error."
@@ -1537,6 +1903,7 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
                 self.autoLaunchStatus.stringValue = settings.legacy
                     ? "An older always-on Steam login launcher is installed. Save to replace it with controller-aware console mode."
                     : settings.enabled ? "Enabled for the next login on this Mac." : "Off. Nothing starts automatically."
+                self.renderGeneral()
             } catch {
                 self.autoLaunchStatus.stringValue = "Cannot read login settings: \(error.localizedDescription)"
                 self.append(self.autoLaunchStatus.stringValue + "\n")
@@ -1797,11 +2164,11 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
                 let stack = self.detail.subviews.compactMap { $0 as? NSStackView }.first!
                 let discoveryOK = success && !self.volumes.isEmpty && self.window.isVisible
                     && self.selected != nil
-                    && self.tabs.numberOfTabViewItems == 9 && self.logWindow == nil
+                    && self.tabs.numberOfTabViewItems == 11 && self.logWindow == nil
                 let args = ProcessInfo.processInfo.arguments
                 if args.contains("--minimum-size") { self.window.setContentSize(self.window.minSize) }
                 if let index = args.firstIndex(of: "--page"), args.indices.contains(index + 1),
-                   let page = Int(args[index + 1]), (0..<9).contains(page) {
+                   let page = Int(args[index + 1]), (0..<11).contains(page) {
                     if page == 4 {
                         self.preferredMode = args.contains("--portable") ? "portable" : "local"
                         self.populateVolumes(previous: nil)
@@ -1826,7 +2193,7 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
                     for page in 0..<self.tabs.numberOfTabViewItems {
                         self.selectPage(page)
                         precondition(!self.navigationBar.isHidden && self.window === self.mainWindow)
-                        precondition(self.sidebar.selectedRow == self.sidebarPages.firstIndex(of: page == 4 ? 3 : page))
+                        precondition(self.sidebar.selectedRow == self.sidebarPages.firstIndex(of: page == 4 ? 3 : page == 10 ? self.inspectorParent : page))
                         self.assertSmokePageScrolls()
                         if page == 7 {
                             for toggle in self.systemSwitches {
@@ -1840,6 +2207,25 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
                         precondition(!self.tableView(self.sidebar, shouldSelectRow: index), "Sidebar section headings must not navigate")
                     }
                     precondition(self.systemSwitches.count == 17 && self.activeControllerRows.arrangedSubviews.count == 1)
+                    let orderedSystems = ConsoleArtwork.groups.flatMap { $0.systems }
+                    precondition(self.consoleSystems.map { $0.id } == orderedSystems,
+                                 "Systems must stay grouped and ordered by original release")
+                    let artwork = orderedSystems.compactMap { ConsoleArtwork.image(for: $0).tiffRepresentation }
+                    precondition(artwork.count == 17 && Set(artwork).count == 17,
+                                 "Every system must have distinct, renderable original artwork")
+                    let inspectorTrigger = NSButton()
+                    inspectorTrigger.tag = 0
+                    self.showAppDetails(inspectorTrigger)
+                    precondition(self.tabs.selectedTabViewItem === self.tabs.tabViewItems[10])
+                    precondition(self.inspectorTitle.stringValue == self.appStates[0].name)
+                    self.closeInspector()
+                    precondition(self.tabs.selectedTabViewItem === self.tabs.tabViewItems[1])
+                    self.showConsoleDetails(inspectorTrigger)
+                    precondition(self.inspectorTitle.stringValue == self.consoleSystems[0].name)
+                    self.closeInspector()
+                    precondition(self.tabs.selectedTabViewItem === self.tabs.tabViewItems[7])
+                    self.selectPage(9)
+                    precondition(self.generalRows.arrangedSubviews.count == 9)
                     self.report = nil
                     self.continueStorage()
                     precondition(self.task == nil, "No storage assessment must never start setup")
@@ -2005,7 +2391,7 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
                             + (report.issues + report.notes).joined(separator: "\n") + "\n")
                 if !self.didRouteInitialLibrary {
                     self.didRouteInitialLibrary = true
-                    self.selectPage(report.state != "valid layout" || !report.issues.isEmpty ? 3 : 0)
+                    self.selectPage(9)
                 }
                 if self.advanceAfterLibraryCheck {
                     self.advanceAfterLibraryCheck = false
@@ -2016,6 +2402,10 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
                     }
                 }
                 self.finishSmokeTest(success: true)
+                if !ProcessInfo.processInfo.arguments.contains("--smoke-test"),
+                   self.tabs.selectedTabViewItem === self.tabs.tabViewItems[9] {
+                    self.loadGeneralDetails()
+                }
             } catch {
                 self.advanceAfterLibraryCheck = false
                 self.status.stringValue = "Cannot read assessment: \(error.localizedDescription)"

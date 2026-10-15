@@ -28,7 +28,11 @@ is published. Some game players require newer macOS.
 
 ## What setup actually does
 
-**One window, no wizard.** Setup stays in the sidebar, alongside Play, Game
+**One window, no wizard.** General opens first with an overview of storage,
+TV-menu availability, active controllers, selected consoles and login launch
+settings. It distinguishes detected readiness from manual game/BIOS/account
+checks instead of claiming the whole setup has been verified.
+Setup stays in the sidebar, alongside Play, Game
 library, Consoles, Controllers, Apps, Steam setup, and Settings. Nothing is installed
 or erased until you confirm it. Storage is checked on launch, explicit refresh
 and volume changes—not whenever you click back into the app.
@@ -43,9 +47,14 @@ library problem; an inactive console is shown as Off, not as an error.
    folders and launcher files only: no apps are installed, no games are moved,
    and Steam's settings are unchanged.
 2. **Choose Consoles and Apps.** Switch on only the systems you want; new
-   libraries start with none selected. Switch changes save automatically. Each system shows its emulator and
-   requirements. In **Apps**, use an app's **Install** button; installed apps
-   show their version and an **Installed** button that offers confirmed removal.
+   libraries start with none selected. Switch changes save automatically and are the
+   only on/off indicator. Systems have original hardware-inspired icons without
+   manufacturer logos. Nintendo home consoles (including the hybrid Switch) and
+   Nintendo handhelds have separate sections; each section lists systems by their
+   first release, oldest first, as do PlayStation and SEGA.
+   In **Apps**, rows show a compact installation summary. Open **Details** for install, open,
+   update and confirmed removal actions. Console rows show only the emulator,
+   an info button for requirements and the enable switch.
    Check Homebrew-managed app updates explicitly and install them individually.
    Steam and manual installations also have their own in-app updaters.
    If Homebrew is missing, finish its installer first, then click Install again.
@@ -157,8 +166,9 @@ avoid a second launch. Turn this feature off in Settings to remove its login
 entry; allow background activity in macOS Login Items if prompted. Logs are in
 `~/Library/Logs/Couch Cube/auto-launch.log`.
 
-**Make it yours:** [app icon](assets/icon.svg) · [portable icon](assets/portable-icon.svg)
-· [DMG icon](assets/dmg-icon.svg). SVGs and 128/512/1024 px PNGs are in `assets/`.
+**Icon:** [Compact, M4-style Mac mini close-up](assets/icon.svg) beneath a wall-mounted TV, shared
+by the app and DMG. The [portable artwork](assets/portable-icon.svg) adds a
+front-connected USB SSD, not a badge. SVGs and 128/512/1024 px PNGs are in `assets/`.
 
 ### Build from source
 
