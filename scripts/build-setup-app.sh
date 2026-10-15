@@ -15,6 +15,9 @@ bash "$ROOT/scripts/build-icons.sh" --reuse-build
 cp "$ROOT/build/Console.icns" "$APP/Contents/Resources/Console.icns"
 xcrun swiftc -target arm64-apple-macos13.0 -swift-version 5 -module-cache-path "$ROOT/build/module-cache" \
   -framework AppKit "$ROOT/setup/ConsoleSetup.swift" -o "$APP/Contents/MacOS/ConsoleSetup"
+xcrun swiftc -target arm64-apple-macos13.0 -swift-version 5 -module-cache-path "$ROOT/build/module-cache" \
+  -framework AppKit -framework GameController -framework IOKit \
+  "$ROOT/setup/ConsoleAutoLaunch.swift" -o "$APP/Contents/MacOS/ConsoleAutoLaunch"
 cp "$ROOT/scripts/console.py" "$APP/Contents/Resources/scripts/console.py"
 cp "$ROOT/scripts/releases.py" "$APP/Contents/Resources/scripts/releases.py"
 cp "$ROOT/config/release.json" "$APP/Contents/Resources/config/release.json"

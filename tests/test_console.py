@@ -58,6 +58,20 @@ class StorageTests(unittest.TestCase):
         self.assertEqual(game.read_text(), "keep")
         self.assertFalse((self.storage.root / console.MARKER).exists())
 
+    def test_setup_creates_only_supported_system_folders(self):
+        self.initialize()
+        folders = {path.name for path in (self.storage.root / "ROMs").iterdir()}
+        self.assertEqual(folders, set(console.SYSTEMS))
+        self.assertFalse((self.storage.root / "BIOS/PCSX2").exists())
+
+    def test_bios_environment_contains_only_checker_input(self):
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            console.shell_env(self.storage)
+        import shlex
+        self.assertEqual(shlex.split(output.getvalue()),
+                         ["BIOS_ROOT=" + str(self.storage.root / "BIOS/retroarch")])
+
     def test_modified_generated_file_preserved(self):
         self.initialize()
         custom = self.storage.root / "Frontend/ES-DE/custom_systems/es_systems.xml"

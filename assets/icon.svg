@@ -1,52 +1,29 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024" role="img" aria-labelledby="title desc">
   <title id="title">Couch Cube</title>
-  <desc id="desc">A black 16:9 wall-mounted TV centered above an oak media console, with a small silver Mac mini underneath its right edge.</desc>
+  <desc id="desc">A geometric black 16:9 TV and silver Mac mini above a solid oak base that follows the icon's lower corners.</desc>
   <defs>
-    <linearGradient id="wall" x2="0" y2="1">
-      <stop stop-color="#f7f2e6"/>
-      <stop offset="1" stop-color="#c9d6d1"/>
-    </linearGradient>
-    <linearGradient id="screen" x2="1" y2="1">
-      <stop stop-color="#0e0e0e"/>
-      <stop offset="1" stop-color="#000"/>
-    </linearGradient>
-    <linearGradient id="silver" x2="0" y2="1">
-      <stop stop-color="#e6e6e6"/>
-      <stop offset="1" stop-color="#9e9e9e"/>
-    </linearGradient>
+    <clipPath id="icon-mask">
+      <rect x="16" y="16" width="992" height="992" rx="210"/>
+    </clipPath>
     <filter id="tv-shadow" x="-10%" y="-10%" width="120%" height="125%">
       <feDropShadow dy="6" stdDeviation="7" flood-opacity=".22"/>
     </filter>
-    <filter id="console-shadow" x="-10%" y="-100%" width="120%" height="300%">
-      <feDropShadow dy="14" stdDeviation="12" flood-opacity=".22"/>
-    </filter>
-    <pattern id="grain" width="240" height="6" patternUnits="userSpaceOnUse">
-      <path d="M0 3 C70 -3 190 8 240 1" fill="none" stroke="#704721" stroke-opacity=".18" stroke-width="1.5"/>
-    </pattern>
   </defs>
-  <rect x="16" y="16" width="992" height="992" rx="210" fill="url(#wall)"/>
-  <rect x="74" y="753" width="876" height="33" rx="10" fill="#c7975c" filter="url(#console-shadow)"/>
-  <g fill="#ad7540">
-    <rect x="93" y="777" width="838" height="104" rx="8"/>
-    <rect x="120" y="871" width="28" height="52" rx="6"/>
-    <rect x="876" y="871" width="28" height="52" rx="6"/>
-  </g>
-  <rect x="350" y="793" width="324" height="73" rx="4" fill="#473321"/>
-  <rect x="365" y="848" width="294" height="7" rx="2" fill="#ad7540"/>
-  <g fill="url(#grain)">
-    <rect x="110" y="784" width="225" height="90"/>
-    <rect x="689" y="784" width="224" height="90"/>
-  </g>
-  <rect x="82" y="767" width="860" height="7" rx="3" fill="#e8ba7d"/>
-  <rect x="154" y="221" width="716" height="413" rx="15" fill="#1a1a1a" filter="url(#tv-shadow)"/>
-  <rect x="166" y="232.75" width="692" height="389.25" rx="5" fill="url(#screen)"/>
+  <rect x="16" y="16" width="992" height="992" rx="210" fill="#87aba3"/>
+  <rect x="16" y="897" width="992" height="111" fill="#c7975c" clip-path="url(#icon-mask)"/>
+  <g transform="translate(-112.64 -155.48) scale(1.22)">
+  <rect x="154" y="221" width="716" height="413" rx="46" fill="#1a1a1a" filter="url(#tv-shadow)"/>
+  <rect x="166" y="232.75" width="692" height="389.25" rx="34" fill="#000"/>
   <rect x="507" y="628" width="10" height="2" rx="1" fill="#fff" opacity=".5"/>
+  </g>
+  <g transform="translate(-1500 -1222.6) scale(2.8)">
   <rect x="755" y="748" width="100" height="9" rx="4" fill="#3b3b3b"/>
-  <rect x="744" y="694" width="122" height="54" rx="12" fill="url(#silver)"/>
+  <rect x="744" y="694" width="122" height="54" rx="18" fill="#c7c7c7"/>
   <rect x="748" y="692" width="114" height="12" rx="6" fill="#ebebeb"/>
   <g fill="#555">
     <rect x="776" y="728" width="12" height="5" rx="2"/>
     <rect x="801" y="728" width="12" height="5" rx="2"/>
   </g>
   <circle cx="838" cy="731" r="2" fill="#fff"/>
+  </g>
 </svg>

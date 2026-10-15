@@ -48,5 +48,5 @@ jobs:
           test "$RELEASE_TAG" = v0.3.0
           gh release create "$RELEASE_TAG" --verify-tag --draft \
             --title "Couch Cube 0.3.0 (Apple Silicon)" \
-            --notes "Apple Silicon macOS 13+. Ad-hoc signed; not notarized. See README for Gatekeeper and destructive SSD-preparation limitations." \
+            --notes "Apple Silicon macOS 13+. Ad-hoc signed; not notarized. See README for storage and SSD-preparation limitations." \
             artifacts/*.dmg artifacts/*.zip artifacts/*.sha256

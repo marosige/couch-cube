@@ -21,7 +21,6 @@ trap cleanup EXIT
 ditto "$APP" "$STAGE/CouchCube.app"
 ln -s /Applications "$STAGE/Applications"
 cp "$ROOT/README.md" "$STAGE/README.md"
-cp "$ROOT/setup/Start Here.txt" "$STAGE/Start Here.txt"
 cp "$ROOT/build/Installer.icns" "$STAGE/.VolumeIcon.icns"
 DMG="$ROOT/build/CouchCube-0.3.0-arm64.dmg"
 ZIP="$ROOT/build/CouchCube-0.3.0-arm64.zip"

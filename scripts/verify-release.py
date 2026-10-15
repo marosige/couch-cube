@@ -25,6 +25,9 @@ def verify_app(app, working_directory, distribution="local"):
     assert (resources / "scripts/releases.py").is_file()
     assert (resources / "config/release.json").is_file()
     assert (resources / "Install Homebrew.command").is_file()
+    helper = app / "Contents/MacOS/ConsoleAutoLaunch"
+    assert helper.is_file()
+    run([str(helper), "--self-test"], cwd=working_directory)
     run(["/bin/bash", "-n", str(resources / "Install Homebrew.command")])
     python = resources / "python/bin/python3"
     run(["/usr/bin/codesign", "--verify", "--deep", "--strict", str(app)])
@@ -36,9 +39,12 @@ def verify_app(app, working_directory, distribution="local"):
          "print('Relocated bundled Python imports passed')", str(app)],
         cwd=working_directory, env={"PATH": "/usr/bin:/bin", "HOME": str(Path.home())})
     run([str(python), "-I", "-B", str(resources / "scripts/console.py"), "drives"], cwd=working_directory)
-    for page in range(6):
+    for page in range(7):
         run([str(app / "Contents/MacOS/ConsoleSetup"), "--smoke-test", "--page", str(page)], cwd=working_directory)
     run([str(app / "Contents/MacOS/ConsoleSetup"), "--smoke-test", "--smoke-flow"], cwd=working_directory)
+    for appearance in ("light", "dark"):
+        run([str(app / "Contents/MacOS/ConsoleSetup"), "--smoke-test", "--smoke-activity",
+             "--appearance", appearance], cwd=working_directory)
     run(["/usr/bin/codesign", "--verify", "--deep", "--strict", str(app)])
     assert list(resources.rglob("LICENSE*")), "Runtime licenses missing"
     assert not (resources / "config/paths.env").exists()
@@ -56,7 +62,7 @@ with tempfile.TemporaryDirectory(prefix="mac-console-release-") as directory:
         app = mount / "CouchCube.app"
         assert (mount / "Applications").is_symlink()
         assert (mount / "Applications").readlink() == Path("/Applications")
-        assert (mount / "Start Here.txt").is_file()
+        assert not (mount / "Start Here.txt").exists()
         assert (mount / "README.md").is_file()
         assert (mount / ".VolumeIcon.icns").is_file()
         assert (mount / ".VolumeIcon.icns").read_bytes() != (app / "Contents/Resources/Console.icns").read_bytes()

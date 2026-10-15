@@ -20,8 +20,3 @@ else
   echo "Run bash scripts/setup.sh first (or use legacy config/paths.env)." >&2
   exit 1
 fi
-
-ensure_dir() {
-  local d="$1"
-  [[ -d "$d" ]] || mkdir -p "$d"
-}

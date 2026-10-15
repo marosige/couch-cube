@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/icon-512.png" width="144" alt="A TV and Mac mini on an oak console">
+  <img src="assets/icon-512.png" width="144" alt="A geometric TV and Mac mini above a solid oak console">
 </p>
 <h1 align="center">Couch Cube</h1>
 <p align="center"><strong>Your Mac. Your games. Your couch.</strong></p>
@@ -26,6 +26,31 @@ collection with **ES-DE**, and connect up to **4 controllers** in supported game
 Downloads appear once the first [release](https://github.com/marosige/couch-cube/releases)
 is published. Some game players require newer macOS.
 
+## What setup actually does
+
+1. **Create game folders.** Choose this Mac or an SSD. This creates Couch Cube's
+   folders and launcher files only: no apps are installed, no games are moved,
+   and Steam's settings are unchanged.
+2. **Install apps.** In **Apps & emulators**, each app says **Installed** or
+   **Not installed**. Steam is needed for Big Picture. ES-DE, RetroArch,
+   Dolphin and Porting Kit are optional; install only what you want to use.
+   If Homebrew is missing, finish its installer first, then install your selection.
+3. **Finish in Steam.** Sign in, install a game and connect a controller.
+   For local play, keep Steam's existing/default library—no storage change is
+   required. To use the SSD or Couch Cube's `SteamLibrary` folder, add it
+   yourself in **Steam → Settings → Storage**, then choose it for installations.
+   Existing games stay in place unless you move them through Steam.
+
+**Play → Your setup** shows folder and app status. **Steam & controller setup**
+shows the exact storage path and manual steps; Couch Cube does not verify
+Steam sign-in, controller configuration or completion of those steps.
+Retro games still need your own ROMs, any required BIOS and emulator cores.
+Add `Launchers/Retro.app` or registered game shortcuts to Steam through
+**Games → Add a Non-Steam Game**; this is not automatic.
+Big Picture remains the console interface; Decky is not included or supported
+on macOS. Windows games need compatible, individually configured wrappers,
+not macOS Proton.
+
 ---
 
 ## For the curious
@@ -37,7 +62,7 @@ helps install optional game players. This isn't a bootable OS or macOS Proton.
 **Your library:** APFS or Mac OS Extended storage. Files live in
 `~/Games/Couch Cube` locally, or `<SSD>/Couch Cube` for portable
 setups. Keep the portable app beside that folder. After moving it, use
-**Settings → Update game library**; Steam links may need reconnecting too.
+**Game library → Update library links**; Steam links may need reconnecting too.
 Storage checks aren't speed tests or game-compatibility guarantees.
 
 **SSD preparation:** verifies the latest portable release before erasing,
@@ -49,6 +74,17 @@ your data. **Details** opens the activity log.
 **Updates:** checked on launch, installed by you. Download, quit the app and
 replace your copy. Offline use works. Builds are ad-hoc signed; checksums
 and signatures check integrity, not publisher identity.
+
+**Automatic console mode:** enable it in **Settings** on each Mac. After login,
+wait 5–300 seconds (30 by default). With no keyboard or mouse connected, a
+USB or Bluetooth controller opens Steam Big Picture, even if connected later.
+A keyboard or mouse skips auto-launch for that login. macOS still requires
+your normal login; Couch Cube never changes passwords or automatic login.
+Keep the app at its saved location, with its SSD connected at login. After
+moving the app, save the setting again. Disable Steam's own login startup to
+avoid a second launch. Turn this feature off in Settings to remove its login
+entry; allow background activity in macOS Login Items if prompted. Logs are in
+`~/Library/Logs/Couch Cube/auto-launch.log`.
 
 **Make it yours:** [app icon](assets/icon.svg) · [portable icon](assets/portable-icon.svg)
 · [DMG icon](assets/dmg-icon.svg). SVGs and 128/512/1024 px PNGs are in `assets/`.

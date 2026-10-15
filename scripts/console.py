@@ -525,7 +525,7 @@ def app_files(name, action, root, identifier=None):
         + runtime_assignment(root)
         + 'if [[ ! -x "$PYTHON" ]]; then\n'
         '  /usr/bin/osascript -e \'display alert "Manager app not found" '
-        'message "Keep CouchCube.app on this drive. Open it and update the library after moving the app." as critical\'\n'
+        'message "Keep CouchCube.app on this drive. Open Game library and update the library after moving the app." as critical\'\n'
         '  exit 1\nfi\n'
         'ERROR_FILE="$(/usr/bin/mktemp)"\n'
         'trap \'rm -f "$ERROR_FILE"\' EXIT\n'
@@ -649,12 +649,12 @@ def initialize(storage):
     if not marker.exists():
         storage.write(MARKER, json_text(state))
     folders = [
-        "SteamLibrary", "ROMs", "BIOS/retroarch/dc", "BIOS/PCSX2",
+        "SteamLibrary", "ROMs", "BIOS/retroarch/dc",
         "Saves/RetroArch/States", "Saves/Dolphin", "Saves/Native", "Saves/Windows",
         "Native/Games", "Native/Assets", "Windows/Wrappers", "Windows/Installers",
         "Frontend", "Config", "Runtime", "Launchers",
     ]
-    folders += ["ROMs/" + system for system in SYSTEMS] + ["ROMs/ps2"]
+    folders += ["ROMs/" + system for system in SYSTEMS]
     for folder in folders:
         storage.mkdir(folder)
     refresh_generated(storage, state)
@@ -814,54 +814,93 @@ def index_games(storage):
     print(f"Wrote {storage.root / 'Config/library.json'}")
 
 
-def login_launcher(confirm):
-    if not confirm:
-        raise SetupError("Login installation requires --confirm. No change made.")
-    storage = configured_storage()
-    if storage.choice["mode"] != "local":
-        raise SetupError("Use Steam's own login setting for portable mode; a disconnected drive must not trigger writes.")
-    label = "com.mac-game-console.steam-big-picture"
-    agent = Path.home() / "Library/LaunchAgents" / (label + ".plist")
-    log_dir = HOST_CONFIG.parent / "Logs"
+LOGIN_LABEL = "com.mac-game-console.steam-big-picture"
+
+
+def login_agent():
+    return Path.home() / "Library/LaunchAgents" / (LOGIN_LABEL + ".plist")
+
+
+def login_status():
+    agent = login_agent()
     reject_symlinks(agent)
+    if not agent.exists():
+        return {"enabled": False, "delay": 30, "legacy": False}
+    with agent.open("rb") as file:
+        previous = plistlib.load(file)
+    if previous.get("Label") != LOGIN_LABEL:
+        raise SetupError("Preserving an unrecognized existing LaunchAgent.")
+    arguments = previous.get("ProgramArguments")
+    if arguments == ["/usr/bin/open", "steam://open/bigpicture"]:
+        return {"enabled": True, "delay": 30, "legacy": True}
+    if (not isinstance(arguments, list) or len(arguments) != 3
+            or not isinstance(arguments[0], str) or not Path(arguments[0]).is_absolute()
+            or Path(arguments[0]).name != "ConsoleAutoLaunch" or arguments[1] != "--delay"
+            or not isinstance(arguments[2], str) or not arguments[2].isdigit()
+            or not 5 <= int(arguments[2]) <= 300):
+        raise SetupError("Unrecognized console auto-launch settings; preserving the existing LaunchAgent.")
+    return {"enabled": True, "delay": int(arguments[2]), "legacy": False}
+
+
+def login_helper():
+    helper = PROJECT.parent / "MacOS/ConsoleAutoLaunch"
+    reject_symlinks(helper)
+    if not helper.is_file() or not os.access(helper, os.X_OK):
+        raise SetupError("Open the built Couch Cube app to configure automatic console mode.")
+    return helper
+
+
+def login_launcher(confirm, enabled=True, delay=30):
+    if not confirm:
+        raise SetupError("Login changes require --confirm. No change made.")
+    if type(delay) is not int or not 5 <= delay <= 300:
+        raise SetupError("Choose a login delay between 5 and 300 seconds.")
+    login_status()
+    agent = login_agent()
+    log_dir = Path.home() / "Library/Logs/Couch Cube"
     reject_symlinks(log_dir)
-    if agent.exists():
-        with agent.open("rb") as file:
-            previous = plistlib.load(file)
-        if previous.get("Label") != label:
-            raise SetupError("Preserving an unrecognized existing LaunchAgent.")
-    agent.parent.mkdir(parents=True, exist_ok=True)
-    log_dir.mkdir(parents=True, exist_ok=True)
-    content = plistlib.dumps({
-        "Label": label,
-        "ProgramArguments": ["/usr/bin/open", "steam://open/bigpicture"],
-        "RunAtLoad": True,
-        "StandardOutPath": str(log_dir / "steam.log"),
-        "StandardErrorPath": str(log_dir / "steam-errors.log"),
-    })
+    content = None
+    if enabled:
+        helper = login_helper()
+        app_binary("Steam.app")
+        content = plistlib.dumps({
+            "Label": LOGIN_LABEL,
+            "ProgramArguments": [str(helper), "--delay", str(delay)],
+            "RunAtLoad": True,
+            "LimitLoadToSessionType": "Aqua",
+            "StandardOutPath": str(log_dir / "auto-launch.log"),
+            "StandardErrorPath": str(log_dir / "auto-launch.log"),
+        })
     domain = f"gui/{os.getuid()}"
-    exists = subprocess.run(["/bin/launchctl", "print", domain + "/" + label],
+    exists = subprocess.run(["/bin/launchctl", "print", domain + "/" + LOGIN_LABEL],
                             stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
     if exists.returncode == 0:
-        run(["/bin/launchctl", "bootout", domain + "/" + label])
+        run(["/bin/launchctl", "bootout", domain + "/" + LOGIN_LABEL])
     elif exists.returncode != 113:
         raise SetupError("Cannot inspect login agent: " + exists.stderr.decode(errors="replace"))
-    agent.write_bytes(content)
-    run(["/bin/launchctl", "bootstrap", domain, str(agent)])
-    print(f"Installed login launcher: {agent}")
+    if not enabled:
+        if agent.exists():
+            agent.unlink()
+        print("Automatic console mode disabled on this Mac.")
+        return
+    agent.parent.mkdir(parents=True, exist_ok=True)
+    log_dir.mkdir(parents=True, exist_ok=True)
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile(dir=agent.parent, delete=False) as file:
+            temporary = Path(file.name)
+            file.write(content)
+        os.chmod(temporary, 0o644)
+        os.replace(temporary, agent)
+    finally:
+        if temporary is not None and temporary.exists():
+            temporary.unlink()
+    print(f"Automatic console mode saved for the next login: {delay} seconds. "
+          "Keep this app at its current location and its drive connected at login.")
 
 
 def shell_env(storage):
-    root = storage.root
-    for key, value in {
-        "ROMS_ROOT": root / "ROMs", "BIOS_ROOT": root / "BIOS/retroarch",
-        "LIBRARY_INDEX_JSON": root / "Config/library.json",
-        "STEAM_APPS_VDF": Path.home() / "Library/Application Support/Steam/steamapps/libraryfolders.vdf",
-        "STEAM_COMMON_DEFAULT": root / "SteamLibrary/steamapps/common",
-        "EMULATIONSTATION_APP": "/Applications/ES-DE.app",
-        "OPENEMU_APP": "/Applications/OpenEmu.app", "RETROARCH_APP": "/Applications/RetroArch.app",
-    }.items():
-        print(key + "=" + shlex.quote(str(value)))
+    print("BIOS_ROOT=" + shlex.quote(str(storage.root / "BIOS/retroarch")))
 
 
 def main():
@@ -870,6 +909,7 @@ def main():
     sub.add_parser("drives")
     sub.add_parser("disks")
     sub.add_parser("update-check")
+    sub.add_parser("login-status")
     install = sub.add_parser("install-apps")
     install.add_argument("--confirm", action="store_true")
     install.add_argument("--packages", nargs="+", choices=list(PACKAGES), required=True)
@@ -890,6 +930,8 @@ def main():
     installer.add_argument("--confirm", action="store_true")
     login = sub.add_parser("login")
     login.add_argument("--confirm", action="store_true")
+    login.add_argument("--disable", action="store_true")
+    login.add_argument("--delay", type=int, default=30)
     setup = sub.add_parser("setup")
     setup.add_argument("--drive", required=True)
     setup.add_argument("--confirm", action="store_true")
@@ -916,6 +958,8 @@ def main():
             print(json_text(physical_disks()))
         elif args.command == "update-check":
             print(json_text(release_tools().latest()))
+        elif args.command == "login-status":
+            print(json_text(login_status()))
         elif args.command == "install-apps":
             if not args.confirm:
                 raise SetupError("No apps installed. Explicit --confirm consent is required.")
@@ -934,7 +978,7 @@ def main():
                 raise SetupError("Installer copying requires explicit --confirm.")
             copy_installer(Storage(select_drive(args.drive)), args.source)
         elif args.command == "login":
-            login_launcher(args.confirm)
+            login_launcher(args.confirm, not args.disable, args.delay)
         elif args.command == "setup":
             if not args.confirm:
                 raise SetupError("No changes made. Setup requires explicit --confirm consent.")
@@ -950,7 +994,7 @@ def main():
             storage.check()
             if not args.no_host_config:
                 save_host_config(choice)
-            print("Setup complete. See README for Steam Storage, controller and Windows-wrapper steps.", flush=True)
+            print("Setup complete. Continue in Couch Cube for game players, Steam and controller guidance.", flush=True)
         else:
             storage = configured_storage(args.root)
             if args.command == "env":

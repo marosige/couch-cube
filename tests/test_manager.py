@@ -2,6 +2,7 @@ import hashlib
 import importlib.util
 import json
 import os
+import plistlib
 from pathlib import Path
 import subprocess
 import tempfile
@@ -347,6 +348,97 @@ class ManagementTests(unittest.TestCase):
             os.close(descriptor)
         self.assertEqual((moved / "fixture").read_text(), "correct disk")
         self.assertFalse((target / "fixture").exists())
+
+
+class AutoLaunchTests(unittest.TestCase):
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temporary.cleanup)
+        self.home = Path(self.temporary.name).resolve()
+        home = patch.object(manager.Path, "home", return_value=self.home)
+        home.start()
+        self.addCleanup(home.stop)
+
+    def write_agent(self, content):
+        agent = manager.login_agent()
+        agent.parent.mkdir(parents=True, exist_ok=True)
+        agent.write_bytes(plistlib.dumps(content))
+        return agent
+
+    def test_default_off_without_creating_files(self):
+        self.assertEqual(manager.login_status(), {"enabled": False, "delay": 30, "legacy": False})
+        self.assertFalse(manager.login_agent().exists())
+
+    def test_enable_saves_controller_helper_for_next_login_only(self):
+        helper = self.home / "CouchCube.app/Contents/MacOS/ConsoleAutoLaunch"
+        with patch.object(manager, "login_helper", return_value=helper), \
+                patch.object(manager, "app_binary", return_value=Path("/steam")), \
+                patch.object(manager.subprocess, "run", return_value=subprocess.CompletedProcess([], 113, stderr=b"")) as run:
+            manager.login_launcher(True, delay=45)
+        self.assertEqual(run.call_count, 1)
+        self.assertEqual(run.call_args.args[0][1], "print")
+        state = plistlib.loads(manager.login_agent().read_bytes())
+        self.assertEqual(state["ProgramArguments"], [str(helper), "--delay", "45"])
+        self.assertTrue(state["RunAtLoad"])
+        self.assertNotIn("KeepAlive", state)
+        self.assertEqual(manager.login_status(), {"enabled": True, "delay": 45, "legacy": False})
+
+    def test_disable_stops_waiting_helper_and_removes_login_entry(self):
+        self.write_agent({"Label": manager.LOGIN_LABEL,
+                          "ProgramArguments": ["/Applications/CouchCube.app/Contents/MacOS/ConsoleAutoLaunch",
+                                               "--delay", "30"]})
+        with patch.object(manager.subprocess, "run", return_value=subprocess.CompletedProcess([], 0)) as run:
+            manager.login_launcher(True, enabled=False)
+        self.assertEqual(run.call_args.args[0][1], "bootout")
+        self.assertFalse(manager.login_agent().exists())
+
+    def test_old_unconditional_launcher_is_recognized(self):
+        self.write_agent({"Label": manager.LOGIN_LABEL,
+                          "ProgramArguments": ["/usr/bin/open", "steam://open/bigpicture"]})
+        self.assertTrue(manager.login_status()["legacy"])
+
+    def test_consent_and_delay_validation_precede_changes(self):
+        with patch.object(manager.subprocess, "run") as run:
+            for confirm, delay in [(False, 30), (True, 4), (True, 301), (True, True)]:
+                with self.assertRaises(manager.SetupError):
+                    manager.login_launcher(confirm, delay=delay)
+            run.assert_not_called()
+        self.assertFalse(manager.login_agent().exists())
+
+    def test_unknown_agent_preserved(self):
+        agent = self.write_agent({"Label": manager.LOGIN_LABEL, "ProgramArguments": ["/unrelated"]})
+        original = agent.read_bytes()
+        with self.assertRaisesRegex(manager.SetupError, "Unrecognized"):
+            manager.login_launcher(True, enabled=False)
+        self.assertEqual(agent.read_bytes(), original)
+
+    def test_symlink_agent_refused(self):
+        target = self.home / "keep.plist"
+        target.write_bytes(b"keep")
+        agent = manager.login_agent()
+        agent.parent.mkdir(parents=True)
+        agent.symlink_to(target)
+        with self.assertRaises(manager.SetupError):
+            manager.login_launcher(True, enabled=False)
+        self.assertEqual(target.read_bytes(), b"keep")
+
+    def test_launchctl_error_preserves_settings(self):
+        agent = self.write_agent({"Label": manager.LOGIN_LABEL,
+                                 "ProgramArguments": ["/usr/bin/open", "steam://open/bigpicture"]})
+        original = agent.read_bytes()
+        with patch.object(manager.subprocess, "run", return_value=subprocess.CompletedProcess([], 1, stderr=b"denied")):
+            with self.assertRaisesRegex(manager.SetupError, "denied"):
+                manager.login_launcher(True, enabled=False)
+        self.assertEqual(agent.read_bytes(), original)
+
+    def test_missing_steam_prevents_installation(self):
+        with patch.object(manager, "login_helper", return_value=Path("/helper")), \
+                patch.object(manager, "app_binary", side_effect=manager.SetupError("Install Steam.app")), \
+                patch.object(manager.subprocess, "run") as run:
+            with self.assertRaisesRegex(manager.SetupError, "Steam"):
+                manager.login_launcher(True)
+            run.assert_not_called()
+        self.assertFalse(manager.login_agent().exists())
 
 
 if __name__ == "__main__":
