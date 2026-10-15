@@ -133,7 +133,9 @@ class StorageTests(unittest.TestCase):
             self.assertTrue(command.endswith("--rom %ROM%"))
             import shlex
             tokens = shlex.split(command)
-            self.assertEqual(tokens[tokens.index("--root") + 1], str(self.storage.root))
+            self.assertEqual(tokens[0], "/bin/bash")
+            self.assertEqual(tokens[1], str(self.storage.root / "Runtime/emulate.sh"))
+            self.assertNotIn("/usr/bin/python3", tokens)
         self.assertEqual(config.find("./system[name='psx']/path").text, "%ROMPATH%/psx")
 
     def test_non_ascii_volume_name_preserved_in_retroarch_config(self):
@@ -158,6 +160,43 @@ class StorageTests(unittest.TestCase):
         )
         subprocess.run(["bash", str(executable)], check=True)
         self.assertEqual(json.loads(evidence.read_text()), ["retro", "--root", str(self.storage.root)])
+
+    def test_portable_launcher_runs_after_volume_and_host_path_change(self):
+        app = self.storage.root.parent / "MacCouchConsole.app"
+        python = app / "Contents/Resources/python/bin/python3"
+        python.parent.mkdir(parents=True)
+        # This temporary stand-in has no dependency on the old mount location.
+        python.write_text('#!/bin/bash\nexec /usr/bin/python3 "$@"\n')
+        python.chmod(0o755)
+        with patch.object(console.sys, "executable", str(python)):
+            self.initialize()
+        launcher = self.storage.root / "Launchers/Retro.app/Contents/MacOS/launch"
+        script = launcher.read_text()
+        self.assertNotIn(str(self.storage.root.parent), script)
+        self.assertIn('PYTHON="$ROOT"/', script)
+        evidence = self.base / "portable-args.json"
+        (self.storage.root / "Runtime/console.py").write_text(
+            "import json, pathlib, sys\npathlib.Path(" + repr(str(evidence))
+            + ").write_text(json.dumps(sys.argv[1:]))\n"
+        )
+        moved = self.base / "Different mount & host"
+        self.storage.root.parent.rename(moved)
+        new_root = moved / console.FOLDER
+        subprocess.run(["bash", str(new_root / "Launchers/Retro.app/Contents/MacOS/launch")], check=True)
+        self.assertEqual(json.loads(evidence.read_text()), ["retro", "--root", str(new_root)])
+        rom = new_root / "ROMs/nes/Test game.nes"
+        rom.write_bytes(b"fixture")
+        subprocess.run(["bash", str(new_root / "Runtime/emulate.sh"), "--system", "nes", "--rom", str(rom)], check=True)
+        self.assertEqual(json.loads(evidence.read_text()),
+                         ["emulate", "--root", str(new_root), "--system", "nes", "--rom", str(rom)])
+
+    def test_library_creation_can_avoid_host_config(self):
+        with patch.object(sys, "argv", ["console.py", "setup", "--drive", self.choice["id"],
+                                      "--confirm", "--no-host-config"]), \
+                patch.object(console, "save_host_config") as save:
+            self.assertEqual(console.main(), 0)
+            save.assert_not_called()
+        self.assertTrue((self.storage.root / console.MARKER).exists())
 
     def test_register_and_launch_windows_wrapper_without_shell_interpolation(self):
         self.initialize()

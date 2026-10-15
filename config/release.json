@@ -1,0 +1,6 @@
+{
+  "repository": "marosige/mac-couch-console",
+  "version": "0.3.0",
+  "asset_prefix": "MacCouchConsole",
+  "app_name": "MacCouchConsole.app"
+}

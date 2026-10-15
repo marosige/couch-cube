@@ -3,6 +3,7 @@
 
 import argparse
 import hashlib
+import importlib.util
 import json
 import os
 from pathlib import Path
@@ -11,9 +12,12 @@ import plistlib
 import re
 import shlex
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
+import time
+import uuid
 import xml.etree.ElementTree as ET
 
 PROJECT = Path(__file__).resolve().parent.parent
@@ -113,7 +117,7 @@ def drives():
         if external_candidate(info, path, physical):
             choices.append({
                 "id": info["VolumeUUID"], "mode": "portable",
-                "name": info.get("VolumeName", path.name) + " (portable data)",
+                "name": info.get("VolumeName", path.name) + " (portable console)",
                 "mount": str(path), "uuid": info["VolumeUUID"],
                 "root": str(path / FOLDER), "filesystem": info.get("FilesystemType", ""),
                 "free": shutil.disk_usage(path).free,
@@ -126,6 +130,308 @@ def select_drive(identifier):
     if len(matches) != 1:
         raise SetupError("Selected drive is disconnected, locked or not writable. Refresh and select again.")
     return matches[0]
+
+
+def assess(identifier):
+    choice = select_drive(identifier)
+    root = Path(choice["root"])
+    issues = []
+    notes = []
+    if choice["filesystem"] not in ["apfs", "hfs"]:
+        issues.append("Unsupported filesystem for this layout: use APFS or Mac OS Extended.")
+    if choice["free"] < 20 * 1024 ** 3:
+        notes.append("Less than 20 GiB free. Many games need more space; no speed test was performed.")
+    state = "not prepared"
+    marker = root / MARKER
+    try:
+        reject_symlinks(root)
+        if marker.exists():
+            reject_symlinks(marker)
+            manifest = read_json(marker)
+            if manifest.get("version") != 1 or manifest.get("uuid") != choice["uuid"]:
+                raise SetupError("Setup manifest version or volume identity does not match.")
+            if not isinstance(manifest.get("managed"), dict) or not isinstance(manifest.get("games"), list):
+                raise SetupError("Setup manifest has invalid managed-file/game entries.")
+            required_files = {
+                "Runtime/console.py", "Runtime/emulate.sh", "Frontend/ES-DE/custom_systems/es_systems.xml",
+                "Config/retroarch-console.cfg", "Launchers/Retro.app/Contents/MacOS/launch",
+                "Launchers/Retro.app/Contents/Info.plist",
+                "Launchers/Steam Big Picture.app/Contents/MacOS/launch",
+            }
+            for relative in sorted(required_files - set(manifest["managed"])):
+                issues.append("Manifest does not track required file: " + relative)
+            for relative, digest in manifest["managed"].items():
+                path = Storage(choice).target(relative)
+                if not isinstance(digest, str) or not path.is_file() or hashlib.sha256(path.read_bytes()).hexdigest() != digest:
+                    issues.append(f"Missing or modified managed file: {relative}")
+            for folder in ["ROMs", "BIOS/retroarch", "SteamLibrary", "Saves", "Native/Assets", "Windows/Wrappers"]:
+                if not Storage(choice).target(folder).is_dir():
+                    issues.append("Missing directory: " + folder)
+            if not Storage(choice).target("Frontend/ES-DE/settings/es_settings.xml").is_file():
+                issues.append("ES-DE settings are missing. Rerun setup.")
+            else:
+                text = Storage(choice).target("Frontend/ES-DE/settings/es_settings.xml").read_text()
+                parsed = ET.fromstring("<settings>" + re.sub(r"<\?xml[^>]*\?>", "", text) + "</settings>")
+                entries = parsed.findall(".//string[@name='ROMDirectory']")
+                if not entries or entries[0].get("value") != str(root / "ROMs"):
+                    issues.append("ES-DE ROM directory points elsewhere. Rerun setup on this Mac.")
+            state = "valid layout" if not issues else "needs attention"
+            if choice["mode"] != manifest.get("mode"):
+                issues.append("Manifest local/portable mode does not match storage.")
+            if manifest.get("managed") == {}:
+                issues.append("Incomplete setup: no managed files recorded.")
+            cores = Path.home() / "Library/Application Support/RetroArch/cores"
+            for system, (_, extensions, core) in SYSTEMS.items():
+                folder = Storage(choice).target("ROMs/" + system)
+                has_games = folder.is_dir() and any(
+                    file.is_file() and file.suffix.lower().lstrip(".") in extensions.split("|")
+                    for file in folder.rglob("*")
+                )
+                if has_games and core != "dolphin" and not (cores / (core + "_libretro.dylib")).is_file():
+                    notes.append(f"Missing host core for ROMs/{system}: {core}. Install using RetroArch Core Downloader.")
+        elif root.exists() and any(root.iterdir()):
+            issues.append("Existing folder has no setup manifest; it will not be overwritten.")
+    except (SetupError, OSError, ValueError, KeyError, AttributeError, TypeError, ET.ParseError) as exc:
+        state = "invalid setup"
+        issues.append(str(exc))
+    missing = []
+    for package, name in PACKAGES.items():
+        try:
+            app_binary(name)
+        except (SetupError, OSError, KeyError, ValueError):
+            missing.append(package)
+    try:
+        find_brew()
+    except SetupError:
+        notes.append("Homebrew missing. Use Install Homebrew... for the official interactive installer.")
+    if platform.machine() != "arm64":
+        issues.append("This release supports Apple Silicon only, not Intel Macs.")
+    notes.append("No SSD benchmark, BIOS authenticity or game compatibility is inferred from metadata.")
+    return {"state": state if not issues else "needs attention", "issues": issues,
+            "notes": notes, "missing": missing, "root": str(root)}
+
+
+def physical_disks():
+    result = run(["/usr/sbin/diskutil", "list", "-plist", "external", "physical"],
+                 stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    identifiers = plistlib.loads(result.stdout).get("WholeDisks", [])
+    output = []
+    for identifier in identifiers:
+        if not re.fullmatch(r"disk\d+", identifier):
+            continue
+        info = disk_info(identifier)
+        if info.get("Internal") is not False or info.get("WholeDisk") is not True:
+            continue
+        output.append({
+            "device": identifier, "model": info.get("MediaName") or info.get("IORegistryEntryName") or "Unknown model",
+            "size": info.get("TotalSize", info.get("Size", 0)),
+            "identity": info.get("DiskUUID") or info.get("MediaUUID") or "",
+            "tree": info.get("DeviceTreePath", ""), "protocol": info.get("BusProtocol", ""),
+        })
+    return output
+
+
+def physical_stores(info):
+    stores = info.get("APFSPhysicalStores", [])
+    if stores:
+        return {re.sub(r"s\d+.*$", "", item["APFSPhysicalStore"]) for item in stores}
+    return {re.sub(r"s\d+.*$", "", info.get("ParentWholeDisk") or info.get("DeviceIdentifier", ""))}
+
+
+def enclosing_mount(path):
+    path = Path(path).resolve()
+    while not os.path.ismount(path) and path != path.parent:
+        path = path.parent
+    return path
+
+
+def protected_disks():
+    protected = physical_stores(home_disk()) | physical_stores(disk_info("/"))
+    for path in [Path(__file__), Path(sys.executable), Path.cwd()]:
+        protected |= physical_stores(disk_info(enclosing_mount(path)))
+    # An app running from a DMG depends on the disk carrying its backing image.
+    result = run(["/usr/bin/hdiutil", "info", "-plist"], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    images = plistlib.loads(result.stdout).get("images", [])
+    for image in images:
+        backing = image.get("image-path")
+        if backing and Path(backing).is_absolute():
+            protected |= physical_stores(disk_info(enclosing_mount(backing)))
+    return protected
+
+
+def format_plan(device):
+    matches = [disk for disk in physical_disks() if disk["device"] == device]
+    if len(matches) != 1:
+        raise SetupError("Selected whole external physical disk is no longer available.")
+    disk = dict(matches[0])
+    if device in protected_disks():
+        raise SetupError("Refusing a startup/app/runtime/installer-backing disk. Copy the app to a different disk and relaunch it there before erasing this disk.")
+    if not disk["identity"] or not disk["tree"] or disk["size"] <= 0:
+        raise SetupError("No reliable whole-disk UUID and device identity available. Automatic erase is disabled. Use Apple Disk Utility manually after verifying the physical device.")
+    disk["token"] = hashlib.sha256(json_text(disk).encode()).hexdigest()
+    return disk
+
+
+def erase_external(device, token, confirmation, confirm):
+    if not confirm or confirmation != "ERASE " + device:
+        raise SetupError("No erase performed: explicit consent and exact typed ERASE <device> required.")
+    plan = format_plan(device)
+    if plan["token"] != token:
+        raise SetupError("Disk identity changed since review. Nothing erased; refresh and review again.")
+    # No shell, untrusted names, helper elevation or retry on a different device.
+    # diskutil handles authorization where supported; permission failures are final.
+    run(["/usr/sbin/diskutil", "eraseDisk", "APFS", "Mac Gaming", "GPT", "/dev/" + device])
+    print("Erase completed.", flush=True)
+
+
+def release_tools():
+    spec = importlib.util.spec_from_file_location("console_releases", Path(__file__).with_name("releases.py"))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def copy_bundle_contents(source, directory_fd):
+    for entry in source.iterdir():
+        mode = entry.lstat().st_mode
+        if stat.S_ISLNK(mode):
+            os.symlink(os.readlink(entry), entry.name, dir_fd=directory_fd)
+        elif stat.S_ISDIR(mode):
+            os.mkdir(entry.name, mode=0o700, dir_fd=directory_fd)
+            child_fd = os.open(entry.name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=directory_fd)
+            try:
+                copy_bundle_contents(entry, child_fd)
+                os.fchmod(child_fd, stat.S_IMODE(mode))
+            finally:
+                os.close(child_fd)
+        elif stat.S_ISREG(mode):
+            file_fd = os.open(entry.name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+                              0o600, dir_fd=directory_fd)
+            with os.fdopen(file_fd, "wb") as outgoing, entry.open("rb") as incoming:
+                shutil.copyfileobj(incoming, outgoing)
+                os.fchmod(outgoing.fileno(), stat.S_IMODE(mode))
+        else:
+            raise SetupError("Unsupported file in portable app: " + str(entry))
+
+
+def prepare_portable(device, token, confirmation, confirm):
+    if not confirm or confirmation != "ERASE " + device:
+        raise SetupError("No preparation performed: exact typed erase consent is required.")
+    reviewed = format_plan(device)
+    if reviewed["token"] != token:
+        raise SetupError("Disk identity changed since review. Nothing erased.")
+    with tempfile.TemporaryDirectory(prefix="mcc-release-") as temporary:
+        staging = Path(temporary)
+        if device in physical_stores(disk_info(enclosing_mount(staging))):
+            raise SetupError("Download staging relies on the selected disk. Nothing erased.")
+        print("Downloading and verifying the latest portable app before erasing anything...", flush=True)
+        app = release_tools().stage(staging, run)
+        # erase_external revalidates the original reviewed identity after download.
+        erase_external(device, token, confirmation, confirm)
+        post_erase = format_plan(device)
+        for key in ["tree", "size", "model", "protocol"]:
+            if reviewed[key] != post_erase[key]:
+                raise SetupError("Disk changed after erase. No app copied; inspect the disk and refresh.")
+
+        def destination_choice():
+            if format_plan(device)["token"] != post_erase["token"]:
+                raise SetupError("Disk identity changed after erase. No further writes performed.")
+            matches = [choice for choice in drives()
+                       if choice["mode"] == "portable" and choice["filesystem"] == "apfs"
+                       and physical_stores(disk_info(choice["mount"])) == {device}]
+            if len(matches) > 1:
+                raise SetupError("Multiple volumes appeared on the prepared disk. Refusing to choose one.")
+            return matches[0] if matches else None
+
+        choice = None
+        for _ in range(10):
+            choice = destination_choice()
+            if choice:
+                break
+            time.sleep(0.5)
+        if choice is None:
+            raise SetupError("Erase completed, but the new APFS volume is not mounted. Refresh and inspect it; do not erase again.")
+        destination = Path(choice["mount"]) / app.name
+        reject_symlinks(destination)
+        if destination.exists():
+            raise SetupError("An app already exists at the SSD root. Preserving it.")
+
+        def destination_unchanged():
+            current = destination_choice()
+            return current is not None and all(
+                current[key] == choice[key] for key in ["id", "uuid", "mount", "root"])
+
+        mount_fd = os.open(choice["mount"], os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        try:
+            if not destination_unchanged():
+                raise SetupError("Destination changed before app copy.")
+            copy_name = ".mcc-copy-" + uuid.uuid4().hex
+            os.mkdir(copy_name, mode=0o700, dir_fd=mount_fd)
+            copy_fd = os.open(copy_name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=mount_fd)
+            try:
+                os.mkdir(app.name, mode=0o755, dir_fd=copy_fd)
+                app_fd = os.open(app.name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=copy_fd)
+                try:
+                    # Descriptor-relative writes cannot fall back to a reused
+                    # /Volumes path if the SSD is disconnected mid-copy.
+                    copy_bundle_contents(app, app_fd)
+                finally:
+                    os.close(app_fd)
+                if not destination_unchanged() or destination.exists():
+                    raise SetupError("Destination changed during app copy. No app installed.")
+                copied = Path(choice["mount"]) / copy_name / app.name
+                if copied.parent.stat().st_ino != os.fstat(copy_fd).st_ino or copied.parent.stat().st_dev != os.fstat(copy_fd).st_dev:
+                    raise SetupError("Copy directory changed. No app installed.")
+                run(["/usr/bin/codesign", "--verify", "--deep", "--strict", str(copied)])
+                if not destination_unchanged() or destination.exists():
+                    raise SetupError("Destination changed during copy verification. No app installed.")
+                os.rename(app.name, destination.name, src_dir_fd=copy_fd, dst_dir_fd=mount_fd)
+            finally:
+                os.close(copy_fd)
+            os.rmdir(copy_name, dir_fd=mount_fd)
+        finally:
+            os.close(mount_fd)
+        print(f"Portable app copied to SSD root: {destination}", flush=True)
+        print("Open that app from the SSD and create your game library. Host players still need setup on each Mac.", flush=True)
+
+
+def copy_installer(storage, source):
+    source = Path(source).expanduser().resolve(strict=True)
+    if source.suffix.lower() != ".dmg" or not source.is_file():
+        raise SetupError("Select an existing real .dmg file. Nothing is downloaded automatically.")
+    run(["/usr/bin/hdiutil", "verify", str(source)], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    destination = storage.target("Installer/" + source.name)
+    if destination.exists():
+        raise SetupError("Installer copy already exists; preserving it. Choose a differently named release or remove the old copy yourself.")
+    if shutil.disk_usage(storage.root).free < source.stat().st_size + 1024 ** 2:
+        raise SetupError("Not enough free space for an installer copy.")
+    storage.mkdir("Installer")
+    temporary = None
+    try:
+        with source.open("rb") as incoming, tempfile.NamedTemporaryFile(dir=destination.parent, delete=False) as outgoing:
+            temporary = Path(outgoing.name)
+            digest = hashlib.sha256()
+            while True:
+                chunk = incoming.read(8 * 1024 * 1024)
+                if not chunk:
+                    break
+                storage.check()
+                digest.update(chunk)
+                outgoing.write(chunk)
+        storage.check()
+        copied = hashlib.sha256()
+        with temporary.open("rb") as file:
+            for chunk in iter(lambda: file.read(8 * 1024 * 1024), b""):
+                copied.update(chunk)
+        if copied.digest() != digest.digest():
+            raise SetupError("Installer copy checksum mismatch.")
+        storage.check()
+        # Hard-link creation refuses overwrite if another copy appeared concurrently.
+        os.link(temporary, destination)
+        print(f"Installer copied: {destination}")
+    finally:
+        if temporary is not None and temporary.exists():
+            temporary.unlink()
 
 
 def reject_symlinks(path):
@@ -197,7 +503,17 @@ def app_binary(name):
     raise SetupError(f"Install {name} in /Applications or ~/Applications first.")
 
 
-def app_files(name, action, identifier=None):
+def runtime_assignment(root):
+    executable = Path(sys.executable).resolve()
+    # Bundled runtime and library on the same volume move together. Never pin
+    # those launchers to a host-specific /Volumes name or Applications folder.
+    if executable.stat().st_dev == root.stat().st_dev:
+        relative = os.path.relpath(executable, root)
+        return 'PYTHON="$ROOT"/' + shlex.quote(relative) + "\n"
+    return "PYTHON=" + shlex.quote(str(executable)) + "\n"
+
+
+def app_files(name, action, root, identifier=None):
     prefix = f"Launchers/{name}.app/Contents"
     args = [action, "--root", '"$ROOT"']
     if identifier:
@@ -206,9 +522,14 @@ def app_files(name, action, identifier=None):
     script = (
         '#!/bin/bash\nset -euo pipefail\n'
         'ROOT="$(cd "$(dirname "$0")/../../../.." && pwd)"\n'
+        + runtime_assignment(root)
+        + 'if [[ ! -x "$PYTHON" ]]; then\n'
+        '  /usr/bin/osascript -e \'display alert "Manager app not found" '
+        'message "Keep MacCouchConsole.app on this drive. Open it and update the library after moving the app." as critical\'\n'
+        '  exit 1\nfi\n'
         'ERROR_FILE="$(/usr/bin/mktemp)"\n'
         'trap \'rm -f "$ERROR_FILE"\' EXIT\n'
-        'if ! /usr/bin/python3 "$ROOT/Runtime/console.py" '
+        'if ! "$PYTHON" -I -B "$ROOT/Runtime/console.py" '
         + " ".join(args) + ' >"$ERROR_FILE" 2>&1; then\n'
         '  cat "$ERROR_FILE" >&2\n'
         '  /usr/bin/osascript - "$ERROR_FILE" <<\'APPLESCRIPT\'\n'
@@ -239,14 +560,20 @@ def generated_files(storage, registrations):
         fields = {
             "name": system, "fullname": name, "path": f"%ROMPATH%/{system}",
             "extension": " ".join(f".{ext} .{ext.upper()}" for ext in extensions.split("|")),
-            "command": "/usr/bin/python3 " + shlex.quote(str(root / "Runtime/console.py"))
-            + " emulate --root " + shlex.quote(str(root)) + " --system " + system + " --rom %ROM%",
+            "command": "/bin/bash " + shlex.quote(str(root / "Runtime/emulate.sh"))
+            + " --system " + system + " --rom %ROM%",
             "platform": system, "theme": system,
         }
         for key, value in fields.items():
             ET.SubElement(entry, key).text = value
     files = {
         "Runtime/console.py": (Path(__file__).read_bytes(), False),
+        "Runtime/emulate.sh": ((
+            '#!/bin/bash\nset -euo pipefail\n'
+            'ROOT="$(cd "$(dirname "$0")/.." && pwd)"\n'
+            + runtime_assignment(root)
+            + 'exec "$PYTHON" -I -B "$ROOT/Runtime/console.py" emulate --root "$ROOT" "$@"\n'
+        ).encode(), True),
         "Frontend/ES-DE/custom_systems/es_systems.xml": (ET.tostring(custom, encoding="utf-8", xml_declaration=True), False),
         "Config/retroarch-console.cfg": (
             "".join(f'{key} = {json.dumps(str(root / value), ensure_ascii=False)}\n' for key, value in {
@@ -263,10 +590,10 @@ def generated_files(storage, registrations):
                      ["Retro", "Steam Big Picture"] + [item["name"] for item in registrations])
          + "\nKeep Steam Input enabled for native Steam games. If ES-DE sees double input, "
          "disable Steam Input for the Retro shortcut and configure the controller in ES-DE.\n").encode(), False)
-    files.update(app_files("Retro", "retro"))
-    files.update(app_files("Steam Big Picture", "steam"))
+    files.update(app_files("Retro", "retro", root))
+    files.update(app_files("Steam Big Picture", "steam", root))
     for item in registrations:
-        files.update(app_files(item["name"], "launch", item["id"]))
+        files.update(app_files(item["name"], "launch", root, item["id"]))
     return files
 
 
@@ -541,11 +868,33 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("drives")
+    sub.add_parser("disks")
+    sub.add_parser("update-check")
+    install = sub.add_parser("install-apps")
+    install.add_argument("--confirm", action="store_true")
+    install.add_argument("--packages", nargs="+", choices=list(PACKAGES), required=True)
+    assessment = sub.add_parser("assess")
+    assessment.add_argument("--drive", required=True)
+    plan = sub.add_parser("format-plan")
+    plan.add_argument("--device", required=True)
+    erase = sub.add_parser("erase")
+    erase.add_argument("--device", required=True)
+    erase.add_argument("--token", required=True)
+    erase.add_argument("--typed", required=True)
+    erase.add_argument("--confirm", action="store_true")
+    erase.add_argument("--prepare-portable", action="store_true",
+                       help="Verify latest GitHub portable release before erasing; copy the app to the new SSD root.")
+    installer = sub.add_parser("copy-installer")
+    installer.add_argument("--drive", required=True)
+    installer.add_argument("--source", required=True)
+    installer.add_argument("--confirm", action="store_true")
     login = sub.add_parser("login")
     login.add_argument("--confirm", action="store_true")
     setup = sub.add_parser("setup")
     setup.add_argument("--drive", required=True)
     setup.add_argument("--confirm", action="store_true")
+    setup.add_argument("--no-host-config", action="store_true",
+                       help="Keep selection on the drive only; do not save it in this Mac's home folder.")
     setup.add_argument("--install", nargs="*", choices=list(PACKAGES), default=[])
     for action in ["env", "index", "steam", "retro", "launch", "emulate", "register"]:
         command = sub.add_parser(action)
@@ -563,6 +912,27 @@ def main():
     try:
         if args.command == "drives":
             print(json_text(drives()))
+        elif args.command == "disks":
+            print(json_text(physical_disks()))
+        elif args.command == "update-check":
+            print(json_text(release_tools().latest()))
+        elif args.command == "install-apps":
+            if not args.confirm:
+                raise SetupError("No apps installed. Explicit --confirm consent is required.")
+            install_packages(args.packages)
+        elif args.command == "assess":
+            print(json_text(assess(args.drive)))
+        elif args.command == "format-plan":
+            print(json_text(format_plan(args.device)))
+        elif args.command == "erase":
+            if args.prepare_portable:
+                prepare_portable(args.device, args.token, args.typed, args.confirm)
+            else:
+                erase_external(args.device, args.token, args.typed, args.confirm)
+        elif args.command == "copy-installer":
+            if not args.confirm:
+                raise SetupError("Installer copying requires explicit --confirm.")
+            copy_installer(Storage(select_drive(args.drive)), args.source)
         elif args.command == "login":
             login_launcher(args.confirm)
         elif args.command == "setup":
@@ -578,7 +948,8 @@ def main():
             initialize(storage)
             install_packages(args.install)
             storage.check()
-            save_host_config(choice)
+            if not args.no_host_config:
+                save_host_config(choice)
             print("Setup complete. See README for Steam Storage, controller and Windows-wrapper steps.", flush=True)
         else:
             storage = configured_storage(args.root)

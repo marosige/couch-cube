@@ -1,0 +1,52 @@
+name: Build portable releases
+on:
+  workflow_dispatch:
+    inputs:
+      publish_draft:
+        description: "Create a draft GitHub Release (requires repository owner's publication approval)"
+        type: boolean
+        default: false
+      tag:
+        description: "Existing version tag for an approved draft release (e.g. v0.3.0)"
+        type: string
+        default: "v0.3.0"
+permissions:
+  contents: read
+jobs:
+  dmg:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - run: /usr/bin/python3 -B -m unittest discover -s tests -q
+      - run: bash scripts/package-release.sh
+      - run: /usr/bin/python3 -B scripts/verify-release.py build/MacCouchConsole-0.3.0-arm64.dmg build/MacCouchConsole-0.3.0-arm64.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MacCouchConsole-arm64
+          path: |
+            build/*.dmg
+            build/*.dmg.sha256
+            build/*.zip
+            build/*.zip.sha256
+  draft-release:
+    if: inputs.publish_draft
+    needs: dmg
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: MacCouchConsole-arm64
+          path: artifacts
+      - name: Create explicitly requested draft
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          test "$RELEASE_TAG" = v0.3.0
+          gh release create "$RELEASE_TAG" --verify-tag --draft \
+            --title "Mac Couch Console 0.3.0 (Apple Silicon)" \
+            --notes "Apple Silicon macOS 13+. Ad-hoc signed; not notarized. See README for Gatekeeper and destructive SSD-preparation limitations." \
+            artifacts/*.dmg artifacts/*.zip artifacts/*.sha256
