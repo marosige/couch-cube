@@ -14,7 +14,8 @@ ditto "$RUNTIME" "$APP/Contents/Resources/python"
 bash "$ROOT/scripts/build-icons.sh" --reuse-build
 cp "$ROOT/build/Console.icns" "$APP/Contents/Resources/Console.icns"
 xcrun swiftc -target arm64-apple-macos13.0 -swift-version 5 -module-cache-path "$ROOT/build/module-cache" \
-  -framework AppKit "$ROOT/setup/ConsoleSetup.swift" -o "$APP/Contents/MacOS/ConsoleSetup"
+  -framework AppKit -framework GameController -framework CoreBluetooth -framework IOBluetooth \
+  "$ROOT/setup/ConsoleSetup.swift" -o "$APP/Contents/MacOS/ConsoleSetup"
 xcrun swiftc -target arm64-apple-macos13.0 -swift-version 5 -module-cache-path "$ROOT/build/module-cache" \
   -framework AppKit -framework GameController -framework IOKit \
   "$ROOT/setup/ConsoleAutoLaunch.swift" -o "$APP/Contents/MacOS/ConsoleAutoLaunch"
@@ -40,6 +41,7 @@ app = pathlib.Path(sys.argv[1])
     "LSArchitecturePriority": ["arm64"],
     "LSMinimumSystemVersion": "13.0",
     "NSHighResolutionCapable": True,
+    "NSBluetoothAlwaysUsageDescription": "Show your paired game controllers and their Bluetooth connection status. Pairing and forgetting devices stay in macOS Bluetooth settings.",
 }))
 PY
 codesign --force --deep --sign - "$APP"

@@ -2,16 +2,14 @@
 
 import hashlib
 import json
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 import platform
 import plistlib
 import re
-import stat
 import subprocess
 import urllib.error
 import urllib.parse
 import urllib.request
-import zipfile
 
 
 class ReleaseError(ValueError):
@@ -46,7 +44,7 @@ def fetch(url, limit):
             return data
     except urllib.error.HTTPError as exc:
         if exc.code == 404:
-            raise ReleaseError("No public release is available yet. Publish a stable GitHub Release with the ARM64 ZIP and checksum first.") from exc
+            raise ReleaseError("No public release is available yet. Publish a stable GitHub Release with the ARM64 DMG first.") from exc
         raise ReleaseError(f"GitHub returned HTTP {exc.code}. Check connectivity or API rate limits and try again.") from exc
     except (urllib.error.URLError, TimeoutError) as exc:
         raise ReleaseError(f"Cannot reach GitHub: {exc}. Check your internet connection and try again.") from exc
@@ -59,9 +57,9 @@ def latest():
         raise ReleaseError("Only published stable releases are supported.")
     tag = release["tag_name"]
     version(tag)
-    filename = f"{config['asset_prefix']}-{tag.removeprefix('v')}-arm64.zip"
+    filename = f"{config['asset_prefix']}-{tag.removeprefix('v')}-arm64.dmg"
     assets = {}
-    for name in [filename, filename + ".sha256"]:
+    for name in [filename]:
         matches = [asset for asset in release.get("assets", []) if asset.get("name") == name]
         if len(matches) != 1:
             raise ReleaseError(f"The latest release is missing a unique {name} asset. Nothing will be erased.")
@@ -70,6 +68,8 @@ def latest():
         if asset.get("browser_download_url") != expected:
             raise ReleaseError("Unexpected release asset URL.")
         assets[name] = asset
+        if not re.fullmatch(r"sha256:[a-fA-F0-9]{64}", asset.get("digest") or ""):
+            raise ReleaseError("The release has no GitHub SHA-256 asset digest. Nothing will be erased.")
     return {"version": tag.removeprefix("v"), "available": version(tag) > version(config["version"]),
             "url": f"https://github.com/{config['repository']}/releases/tag/{tag}",
             "filename": filename, "assets": assets}
@@ -81,38 +81,32 @@ def stage(directory, run):
     if version(release["version"]) < version(config["version"]):
         raise ReleaseError("The published release is older than this app. Publish the current release before preparing an SSD.")
     filename = release["filename"]
-    checksum = fetch(release["assets"][filename + ".sha256"]["browser_download_url"], 8192).decode("ascii")
-    match = re.fullmatch(r"([a-fA-F0-9]{64}) [ *]" + re.escape(filename) + r"\s*", checksum)
-    if not match:
-        raise ReleaseError("Release checksum has an invalid digest or filename.")
     archive = fetch(release["assets"][filename]["browser_download_url"], 512 * 1024 ** 2)
     digest = hashlib.sha256(archive).hexdigest()
-    if digest != match[1].lower():
-        raise ReleaseError("Portable ZIP checksum mismatch. Nothing will be erased.")
-    github_digest = release["assets"][filename].get("digest")
-    if github_digest and github_digest != "sha256:" + digest:
-        raise ReleaseError("Portable ZIP does not match GitHub's asset digest.")
+    github_digest = release["assets"][filename]["digest"].lower()
+    if github_digest != "sha256:" + digest:
+        raise ReleaseError("DMG checksum mismatch against GitHub's asset digest. Nothing will be erased.")
     archive_path = directory / filename
     archive_path.write_bytes(archive)
-    try:
-        with zipfile.ZipFile(archive_path) as zipped:
-            if sum(item.file_size for item in zipped.infolist()) > 2 * 1024 ** 3:
-                raise ReleaseError("Portable ZIP expands beyond the supported size.")
-            for item in zipped.infolist():
-                path = PurePosixPath(item.filename)
-                if path.is_absolute() or ".." in path.parts or not path.parts or path.parts[0] not in {config["app_name"], "__MACOSX"}:
-                    raise ReleaseError("Portable ZIP contains a path outside the app.")
-                mode = item.external_attr >> 16
-                if stat.S_ISLNK(mode):
-                    if item.file_size > 4096:
-                        raise ReleaseError("Portable ZIP has an oversized symbolic link.")
-                    target = PurePosixPath(zipped.read(item).decode("utf-8"))
-                    if target.is_absolute() or ".." in target.parts:
-                        raise ReleaseError("Portable ZIP contains an unsafe symbolic link.")
-    except zipfile.BadZipFile as exc:
-        raise ReleaseError("The portable release is not a valid ZIP. Nothing will be erased.") from exc
+    run(["/usr/bin/hdiutil", "verify", str(archive_path)], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    mount = directory / "image"
+    mount.mkdir()
+    run(["/usr/bin/hdiutil", "attach", "-readonly", "-nobrowse", "-mountpoint", str(mount), str(archive_path)],
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     extracted = directory / "extracted"
-    run(["/usr/bin/ditto", "-x", "-k", str(archive_path), str(extracted)])
+    extracted.mkdir()
+    try:
+        source = mount / config["app_name"]
+        if source.is_symlink() or not source.is_dir():
+            raise ReleaseError("DMG is missing a real Couch Cube app.")
+        for path in source.rglob("*"):
+            if path.is_symlink() and not path.resolve().is_relative_to(source.resolve()):
+                raise ReleaseError("DMG app has an escaping symbolic link.")
+            if not (path.is_file() or path.is_dir() or path.is_symlink()):
+                raise ReleaseError("DMG app contains an unsupported file type.")
+        run(["/usr/bin/ditto", str(source), str(extracted / config["app_name"])])
+    finally:
+        run(["/usr/bin/hdiutil", "detach", str(mount)], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     app = extracted / config["app_name"]
     for path in app.rglob("*"):
         if path.is_symlink() and not path.resolve().is_relative_to(app.resolve()):
@@ -122,7 +116,8 @@ def stage(directory, run):
     if info.get("CFBundleIdentifier") != "org.macgameconsole.setup" or info.get("CFBundleShortVersionString") != release["version"]:
         raise ReleaseError("Downloaded app identity/version does not match the release.")
     if info.get("MCCDistribution") != "portable":
-        raise ReleaseError("The release ZIP is not the portable distribution.")
+        if info.get("MCCDistribution") != "local":
+            raise ReleaseError("Unrecognized app distribution in the DMG.")
     minimum = tuple(int(part) for part in info["LSMinimumSystemVersion"].split("."))
     current = tuple(int(part) for part in platform.mac_ver()[0].split("."))
     if current < minimum:

@@ -101,22 +101,21 @@ class FormatTests(unittest.TestCase):
                 patch.object(manager, "run", return_value=image_info):
             self.assertIn("disk42", self.real_protected_disks())
 
-    def test_failed_download_cannot_erase(self):
+    def test_failed_app_staging_cannot_erase(self):
         plan = manager.format_plan("disk42")
-        releases = SimpleNamespace(stage=lambda *args: (_ for _ in ()).throw(ValueError("No release available")))
-        with patch.object(manager, "release_tools", return_value=releases), \
+        with patch.object(manager, "stage_current_app", side_effect=ValueError("App verification failed")), \
                 patch.object(manager, "disk_info", return_value={"DeviceIdentifier": "disk0"}), \
                 patch.object(manager, "erase_external") as erase:
-            with self.assertRaisesRegex(ValueError, "No release"):
+            with self.assertRaisesRegex(ValueError, "App verification"):
                 manager.prepare_portable("disk42", plan["token"], "ERASE disk42", True)
             erase.assert_not_called()
 
-    def test_identity_change_during_download_prevents_erase(self):
+    def test_identity_change_during_staging_prevents_erase(self):
         plan = manager.format_plan("disk42")
         def stage(*args):
             self.disk["identity"] = "replacement-disk"
             return Path("/unused")
-        with patch.object(manager, "release_tools", return_value=SimpleNamespace(stage=stage)), \
+        with patch.object(manager, "stage_current_app", side_effect=stage), \
                 patch.object(manager, "disk_info", return_value={"DeviceIdentifier": "disk0"}), \
                 patch.object(manager, "run") as run:
             with self.assertRaisesRegex(manager.SetupError, "identity changed"):
@@ -125,7 +124,7 @@ class FormatTests(unittest.TestCase):
 
     def test_preparation_denied_before_download(self):
         plan = manager.format_plan("disk42")
-        with patch.object(manager, "release_tools") as releases:
+        with patch.object(manager, "stage_current_app") as releases:
             with self.assertRaises(manager.SetupError):
                 manager.prepare_portable("disk42", plan["token"], "", False)
             releases.assert_not_called()
@@ -133,7 +132,7 @@ class FormatTests(unittest.TestCase):
     def test_download_staging_on_target_disk_is_refused(self):
         plan = manager.format_plan("disk42")
         with patch.object(manager, "disk_info", return_value={"DeviceIdentifier": "disk42"}), \
-                patch.object(manager, "release_tools") as releases, \
+                patch.object(manager, "stage_current_app") as releases, \
                 patch.object(manager, "erase_external") as erase:
             with self.assertRaisesRegex(manager.SetupError, "staging relies"):
                 manager.prepare_portable("disk42", plan["token"], "ERASE disk42", True)
@@ -150,8 +149,8 @@ class FormatTests(unittest.TestCase):
             def drives():
                 discovery_calls.append(True)
                 return [dict(choice, free=100_000_000 - len(discovery_calls) * 1000)]
-            def stage(directory, run):
-                events.append("download")
+            def stage(directory):
+                events.append("stage")
                 app = directory / "CouchCube.app"
                 app.mkdir()
                 (app / "fixture").write_text("verified release")
@@ -167,18 +166,18 @@ class FormatTests(unittest.TestCase):
                 else:
                     self.fail("Unexpected external command: " + str(args))
             plan = manager.format_plan("disk42")
-            with patch.object(manager, "release_tools", return_value=SimpleNamespace(stage=stage)), \
+            with patch.object(manager, "stage_current_app", side_effect=stage), \
                     patch.object(manager, "disk_info", side_effect=info), \
                     patch.object(manager, "erase_external", side_effect=erase), \
                     patch.object(manager, "drives", side_effect=drives), patch.object(manager, "run", side_effect=run):
                 manager.prepare_portable("disk42", plan["token"], "ERASE disk42", True)
-            self.assertEqual(events, ["download", "erase", "verify-copy"])
+            self.assertEqual(events, ["stage", "erase", "verify-copy"])
             self.assertEqual((mount / "CouchCube.app/fixture").read_text(), "verified release")
             self.assertFalse((mount / "Couch Cube").exists())
 
     def test_no_mount_after_erase_never_substitutes_another_drive(self):
         plan = manager.format_plan("disk42")
-        with patch.object(manager, "release_tools", return_value=SimpleNamespace(stage=lambda *args: Path("/unused"))), \
+        with patch.object(manager, "stage_current_app", return_value=Path("/unused")), \
                 patch.object(manager, "disk_info", return_value={"DeviceIdentifier": "disk0"}), \
                 patch.object(manager, "erase_external") as erase, \
                 patch.object(manager, "drives", return_value=[]), patch.object(manager.time, "sleep"), \
@@ -350,6 +349,63 @@ class ManagementTests(unittest.TestCase):
         self.assertFalse((target / "fixture").exists())
 
 
+class AppManagementTests(unittest.TestCase):
+    def test_app_management_requires_confirmation(self):
+        with patch.object(manager, "run") as run:
+            for package, action in [("steam", "remove"), ("unknown", "install"), ("steam", "zap")]:
+                with self.assertRaises(manager.SetupError):
+                    manager.manage_app(package, action)
+            run.assert_not_called()
+
+    def test_homebrew_remove_keeps_preferences_no_zap(self):
+        with patch.object(manager, "app_status", return_value=[{"id": "steam", "managed": True}]), \
+                patch.object(manager, "find_brew", return_value="/brew"), patch.object(manager, "run") as run:
+            manager.manage_app("steam", "remove", True)
+        run.assert_called_once_with(["/brew", "uninstall", "--cask", "steam"])
+
+    def test_unmanaged_app_not_removed_by_brew(self):
+        with patch.object(manager, "app_status", return_value=[{"id": "rpcs3", "managed": False}]), \
+                patch.object(manager, "run") as run:
+            with self.assertRaisesRegex(manager.SetupError, "Finder"):
+                manager.manage_app("rpcs3", "remove", True)
+            run.assert_not_called()
+
+    def test_cemu_and_switch_never_install_wrong_cask(self):
+        with patch.object(manager, "run") as run:
+            for package in ["cemu-wiiu", "switch", "rpcs3"]:
+                with self.assertRaisesRegex(manager.SetupError, "manual"):
+                    manager.install_packages([package])
+            run.assert_not_called()
+
+    def test_cleanup_preserves_user_library(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            home = Path(temporary).resolve()
+            config = home / "setup.json"
+            config.write_text("{}")
+            games = home / "Games/ROMs"
+            games.mkdir(parents=True)
+            (games / "mine.iso").write_bytes(b"keep")
+            with patch.object(manager, "HOST_CONFIG", config), patch.object(manager.Path, "home", return_value=home), \
+                    patch.object(manager, "login_launcher") as login:
+                manager.cleanup_host(True)
+            login.assert_called_once_with(True, enabled=False)
+            self.assertFalse(config.exists())
+            self.assertEqual((games / "mine.iso").read_bytes(), b"keep")
+
+    def test_copy_app_preserves_existing_destination(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            mount = Path(temporary).resolve()
+            destination = mount / "CouchCube.app"
+            destination.mkdir()
+            (destination / "keep").write_text("user app")
+            choice = {"id": "drive", "uuid": "drive", "mode": "portable", "mount": str(mount),
+                      "root": str(mount / manager.FOLDER)}
+            with patch.object(manager, "select_drive", return_value=choice):
+                with self.assertRaisesRegex(manager.SetupError, "already exists"):
+                    manager.copy_app_to_storage(choice, Path("/source/CouchCube.app"))
+            self.assertEqual((destination / "keep").read_text(), "user app")
+
+
 class DefaultFrontendTests(unittest.TestCase):
     def test_steam_preferred_when_both_installed(self):
         with patch.object(manager.Path, "is_dir", return_value=True), \
@@ -374,11 +430,11 @@ class DefaultFrontendTests(unittest.TestCase):
         with patch.object(manager, "default_frontend", return_value="retro"), \
                 patch.object(manager, "read_json", return_value={}), \
                 patch.object(manager, "refresh_generated") as refresh, \
-                patch.object(manager, "app_binary", return_value=Path("/ES-DE")), \
+                patch.object(manager, "app_binary", return_value=Path("/Applications/ES-DE.app/Contents/MacOS/ES-DE")), \
                 patch.object(manager, "run") as run:
             manager.launch(storage, "console")
             refresh.assert_called_once_with(storage, {})
-            run.assert_called_once_with(["/ES-DE", "--home", "/games/Frontend"])
+            run.assert_called_once_with(["/usr/bin/open", "-a", "/Applications/ES-DE.app", "--args", "--home", "/games/Frontend"])
 
 
 class AutoLaunchTests(unittest.TestCase):

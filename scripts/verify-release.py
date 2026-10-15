@@ -19,6 +19,7 @@ def verify_app(app, working_directory, distribution="local"):
     assert info["CFBundleDisplayName"] == "Couch Cube"
     assert info["CFBundleIconFile"] == "Console"
     assert info["MCCDistribution"] == distribution
+    assert info["NSBluetoothAlwaysUsageDescription"]
     assert info["CFBundleShortVersionString"] == "0.3.0"
     resources = app / "Contents/Resources"
     assert (resources / "Console.icns").is_file()
@@ -39,11 +40,9 @@ def verify_app(app, working_directory, distribution="local"):
          "print('Relocated bundled Python imports passed')", str(app)],
         cwd=working_directory, env={"PATH": "/usr/bin:/bin", "HOME": str(Path.home())})
     run([str(python), "-I", "-B", str(resources / "scripts/console.py"), "drives"], cwd=working_directory)
-    for page in range(7):
-        run([str(app / "Contents/MacOS/ConsoleSetup"), "--smoke-test", "--page", str(page)], cwd=working_directory)
-    run([str(app / "Contents/MacOS/ConsoleSetup"), "--smoke-test", "--smoke-flow"], cwd=working_directory)
     for appearance in ("light", "dark"):
-        run([str(app / "Contents/MacOS/ConsoleSetup"), "--smoke-test", "--smoke-activity",
+        run([str(app / "Contents/MacOS/ConsoleSetup"), "--smoke-test", "--smoke-flow",
+             "--smoke-activity", "--minimum-size",
              "--appearance", appearance], cwd=working_directory)
     run(["/usr/bin/codesign", "--verify", "--deep", "--strict", str(app)])
     assert list(resources.rglob("LICENSE*")), "Runtime licenses missing"
@@ -71,22 +70,18 @@ with tempfile.TemporaryDirectory(prefix="mac-console-release-") as directory:
         flags = run(["/usr/bin/xcrun", "GetFileInfo", "-aC", str(mount)], stdout=subprocess.PIPE)
         assert flags.stdout.strip() == b"1", "Mounted DMG custom icon is not enabled"
         verify_app(app, directory)
+        relocated = Path(directory) / "SSD copy/CouchCube.app"
+        relocated.parent.mkdir()
+        run(["/usr/bin/ditto", str(app), str(relocated)])
         print("Read-only release verification passed: DMG contents, signature, relocated runtime, backend and native GUI.")
     finally:
         if attached:
             run(["/usr/bin/hdiutil", "detach", str(mount)], stdout=subprocess.PIPE)
 
-if len(sys.argv) > 2:
-    archive = Path(sys.argv[2]).resolve(strict=True)
-    with tempfile.TemporaryDirectory(prefix="mac-console-portable-") as directory:
-        download = Path(directory) / "Download"
-        moved = Path(directory) / "Gaming SSD with spaces"
-        run(["/usr/bin/ditto", "-x", "-k", str(archive), str(download)])
-        download.rename(moved)
-        verify_app(moved / "CouchCube.app", directory, distribution="portable")
-        app = moved / "CouchCube.app"
-        portable_icon = (app / "Contents/Resources/Console.icns").read_bytes()
-        assert portable_icon not in [local_icon, installer_icon], "Portable icon must differ from local and DMG icons"
+    with tempfile.TemporaryDirectory(prefix="mac-console-copy-") as copy_directory:
+        app = relocated
+        directory = copy_directory
+        verify_app(app, directory)
         copied = Path(directory) / "Descriptor copy/CouchCube.app"
         copied.mkdir(parents=True)
         run([str(app / "Contents/Resources/python/bin/python3"), "-I", "-B", "-c",
@@ -97,5 +92,5 @@ if len(sys.argv) > 2:
              "fd=os.open(target,os.O_RDONLY|os.O_DIRECTORY); "
              "module.copy_bundle_contents(source,fd); os.close(fd)", str(app), str(copied)],
             cwd=directory)
-        verify_app(copied, directory, distribution="portable")
-        print("Portable ZIP verification passed after moving the extracted app; no Applications installation used.")
+        verify_app(copied, directory)
+        print("Single DMG app relocation and descriptor-relative SSD copy passed; no Applications installation used.")

@@ -30,6 +30,15 @@ PACKAGES = {
     "retroarch-metal": "RetroArch.app",
     "dolphin": "Dolphin.app",
     "porting-kit": "Porting Kit.app",
+    "pcsx2": "PCSX2.app",
+    "rpcs3": "RPCS3.app",
+    "cemu-wiiu": "Cemu.app",
+    "switch": "Ryujinx.app",
+}
+MANUAL_APPS = {
+    "rpcs3": "https://rpcs3.net/download",
+    "cemu-wiiu": "https://cemu.info/",
+    "switch": None,
 }
 # Folder names match ES-DE's macOS system definitions.
 SYSTEMS = {
@@ -46,7 +55,19 @@ SYSTEMS = {
     "megadrive": ("Mega Drive / Genesis", "md|bin|zip|7z", "genesis_plus_gx"),
     "segacd": ("Sega CD", "cue|chd|m3u", "genesis_plus_gx"),
     "dreamcast": ("Dreamcast", "gdi|cdi|chd|m3u", "flycast"),
+    "wiiu": ("Wii U", "wua|wud|wux|rpx", "cemu-wiiu"),
+    "ps2": ("PlayStation 2", "iso|chd|cso|bin", "pcsx2"),
+    "ps3": ("PlayStation 3", "self|bin", "rpcs3"),
+    "switch": ("Nintendo Switch", "nsp|xci|nro", "switch"),
 }
+STANDALONE = {"dolphin", "pcsx2", "rpcs3", "cemu-wiiu", "switch"}
+
+def selected_systems(state):
+    selected = state.get("systems", [key for key in SYSTEMS if key not in {"wiiu", "ps2", "ps3", "switch"}])
+    if (not isinstance(selected, list) or any(not isinstance(item, str) or item not in SYSTEMS for item in selected)
+            or len(set(selected)) != len(selected)):
+        raise SetupError("Invalid console selection in the library manifest.")
+    return selected
 
 
 class SetupError(Exception):
@@ -187,7 +208,7 @@ def assess(identifier):
                     file.is_file() and file.suffix.lower().lstrip(".") in extensions.split("|")
                     for file in folder.rglob("*")
                 )
-                if has_games and core != "dolphin" and not (cores / (core + "_libretro.dylib")).is_file():
+                if has_games and core not in STANDALONE and not (cores / (core + "_libretro.dylib")).is_file():
                     notes.append(f"Missing host core for ROMs/{system}: {core}. Install using RetroArch Core Downloader.")
         elif root.exists() and any(root.iterdir()):
             issues.append("Existing folder has no setup manifest; it will not be overwritten.")
@@ -313,6 +334,61 @@ def copy_bundle_contents(source, directory_fd):
         else:
             raise SetupError("Unsupported file in portable app: " + str(entry))
 
+def stage_current_app(directory):
+    app = PROJECT.parent.parent
+    if app.name != "CouchCube.app" or not (app / "Contents/Info.plist").is_file():
+        raise SetupError("Open the built Couch Cube app to copy it to an SSD.")
+    reject_symlinks(app)
+    run(["/usr/bin/codesign", "--verify", "--deep", "--strict", str(app)])
+    for path in app.rglob("*"):
+        if path.is_symlink() and not path.resolve().is_relative_to(app.resolve()):
+            raise SetupError("App contains an escaping symbolic link; no disk changes made.")
+    target = directory / app.name
+    run(["/usr/bin/ditto", str(app), str(target)])
+    run(["/usr/bin/codesign", "--verify", "--deep", "--strict", str(target)])
+    return target
+
+
+def copy_app_to_storage(choice, source):
+    if choice["mode"] != "portable":
+        raise SetupError("Choose an external SSD for a portable app copy.")
+    current = select_drive(choice["id"])
+    if any(current[key] != choice[key] for key in ["uuid", "mount", "root"]):
+        raise SetupError("SSD identity changed. Nothing copied.")
+    destination = Path(choice["mount"]) / source.name
+    reject_symlinks(destination)
+    if destination.exists():
+        raise SetupError("CouchCube.app already exists on this SSD. It will not be overwritten.")
+    directory_fd = os.open(choice["mount"], os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    temporary_name = ".couch-cube-copy-" + uuid.uuid4().hex
+    try:
+        os.mkdir(temporary_name, dir_fd=directory_fd)
+        temporary_fd = os.open(temporary_name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=directory_fd)
+        try:
+            os.mkdir(source.name, dir_fd=temporary_fd)
+            app_fd = os.open(source.name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=temporary_fd)
+            try:
+                copy_bundle_contents(source, app_fd)
+            finally:
+                os.close(app_fd)
+            current = select_drive(choice["id"])
+            if any(current[key] != choice[key] for key in ["uuid", "mount", "root"]):
+                raise SetupError("SSD disconnected or changed during copy.")
+            copied = Path(choice["mount"]) / temporary_name / source.name
+            if copied.parent.stat().st_ino != os.fstat(temporary_fd).st_ino or copied.parent.stat().st_dev != os.fstat(temporary_fd).st_dev:
+                raise SetupError("Copy directory identity changed.")
+            run(["/usr/bin/codesign", "--verify", "--deep", "--strict", str(copied)])
+            current = select_drive(choice["id"])
+            if destination.exists() or any(current[key] != choice[key] for key in ["uuid", "mount", "root"]):
+                raise SetupError("Destination changed before copy completed.")
+            os.rename(source.name, destination.name, src_dir_fd=temporary_fd, dst_dir_fd=directory_fd)
+        finally:
+            os.close(temporary_fd)
+        os.rmdir(temporary_name, dir_fd=directory_fd)
+    finally:
+        os.close(directory_fd)
+    print(f"Couch Cube copied to {destination}. Open that copy on the SSD; no files were erased.", flush=True)
+
 
 def prepare_portable(device, token, confirmation, confirm):
     if not confirm or confirmation != "ERASE " + device:
@@ -324,9 +400,9 @@ def prepare_portable(device, token, confirmation, confirm):
         staging = Path(temporary)
         if device in physical_stores(disk_info(enclosing_mount(staging))):
             raise SetupError("Download staging relies on the selected disk. Nothing erased.")
-        print("Downloading and verifying the latest portable app before erasing anything...", flush=True)
-        app = release_tools().stage(staging, run)
-        # erase_external revalidates the original reviewed identity after download.
+        print("Staging and verifying this app before erasing anything. No download needed.", flush=True)
+        app = stage_current_app(staging)
+        # Revalidate the reviewed drive identity after staging the app.
         erase_external(device, token, confirmation, confirm)
         post_erase = format_plan(device)
         for key in ["tree", "size", "model", "protocol"]:
@@ -552,10 +628,12 @@ def app_files(name, action, root, identifier=None):
     }
 
 
-def generated_files(storage, registrations):
+def generated_files(storage, registrations, systems=None):
     root = storage.root
     custom = ET.Element("systemList")
     for system, (name, extensions, _) in SYSTEMS.items():
+        if systems is not None and system not in systems:
+            continue
         entry = ET.SubElement(custom, "system")
         fields = {
             "name": system, "fullname": name, "path": f"%ROMPATH%/{system}",
@@ -584,6 +662,10 @@ def generated_files(storage, registrations):
             b'savefiles_in_content_dir = "false"\n'
             b'savestates_in_content_dir = "false"\n', False),
     }
+    if systems is not None:
+        for system in SYSTEMS:
+            if system not in systems and storage.target("ROMs/" + system).is_dir():
+                files[f"ROMs/{system}/noload.txt"] = (b"Disabled by Couch Cube. Re-enable in Consoles.\n", False)
     files["Config/steam-shortcuts.txt"] = (
         ("Steam > Games > Add a Non-Steam Game > Browse. Add these .app bundles:\n\n"
          + "\n".join(str(root / "Launchers" / (name + ".app")) for name in
@@ -610,12 +692,16 @@ def settings_content(storage):
     matches = root.findall("./string[@name='ROMDirectory']")
     setting = matches[0] if matches else ET.SubElement(root, "string", {"name": "ROMDirectory"})
     setting.set("value", str(storage.root / "ROMs"))
+    parse_only = root.find("./bool[@name='ParseGamelistOnly']")
+    if parse_only is None:
+        parse_only = ET.SubElement(root, "bool", {"name": "ParseGamelistOnly"})
+    parse_only.set("value", "false")
     # ES-DE 3.x uses sibling XML elements, not a standard XML document root.
     return b'<?xml version="1.0"?>\n' + b"\n".join(ET.tostring(child, encoding="utf-8") for child in root) + b"\n"
 
 
 def refresh_generated(storage, state):
-    files = generated_files(storage, state.get("games", []))
+    files = generated_files(storage, state.get("games", []), selected_systems(state))
     settings = settings_content(storage)
     managed = state.get("managed", {})
     for relative, (content, _) in files.items():
@@ -625,6 +711,17 @@ def refresh_generated(storage, state):
             wanted = hashlib.sha256(content).hexdigest()
             if actual != managed.get(relative) and actual != wanted:
                 raise SetupError(f"Preserving modified/unmanaged file: {path}. Move it aside before rerunning.")
+    disabled_markers = [key for key in managed if re.fullmatch(r"ROMs/[^/]+/noload\.txt", key) and key not in files]
+    for relative in disabled_markers:
+        path = storage.target(relative)
+        if path.exists() and hashlib.sha256(path.read_bytes()).hexdigest() != managed[relative]:
+            raise SetupError("Preserving modified console visibility marker: " + str(path))
+    for relative in disabled_markers:
+        storage.check()
+        path = storage.target(relative)
+        if path.exists():
+            path.unlink()
+        del managed[relative]
     for relative, (content, executable) in files.items():
         storage.write(relative, content, executable)
         managed[relative] = hashlib.sha256(content).hexdigest()
@@ -632,13 +729,38 @@ def refresh_generated(storage, state):
     storage.write(MARKER, json_text(state))
     storage.write("Frontend/ES-DE/settings/es_settings.xml", settings)
 
+def select_systems(storage, systems):
+    if len(set(systems)) != len(systems) or any(system not in SYSTEMS for system in systems):
+        raise SetupError("Unknown or duplicate console selection.")
+    state = read_json(storage.target(MARKER))
+    state["systems"] = systems
+    for system in systems:
+        storage.mkdir("ROMs/" + system)
+    refresh_generated(storage, state)
+    print("Console selection saved. Existing ROMs and saves were kept.", flush=True)
 
-def initialize(storage):
+
+def systems_status(storage=None):
+    enabled = selected_systems(read_json(storage.target(MARKER))) if storage else []
+    return [{"id": key, "name": name, "enabled": key in enabled,
+             "package": core if core in STANDALONE else "retroarch-metal",
+             "requirement": ("Own console keys/firmware; bring your own compatible macOS emulator. Not automatically downloaded."
+                             if key == "switch" else
+                             "Sony firmware installed in RPCS3; game compatibility varies." if key == "ps3" else
+                             "Your own PS2 BIOS. Current Homebrew build may require Rosetta." if key == "ps2" else
+                             "Your own games; configure controllers in Cemu." if key == "wiiu" else
+                             "Dolphin; configure controllers in the emulator." if core == "dolphin" else
+                             f"RetroArch core: {core}. Some systems need your own BIOS.")}
+            for key, (name, _, core) in SYSTEMS.items()]
+
+
+def initialize(storage, systems=None):
     storage.check()
     marker = storage.target(MARKER)
     if storage.root.exists() and not marker.exists() and any(storage.root.iterdir()):
         raise SetupError(f"Preserving existing unrecognized folder: {storage.root}. Rename it or choose another drive.")
-    state = read_json(marker) if marker.exists() else {"version": 1, "games": [], "managed": {}}
+    state = read_json(marker) if marker.exists() else {
+        "version": 1, "games": [], "managed": {}, "systems": systems if systems is not None else []}
     if state.get("version") != 1:
         raise SetupError("Unsupported setup version; preserving existing data.")
     if state.get("uuid", storage.choice["uuid"]) != storage.choice["uuid"]:
@@ -654,7 +776,7 @@ def initialize(storage):
         "Native/Games", "Native/Assets", "Windows/Wrappers", "Windows/Installers",
         "Frontend", "Config", "Runtime", "Launchers",
     ]
-    folders += ["ROMs/" + system for system in SYSTEMS]
+    folders += ["ROMs/" + system for system in selected_systems(state)]
     for folder in folders:
         storage.mkdir(folder)
     refresh_generated(storage, state)
@@ -673,6 +795,8 @@ def install_packages(packages):
         return
     if any(item not in PACKAGES for item in packages):
         raise SetupError("Unknown package selection.")
+    if any(item in MANUAL_APPS for item in packages):
+        raise SetupError("This emulator requires a manual macOS installation. Open its download page in Apps.")
     brew = find_brew()
     installed = run([brew, "list", "--cask"], stdout=subprocess.PIPE, text=True).stdout.splitlines()
     for package in packages:
@@ -681,6 +805,67 @@ def install_packages(packages):
             continue
         print(f"Installing host component: {package}", flush=True)
         run([brew, "install", "--cask", package])
+
+def app_status(check_updates=False):
+    brew = None
+    try:
+        brew = find_brew()
+    except SetupError:
+        pass
+    managed = {}
+    if brew:
+        info = json.loads(run([brew, "info", "--json=v2", "--cask", "--installed"],
+                              stdout=subprocess.PIPE, text=True).stdout)
+        managed = {item["token"]: item for item in info.get("casks", [])}
+    outdated = {}
+    if check_updates:
+        if not brew:
+            raise SetupError("Install Homebrew to check updates for Homebrew-managed apps.")
+        info = json.loads(run([brew, "outdated", "--cask", "--greedy", "--json=v2"],
+                              stdout=subprocess.PIPE, text=True).stdout)
+        outdated = {item["name"]: item.get("current_version", "") for item in info.get("casks", [])}
+    result = []
+    for key, name in PACKAGES.items():
+        paths = [base / name for base in [Path("/Applications"), Path.home() / "Applications"]]
+        path = next((path for path in paths if path.is_dir()), None)
+        version = ""
+        if path:
+            with (path / "Contents/Info.plist").open("rb") as file:
+                plist = plistlib.load(file)
+            version = str(plist.get("CFBundleShortVersionString", plist.get("CFBundleVersion", "Unknown")))
+        result.append({"id": key, "name": name.removesuffix(".app"), "installed": path is not None,
+                       "path": str(path) if path else "", "version": version,
+                       "brew": brew is not None,
+                       "managed": key in managed, "update": outdated.get(key),
+                       "manual": key in MANUAL_APPS, "url": MANUAL_APPS.get(key)})
+    return result
+
+
+def manage_app(package, action, confirm=False):
+    if not confirm or package not in PACKAGES or action not in {"install", "update", "remove"}:
+        raise SetupError("A known app, valid action and explicit confirmation are required.")
+    if action == "install":
+        install_packages([package])
+        return
+    status = next(item for item in app_status() if item["id"] == package)
+    if not status["managed"]:
+        raise SetupError("This app is not managed by Homebrew. Use Finder to move the app to Trash; preferences and games are kept.")
+    run([find_brew(), "upgrade" if action == "update" else "uninstall", "--cask", package])
+    print("App " + ("updated." if action == "update" else "removed. Games and preferences were kept."), flush=True)
+
+
+def cleanup_host(confirm):
+    if not confirm:
+        raise SetupError("Removing Couch Cube settings requires explicit confirmation.")
+    login_launcher(True, enabled=False)
+    reject_symlinks(HOST_CONFIG)
+    if HOST_CONFIG.is_file():
+        HOST_CONFIG.unlink()
+    log_path = Path.home() / "Library/Logs/Couch Cube/auto-launch.log"
+    reject_symlinks(log_path)
+    if log_path.is_file():
+        log_path.unlink()
+    print("Couch Cube login entry and local settings removed. Game folders, saves and other apps were kept.")
 
 
 def save_host_config(choice):
@@ -761,7 +946,8 @@ def launch(storage, action, identifier=None):
         state = read_json(storage.target(MARKER))
         refresh_generated(storage, state)
         binary = app_binary("ES-DE.app")
-        run([str(binary), "--home", str(storage.root / "Frontend")])
+        run(["/usr/bin/open", "-a", str(binary.parent.parent.parent),
+             "--args", "--home", str(storage.root / "Frontend")])
     elif action == "launch":
         games = read_json(storage.target(MARKER))["games"]
         matches = [game for game in games if game["id"] == identifier]
@@ -779,9 +965,19 @@ def emulate(storage, system, rom):
     if not path.is_relative_to(storage.root / "ROMs" / system) or not path.is_file():
         raise SetupError("ROM must be a file in the selected system's ROM folder.")
     core = SYSTEMS[system][2]
+    enabled = selected_systems(read_json(storage.target(MARKER)))
+    if system not in enabled:
+        raise SetupError("This console is disabled. Enable it in Couch Cube > Consoles.")
     if core == "dolphin":
         binary = app_binary("Dolphin.app")
         args = [str(binary), "-b", "-e", str(path), "-u", str(storage.root / "Saves/Dolphin")]
+    elif core in STANDALONE:
+        binary = app_binary(PACKAGES[core])
+        flags = {"pcsx2": ["-fullscreen", "-batch", str(path)],
+                 "rpcs3": ["--no-gui", str(path)],
+                 "cemu-wiiu": ["-f", "-g", str(path)],
+                 "switch": ["-f", str(path)]}
+        args = [str(binary)] + flags[core]
     else:
         binary = app_binary("RetroArch.app")
         core_path = Path.home() / "Library/Application Support/RetroArch/cores" / (core + "_libretro.dylib")
@@ -928,6 +1124,19 @@ def main():
     sub.add_parser("disks")
     sub.add_parser("update-check")
     sub.add_parser("login-status")
+    sub.add_parser("system-catalog")
+    apps = sub.add_parser("apps")
+    apps.add_argument("--updates", action="store_true")
+    manage = sub.add_parser("manage-app")
+    manage.add_argument("--package", choices=list(PACKAGES), required=True)
+    manage.add_argument("--action", choices=["install", "update", "remove"], required=True)
+    manage.add_argument("--confirm", action="store_true")
+    cleanup = sub.add_parser("cleanup-host")
+    cleanup.add_argument("--confirm", action="store_true")
+    systems = sub.add_parser("systems")
+    systems.add_argument("--root", required=True)
+    systems.add_argument("--enabled", nargs="*", choices=list(SYSTEMS))
+    systems.add_argument("--confirm", action="store_true")
     install = sub.add_parser("install-apps")
     install.add_argument("--confirm", action="store_true")
     install.add_argument("--packages", nargs="+", choices=list(PACKAGES), required=True)
@@ -946,6 +1155,9 @@ def main():
     installer.add_argument("--drive", required=True)
     installer.add_argument("--source", required=True)
     installer.add_argument("--confirm", action="store_true")
+    copy_app = sub.add_parser("copy-app")
+    copy_app.add_argument("--drive", required=True)
+    copy_app.add_argument("--confirm", action="store_true")
     login = sub.add_parser("login")
     login.add_argument("--confirm", action="store_true")
     login.add_argument("--disable", action="store_true")
@@ -979,6 +1191,22 @@ def main():
             print(json_text(release_tools().latest()))
         elif args.command == "login-status":
             print(json_text(login_status()))
+        elif args.command == "system-catalog":
+            print(json_text(systems_status()))
+        elif args.command == "apps":
+            print(json_text(app_status(args.updates)))
+        elif args.command == "manage-app":
+            manage_app(args.package, args.action, args.confirm)
+        elif args.command == "cleanup-host":
+            cleanup_host(args.confirm)
+        elif args.command == "systems":
+            storage = configured_storage(args.root)
+            if args.enabled is not None:
+                if not args.confirm:
+                    raise SetupError("Changing console selection requires explicit confirmation.")
+                select_systems(storage, args.enabled)
+            else:
+                print(json_text(systems_status(storage)))
         elif args.command == "install-apps":
             if not args.confirm:
                 raise SetupError("No apps installed. Explicit --confirm consent is required.")
@@ -996,6 +1224,13 @@ def main():
             if not args.confirm:
                 raise SetupError("Installer copying requires explicit --confirm.")
             copy_installer(Storage(select_drive(args.drive)), args.source)
+        elif args.command == "copy-app":
+            if not args.confirm:
+                raise SetupError("Copying this app requires explicit confirmation.")
+            choice = select_drive(args.drive)
+            with tempfile.TemporaryDirectory(prefix="couch-cube-app-") as directory:
+                app = stage_current_app(Path(directory))
+                copy_app_to_storage(choice, app)
         elif args.command == "login":
             login_launcher(args.confirm, not args.disable, args.delay, args.root)
         elif args.command == "setup":

@@ -33,7 +33,7 @@ class StorageTests(unittest.TestCase):
         self.storage = console.Storage(self.choice)
 
     def initialize(self):
-        return console.initialize(self.storage)
+        return console.initialize(self.storage, systems=list(console.SYSTEMS))
 
     def test_setup_preserves_roms_and_repeated_runs(self):
         self.initialize()
@@ -71,6 +71,55 @@ class StorageTests(unittest.TestCase):
         import shlex
         self.assertEqual(shlex.split(output.getvalue()),
                          ["BIOS_ROOT=" + str(self.storage.root / "BIOS/retroarch")])
+
+    def test_new_library_starts_with_no_consoles_or_unwanted_folders(self):
+        state = console.initialize(self.storage)
+        self.assertEqual(state["systems"], [])
+        self.assertEqual(list((self.storage.root / "ROMs").iterdir()), [])
+
+    def test_console_selection_includes_switch_and_preserves_disabled_games(self):
+        self.initialize()
+        rom = self.storage.root / "ROMs/snes/mine.sfc"
+        rom.write_bytes(b"own game")
+        console.select_systems(self.storage, ["gc", "wii", "wiiu", "ps2", "ps3", "switch"])
+        state = console.read_json(self.storage.root / console.MARKER)
+        self.assertIn("switch", state["systems"])
+        self.assertTrue((rom.parent / "noload.txt").exists())
+        config = ET.parse(self.storage.root / "Frontend/ES-DE/custom_systems/es_systems.xml")
+        self.assertEqual({item.findtext("name") for item in config.findall("system")}, set(state["systems"]))
+        console.select_systems(self.storage, state["systems"] + ["snes"])
+        self.assertFalse((rom.parent / "noload.txt").exists())
+        self.assertEqual(rom.read_bytes(), b"own game")
+
+    def test_console_selection_preserves_customized_files_and_manifest(self):
+        self.initialize()
+        marker = (self.storage.root / console.MARKER).read_bytes()
+        custom = self.storage.root / "Frontend/ES-DE/custom_systems/es_systems.xml"
+        custom.write_text("user customized")
+        with self.assertRaisesRegex(console.SetupError, "Preserving"):
+            console.select_systems(self.storage, ["gc"])
+        self.assertEqual(custom.read_text(), "user customized")
+        self.assertEqual((self.storage.root / console.MARKER).read_bytes(), marker)
+
+    def test_ps2_launch_does_not_require_retroarch(self):
+        self.initialize()
+        rom = self.storage.root / "ROMs/ps2/mine.iso"
+        rom.write_bytes(b"own dump")
+        with patch.object(console, "app_binary", return_value=Path("/pcsx2")) as binary, \
+                patch.object(console, "run") as run:
+            console.emulate(self.storage, "ps2", str(rom))
+        binary.assert_called_once_with("PCSX2.app")
+        run.assert_called_once_with(["/pcsx2", "-fullscreen", "-batch", str(rom)])
+
+    def test_disabled_console_refuses_launch(self):
+        self.initialize()
+        rom = self.storage.root / "ROMs/gc/mine.iso"
+        rom.write_bytes(b"own dump")
+        console.select_systems(self.storage, [])
+        with patch.object(console, "run") as run:
+            with self.assertRaisesRegex(console.SetupError, "disabled"):
+                console.emulate(self.storage, "gc", str(rom))
+            run.assert_not_called()
 
     def test_modified_generated_file_preserved(self):
         self.initialize()
@@ -304,6 +353,17 @@ class StorageTests(unittest.TestCase):
             (bios / name).write_bytes(b"fixture")
         result = subprocess.run(["bash", str(project / "scripts/check-bios.sh")], env=env, capture_output=True, text=True)
         self.assertEqual(result.returncode, 0)
+
+
+class CatalogTests(unittest.TestCase):
+    def test_catalog_needs_no_library_or_app_installation(self):
+        with patch.object(console, "read_json") as read, patch.object(console, "app_binary") as app:
+            catalog = console.systems_status()
+        read.assert_not_called()
+        app.assert_not_called()
+        self.assertEqual({system["id"] for system in catalog}, set(console.SYSTEMS))
+        self.assertFalse(any(system["enabled"] for system in catalog))
+        self.assertEqual(next(system["package"] for system in catalog if system["id"] == "switch"), "switch")
 
 
 class DriveTests(unittest.TestCase):

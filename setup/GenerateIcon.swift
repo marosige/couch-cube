@@ -9,101 +9,52 @@ if CommandLine.arguments.count == 4 && CommandLine.arguments[1] == "--set-file-i
     exit(0)
 }
 
-func rounded(_ rect: NSRect, _ radius: CGFloat, _ color: NSColor) {
-    color.setFill()
+func color(_ hex: UInt32) -> NSColor {
+    NSColor(calibratedRed: CGFloat((hex >> 16) & 255) / 255,
+            green: CGFloat((hex >> 8) & 255) / 255,
+            blue: CGFloat(hex & 255) / 255, alpha: 1)
+}
+
+func rounded(_ rect: NSRect, _ radius: CGFloat, _ fill: NSColor) {
+    fill.setFill()
     NSBezierPath(roundedRect: rect, xRadius: radius, yRadius: radius).fill()
 }
 
 func drawIcon() {
-    let backdrop = NSBezierPath(roundedRect: NSRect(x: 16, y: 16, width: 992, height: 992), xRadius: 210, yRadius: 210)
-    NSColor(calibratedRed: 0.53, green: 0.67, blue: 0.64, alpha: 1).setFill()
-    backdrop.fill()
-
     NSGraphicsContext.saveGraphicsState()
-    backdrop.addClip()
-    NSColor(calibratedRed: 0.78, green: 0.59, blue: 0.36, alpha: 1).setFill()
-    NSRect(x: 16, y: 16, width: 992, height: 111).fill()
-    NSGraphicsContext.restoreGraphicsState()
-    let shadow = NSShadow()
-    shadow.shadowColor = NSColor.black.withAlphaComponent(0.22)
-    NSGraphicsContext.saveGraphicsState()
-    NSAffineTransform(transform: AffineTransform(m11: 1.22, m12: 0, m21: 0, m22: 1.22,
-                                                 tX: -112.64, tY: -69.8)).concat()
-    NSGraphicsContext.saveGraphicsState()
-    shadow.shadowBlurRadius = 14
-    shadow.shadowOffset = NSSize(width: 0, height: -6)
-    shadow.set()
-    rounded(NSRect(x: 154, y: 390, width: 716, height: 413), 46,
-            NSColor(calibratedWhite: 0.10, alpha: 1))
-    NSGraphicsContext.restoreGraphicsState()
-    let screen = NSBezierPath(roundedRect: NSRect(x: 166, y: 402, width: 692, height: 389.25),
-                             xRadius: 34, yRadius: 34)
-    NSColor.black.setFill()
-    screen.fill()
-    if CommandLine.arguments.contains("--installer") {
-        rounded(NSRect(x: 496, y: 640, width: 32, height: 70), 5, .systemBlue)
-        NSColor.systemBlue.setFill()
-        let arrow = NSBezierPath()
-        arrow.move(to: NSPoint(x: 464, y: 645))
-        arrow.line(to: NSPoint(x: 512, y: 590))
-        arrow.line(to: NSPoint(x: 560, y: 645))
-        arrow.close()
-        arrow.fill()
-        rounded(NSRect(x: 464, y: 550, width: 96, height: 12), 6, .systemBlue)
-    }
-    rounded(NSRect(x: 507, y: 394, width: 10, height: 2), 1,
-            NSColor.white.withAlphaComponent(0.5))
-    NSGraphicsContext.restoreGraphicsState()
-
-    NSGraphicsContext.saveGraphicsState()
-    NSAffineTransform(transform: AffineTransform(m11: 2.8, m12: 0, m21: 0, m22: 2.8,
-                                                 tX: -1500, tY: -620.6)).concat()
-    rounded(NSRect(x: 755, y: 267, width: 100, height: 9), 4,
-            NSColor(calibratedWhite: 0.23, alpha: 1))
-    let mini = NSBezierPath(roundedRect: NSRect(x: 744, y: 276, width: 122, height: 54),
-                           xRadius: 18, yRadius: 18)
-    NSColor(calibratedWhite: 0.78, alpha: 1).setFill()
-    mini.fill()
-    rounded(NSRect(x: 748, y: 320, width: 114, height: 12), 6,
-            NSColor(calibratedWhite: 0.92, alpha: 1))
-    for x in [CGFloat(776), CGFloat(801)] {
-        rounded(NSRect(x: x, y: 291, width: 12, height: 5), 2, .darkGray)
-    }
-    rounded(NSRect(x: 836, y: 291, width: 4, height: 4), 2, .white)
-    if CommandLine.arguments.contains("--portable") {
-        let cable = NSBezierPath()
-        cable.move(to: NSPoint(x: 782, y: 293.5))
-        cable.curve(to: NSPoint(x: 751, y: 319),
-                    controlPoint1: NSPoint(x: 770, y: 298),
-                    controlPoint2: NSPoint(x: 769, y: 321))
-        cable.curve(to: NSPoint(x: 721, y: 282),
-                    controlPoint1: NSPoint(x: 733, y: 317),
-                    controlPoint2: NSPoint(x: 740, y: 282))
-        cable.lineWidth = 5
-        cable.lineCapStyle = .round
-        NSColor(calibratedWhite: 0.16, alpha: 1).setStroke()
-        cable.stroke()
-        rounded(NSRect(x: 776, y: 291, width: 12, height: 5), 2,
-                NSColor(calibratedWhite: 0.65, alpha: 1))
-        rounded(NSRect(x: 774, y: 287.5, width: 16, height: 12), 4,
-                NSColor(calibratedWhite: 0.22, alpha: 1))
-        NSGraphicsContext.saveGraphicsState()
-        let placement = AffineTransform(translationByX: 665, byY: 282)
-        (placement as NSAffineTransform).concat()
-        rounded(NSRect(x: -54, y: -15, width: 108, height: 7), 3,
-                NSColor.black.withAlphaComponent(0.16))
-        let enclosure = NSBezierPath(roundedRect: NSRect(x: -54, y: -10, width: 108, height: 18),
-                                     xRadius: 6, yRadius: 6)
-        NSGradient(starting: NSColor(calibratedRed: 0.39, green: 0.45, blue: 0.48, alpha: 1),
-                   ending: NSColor(calibratedRed: 0.20, green: 0.25, blue: 0.28, alpha: 1))!
-            .draw(in: enclosure, angle: -90)
-        rounded(NSRect(x: -49, y: 5, width: 98, height: 3), 1.5,
-                NSColor.white.withAlphaComponent(0.3))
-        rounded(NSRect(x: 48, y: -4, width: 12, height: 8), 3,
-                NSColor(calibratedWhite: 0.20, alpha: 1))
-        rounded(NSRect(x: -39, y: 5, width: 4, height: 2), 1,
-                NSColor(calibratedRed: 0.49, green: 0.86, blue: 0.89, alpha: 1))
-        NSGraphicsContext.restoreGraphicsState()
+    NSAffineTransform(transform: AffineTransform(m11: 1, m12: 0, m21: 0, m22: -1, tX: 0, tY: 1024)).concat()
+    rounded(NSRect(x: 16, y: 16, width: 992, height: 992), 218, color(0x28334B))
+    rounded(NSRect(x: 206, y: 245, width: 612, height: 590), 148, color(0x1C2538))
+    rounded(NSRect(x: 206, y: 189, width: 612, height: 590), 148, color(0x8FD9CC))
+    rounded(NSRect(x: 242, y: 215, width: 540, height: 126), 100, color(0xB6EBDD))
+    rounded(NSRect(x: 206, y: 291, width: 612, height: 488), 122, color(0x8FD9CC))
+    let ink = color(0x28334B)
+    rounded(NSRect(x: 310, y: 420, width: 190, height: 64), 20, ink)
+    rounded(NSRect(x: 373, y: 357, width: 64, height: 190), 20, ink)
+    rounded(NSRect(x: 597, y: 382, width: 70, height: 70), 35, ink)
+    rounded(NSRect(x: 681, y: 466, width: 70, height: 70), 35, ink)
+    rounded(NSRect(x: 337, y: 652, width: 222, height: 18), 9, color(0x4B9D94))
+    rounded(NSRect(x: 674, y: 646, width: 30, height: 30), 15, color(0xF4F7EE))
+    if CommandLine.arguments.contains("--portable") || CommandLine.arguments.contains("--installer") {
+        rounded(NSRect(x: 648, y: 680, width: 292, height: 250), 70, color(0x28334B))
+        rounded(NSRect(x: 670, y: 702, width: 248, height: 206), 52, color(0xF4F7EE))
+        if CommandLine.arguments.contains("--portable") {
+            rounded(NSRect(x: 719, y: 752, width: 150, height: 100), 24, ink)
+            rounded(NSRect(x: 739, y: 812, width: 66, height: 10), 5, color(0x8FD9CC))
+            rounded(NSRect(x: 832, y: 809, width: 16, height: 16), 8, color(0x8FD9CC))
+        } else {
+            rounded(NSRect(x: 780, y: 740, width: 28, height: 82), 10, ink)
+            let arrow = NSBezierPath()
+            arrow.move(to: NSPoint(x: 744, y: 790))
+            arrow.line(to: NSPoint(x: 794, y: 840))
+            arrow.line(to: NSPoint(x: 844, y: 790))
+            arrow.lineWidth = 28
+            arrow.lineJoinStyle = .round
+            arrow.lineCapStyle = .round
+            ink.setStroke()
+            arrow.stroke()
+            rounded(NSRect(x: 737, y: 862, width: 114, height: 12), 6, ink)
+        }
     }
     NSGraphicsContext.restoreGraphicsState()
 }

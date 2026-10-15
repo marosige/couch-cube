@@ -1,4 +1,4 @@
-name: Build portable releases
+name: Build Couch Cube installer
 on:
   push:
     tags:
@@ -29,15 +29,12 @@ jobs:
         run: '[[ "$RELEASE_TAG" =~ ^v0\.3\.0-alpha\.[0-9]+$ ]]'
       - run: /usr/bin/python3 -B -m unittest discover -s tests -q
       - run: bash scripts/package-release.sh
-      - run: /usr/bin/python3 -B scripts/verify-release.py build/CouchCube-0.3.0-arm64.dmg build/CouchCube-0.3.0-arm64.zip
+      - run: /usr/bin/python3 -B scripts/verify-release.py build/CouchCube-0.3.0-arm64.dmg
       - uses: actions/upload-artifact@v4
         with:
           name: CouchCube-arm64
           path: |
             build/*.dmg
-            build/*.dmg.sha256
-            build/*.zip
-            build/*.zip.sha256
   publish-release:
     if: github.event_name == 'push' || inputs.publish_draft
     needs: dmg
@@ -60,12 +57,12 @@ jobs:
             [[ "$RELEASE_TAG" =~ ^v0\.3\.0-alpha\.[0-9]+$ ]]
             gh release create "$RELEASE_TAG" --verify-tag --prerelease --latest=false \
               --title "Couch Cube ${RELEASE_TAG#v} (Apple Silicon)" \
-              --notes "Early alpha for Apple Silicon Macs running macOS 13+. Internal app version: 0.3.0. DMG: drag CouchCube.app to Applications. Portable ZIP: extract onto your SSD. Includes native guided setup, explicit installed-app status, Steam storage guidance, and ES-DE fallback when Steam is absent. Ad-hoc signed, not notarized: macOS may require explicit approval in Privacy & Security. No games, BIOS or Steam sign-in included. Steam storage and shortcuts are configured manually. Automatic console mode is opt-in; physical login/controller hotplug is not yet verified. In-app release discovery and SSD preparation require a stable release and do not use this alpha. Back up data before testing; avoid SSD erasure in this alpha." \
-              artifacts/*.dmg artifacts/*.zip artifacts/*.sha256
+              --notes "Early alpha for Apple Silicon Macs running macOS 13+. One download: open the DMG and drag CouchCube.app to Applications. For an SSD, open Setup in the app to copy this app or explicitly prepare a new drive. Internal app version: 0.3.0. Ad-hoc signed, not notarized: macOS may require explicit approval in Privacy & Security. No games, BIOS, firmware or keys included. Steam storage and shortcuts are configured manually. Switch emulator setup is manual with no verified automatic download. Back up data before testing. Physical SSD erase and login/controller hotplug have not been exercised on a test Mac." \
+              artifacts/*.dmg
           else
             test "$RELEASE_TAG" = v0.3.0
             gh release create "$RELEASE_TAG" --verify-tag --draft \
               --title "Couch Cube 0.3.0 (Apple Silicon)" \
               --notes "Apple Silicon macOS 13+. Ad-hoc signed; not notarized. See README for storage and SSD-preparation limitations." \
-              artifacts/*.dmg artifacts/*.zip artifacts/*.sha256
+              artifacts/*.dmg
           fi
