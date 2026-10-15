@@ -151,19 +151,20 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate {
             stack.bottomAnchor.constraint(equalTo: window.contentView!.bottomAnchor, constant: -24)
         ])
         let title = NSTextField(labelWithString: "Couch Cube")
-        title.font = .systemFont(ofSize: 24, weight: .bold)
+        title.font = .systemFont(ofSize: 22, weight: .semibold)
         let icon = NSImageView(image: NSImage(contentsOf: Bundle.main.resourceURL!.appendingPathComponent("Console.icns"))!)
         icon.setAccessibilityLabel("TV and Mac mini on an oak console")
-        icon.widthAnchor.constraint(equalToConstant: 64).isActive = true
-        icon.heightAnchor.constraint(equalToConstant: 64).isActive = true
+        icon.widthAnchor.constraint(equalToConstant: 56).isActive = true
+        icon.heightAnchor.constraint(equalToConstant: 56).isActive = true
         icon.imageScaling = .scaleProportionallyUpOrDown
         let headings = column([
             title,
-            text("Turn your Mac into a couch console.", size: 15),
-            text("Connect up to 4 controllers and play on the big screen in supported games.", size: 13, secondary: true)
+            text("Your Mac. Your games. Your couch.", size: 13, secondary: true)
         ])
+        headings.spacing = 4
         let header = row([icon, headings])
-        headings.widthAnchor.constraint(equalTo: header.widthAnchor, constant: -74).isActive = true
+        header.spacing = 14
+        headings.widthAnchor.constraint(equalTo: header.widthAnchor, constant: -70).isActive = true
         stack.addArrangedSubview(header)
         modeLabel.font = .systemFont(ofSize: 10, weight: .semibold)
         modeLabel.textColor = .secondaryLabelColor
@@ -619,11 +620,11 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate {
         tabs.selectTabViewItem(at: index)
         navigationBar.isHidden = onboarding || index >= 3
         playerContinue.isHidden = !onboarding
-        journey.isHidden = !onboarding
+        journey.isHidden = !onboarding || index == 3
         storageNext.keyEquivalent = index == 4 ? "\r" : ""
         playerContinue.keyEquivalent = index == 1 && onboarding ? "\r" : ""
         switch index {
-        case 3: journey.stringValue = "LET'S GET STARTED"
+        case 3: journey.stringValue = ""
         case 4: journey.stringValue = "STEP 1 OF 3  ·  YOUR STORAGE"
         case 1: journey.stringValue = "STEP 2 OF 3  ·  YOUR GAME PLAYERS"
         case 5: journey.stringValue = "STEP 3 OF 3  ·  CONNECT & PLAY"

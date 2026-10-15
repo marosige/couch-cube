@@ -143,7 +143,7 @@ class FormatTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             mount = Path(temporary).resolve()
             choice = {"id": "new-volume", "uuid": "new-volume", "mode": "portable", "filesystem": "apfs",
-                      "mount": str(mount), "root": str(mount / "Mac Game Console")}
+                      "mount": str(mount), "root": str(mount / "Couch Cube")}
             events = []
             discovery_calls = []
             def drives():
@@ -173,7 +173,7 @@ class FormatTests(unittest.TestCase):
                 manager.prepare_portable("disk42", plan["token"], "ERASE disk42", True)
             self.assertEqual(events, ["download", "erase", "verify-copy"])
             self.assertEqual((mount / "CouchCube.app/fixture").read_text(), "verified release")
-            self.assertFalse((mount / "Mac Game Console").exists())
+            self.assertFalse((mount / "Couch Cube").exists())
 
     def test_no_mount_after_erase_never_substitutes_another_drive(self):
         plan = manager.format_plan("disk42")
@@ -194,7 +194,7 @@ class ManagementTests(unittest.TestCase):
         self.addCleanup(self.temporary.cleanup)
         self.base = Path(self.temporary.name).resolve()
         self.choice = {"id": "uuid", "uuid": "uuid", "mode": "portable", "filesystem": "apfs",
-                       "free": 100 * 1024 ** 3, "root": str(self.base / "Mac Game Console")}
+                       "free": 100 * 1024 ** 3, "root": str(self.base / "Couch Cube")}
         self.discovery = patch.object(manager, "drives", return_value=[self.choice])
         self.discovery.start()
         self.addCleanup(self.discovery.stop)

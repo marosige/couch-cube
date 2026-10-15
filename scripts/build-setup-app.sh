@@ -7,10 +7,11 @@ if [[ "$(uname -s)" != Darwin ]]; then
   echo "Build requires macOS and Apple Command Line Tools (xcode-select --install)." >&2
   exit 1
 fi
+bash "$ROOT/scripts/clean-build.sh"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources/scripts" "$APP/Contents/Resources/config" "$ROOT/build/module-cache"
 RUNTIME="$(bash "$ROOT/scripts/prepare-runtime.sh")"
 ditto "$RUNTIME" "$APP/Contents/Resources/python"
-bash "$ROOT/scripts/build-icons.sh"
+bash "$ROOT/scripts/build-icons.sh" --reuse-build
 cp "$ROOT/build/Console.icns" "$APP/Contents/Resources/Console.icns"
 xcrun swiftc -target arm64-apple-macos13.0 -swift-version 5 -module-cache-path "$ROOT/build/module-cache" \
   -framework AppKit "$ROOT/setup/ConsoleSetup.swift" -o "$APP/Contents/MacOS/ConsoleSetup"

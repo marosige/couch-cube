@@ -306,7 +306,7 @@ class DriveTests(unittest.TestCase):
             self.assertFalse(console.external_candidate(dict(info, Locked=True), path, {"disk4"}))
 
     def test_internal_choice_and_duplicate_mountpoint_lookup(self):
-        choice = {"id": "internal", "mode": "local", "uuid": "LOCAL", "root": "/Users/test/Games/Mac Game Console"}
+        choice = {"id": "internal", "mode": "local", "uuid": "LOCAL", "root": "/Users/test/Games/Couch Cube"}
         with patch.object(console, "drives", return_value=[choice]):
             self.assertEqual(console.select_drive("internal")["mode"], "local")
         with patch.object(console, "drives", return_value=[choice, choice]):
@@ -314,7 +314,7 @@ class DriveTests(unittest.TestCase):
                 console.select_drive("internal")
 
     def test_remounted_external_resolved_by_uuid(self):
-        choice = {"id": "VOL-1", "uuid": "VOL-1", "root": "/Volumes/Renamed SSD/Mac Game Console"}
+        choice = {"id": "VOL-1", "uuid": "VOL-1", "root": "/Volumes/Renamed SSD/Couch Cube"}
         with patch.object(console, "drives", return_value=[choice]):
             self.assertEqual(console.select_drive("VOL-1")["root"], choice["root"])
 

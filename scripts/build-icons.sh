@@ -1,6 +1,9 @@
 #!/bin/bash
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+if [[ "${1:-}" != "--reuse-build" ]]; then
+  bash "$ROOT/scripts/clean-build.sh"
+fi
 mkdir -p "$ROOT/build/module-cache"
 xcrun swiftc -target arm64-apple-macos13.0 -swift-version 5 -module-cache-path "$ROOT/build/module-cache" \
   -framework AppKit "$ROOT/setup/GenerateIcon.swift" -o "$ROOT/build/generate-icon"

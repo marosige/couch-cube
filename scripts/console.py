@@ -23,7 +23,7 @@ import xml.etree.ElementTree as ET
 PROJECT = Path(__file__).resolve().parent.parent
 HOST_CONFIG = Path.home() / "Library/Application Support/Mac Game Console/setup.json"
 MARKER = ".mac-game-console.json"
-FOLDER = "Mac Game Console"
+FOLDER = "Couch Cube"
 PACKAGES = {
     "steam": "Steam.app",
     "es-de": "ES-DE.app",
