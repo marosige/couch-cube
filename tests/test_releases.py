@@ -19,29 +19,29 @@ spec.loader.exec_module(releases)
 
 class ReleaseTests(unittest.TestCase):
     def setUp(self):
-        self.config = {"repository": "marosige/mac-couch-console", "version": "0.3.0",
-                       "asset_prefix": "MacCouchConsole", "app_name": "MacCouchConsole.app"}
+        self.config = {"repository": "marosige/couch-cube", "version": "0.3.0",
+                       "asset_prefix": "CouchCube", "app_name": "CouchCube.app"}
         self.configuration = patch.object(releases, "configuration", return_value=self.config)
         self.configuration.start()
         self.addCleanup(self.configuration.stop)
-        self.filename = "MacCouchConsole-0.4.0-arm64.zip"
+        self.filename = "CouchCube-0.4.0-arm64.zip"
         self.metadata = {"tag_name": "v0.4.0", "draft": False, "prerelease": False, "assets": [
             {"name": name, "browser_download_url":
-             "https://github.com/marosige/mac-couch-console/releases/download/v0.4.0/" + name}
+             "https://github.com/marosige/couch-cube/releases/download/v0.4.0/" + name}
             for name in [self.filename, self.filename + ".sha256"]
         ]}
 
     def archive(self, extra=None, app_version="0.4.0"):
         data = io.BytesIO()
         with zipfile.ZipFile(data, "w") as zipped:
-            zipped.writestr("MacCouchConsole.app/Contents/Info.plist", plistlib.dumps({
+            zipped.writestr("CouchCube.app/Contents/Info.plist", plistlib.dumps({
                 "CFBundleIdentifier": "org.macgameconsole.setup",
                 "CFBundleExecutable": "ConsoleSetup",
                 "CFBundleShortVersionString": app_version,
                 "LSMinimumSystemVersion": "13.0",
                 "MCCDistribution": "portable",
             }))
-            zipped.writestr("MacCouchConsole.app/Contents/MacOS/ConsoleSetup", b"fixture, never executed")
+            zipped.writestr("CouchCube.app/Contents/MacOS/ConsoleSetup", b"fixture, never executed")
             if extra:
                 zipped.writestr(*extra)
         return data.getvalue()
@@ -67,7 +67,7 @@ class ReleaseTests(unittest.TestCase):
             report = releases.latest()
         self.assertTrue(report["available"])
         self.assertEqual(report["version"], "0.4.0")
-        self.assertEqual(report["url"], "https://github.com/marosige/mac-couch-console/releases/tag/v0.4.0")
+        self.assertEqual(report["url"], "https://github.com/marosige/couch-cube/releases/tag/v0.4.0")
 
     def test_missing_asset_unexpected_url_and_prerelease_refused(self):
         for key, value in [("assets", []), ("prerelease", True), ("tag_name", "../../bad")]:
@@ -105,7 +105,7 @@ class ReleaseTests(unittest.TestCase):
             unused.run.assert_not_called()
 
     def test_path_traversal_and_escaping_symlink_never_extract(self):
-        symlink = zipfile.ZipInfo("MacCouchConsole.app/link")
+        symlink = zipfile.ZipInfo("CouchCube.app/link")
         symlink.create_system = 3
         symlink.external_attr = (stat.S_IFLNK | 0o777) << 16
         for extra in [("../outside", b"bad"), ("/absolute", b"bad"), (symlink, "../outside")]:

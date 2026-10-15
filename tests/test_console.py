@@ -162,7 +162,7 @@ class StorageTests(unittest.TestCase):
         self.assertEqual(json.loads(evidence.read_text()), ["retro", "--root", str(self.storage.root)])
 
     def test_portable_launcher_runs_after_volume_and_host_path_change(self):
-        app = self.storage.root.parent / "MacCouchConsole.app"
+        app = self.storage.root.parent / "CouchCube.app"
         python = app / "Contents/Resources/python/bin/python3"
         python.parent.mkdir(parents=True)
         # This temporary stand-in has no dependency on the old mount location.

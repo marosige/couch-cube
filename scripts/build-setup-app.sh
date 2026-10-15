@@ -1,7 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-APP="$ROOT/build/MacCouchConsole.app"
+APP="$ROOT/build/CouchCube.app"
 
 if [[ "$(uname -s)" != Darwin ]]; then
   echo "Build requires macOS and Apple Command Line Tools (xcode-select --install)." >&2
@@ -24,8 +24,8 @@ chmod +x "$APP/Contents/Resources/Install Homebrew.command"
 import pathlib, plistlib, sys
 app = pathlib.Path(sys.argv[1])
 (app / "Contents/Info.plist").write_bytes(plistlib.dumps({
-    "CFBundleName": "Mac Couch Console",
-    "CFBundleDisplayName": "Mac Couch Console",
+    "CFBundleName": "Couch Cube",
+    "CFBundleDisplayName": "Couch Cube",
     "CFBundleIconFile": "Console",
     "MCCDistribution": "local",
     "CFBundleIdentifier": "org.macgameconsole.setup",

@@ -133,7 +133,7 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 880, height: 800),
                           styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
-        window.title = "Mac Couch Console (MCC)"
+        window.title = "Couch Cube"
         window.minSize = NSSize(width: 800, height: 760)
         window.titlebarAppearsTransparent = true
         window.backgroundColor = .windowBackgroundColor
@@ -150,7 +150,7 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate {
             stack.topAnchor.constraint(equalTo: window.contentView!.topAnchor, constant: 24),
             stack.bottomAnchor.constraint(equalTo: window.contentView!.bottomAnchor, constant: -24)
         ])
-        let title = NSTextField(labelWithString: "Mac Couch Console")
+        let title = NSTextField(labelWithString: "Couch Cube")
         title.font = .systemFont(ofSize: 24, weight: .bold)
         let icon = NSImageView(image: NSImage(contentsOf: Bundle.main.resourceURL!.appendingPathComponent("Console.icns"))!)
         icon.setAccessibilityLabel("TV and Mac mini on an oak console")
@@ -250,7 +250,7 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate {
             card("App updates", subtitle: "Checks GitHub at launch. Downloads and app replacement are never automatic.", views: [
                 updateStatus, row([button("Check for updates", #selector(checkUpdates)), updateButton])
             ]),
-            card("Carry the app with your games", subtitle: "In Finder, copy MacCouchConsole.app to your SSD and open it there. Or use the DMG to copy it to Applications for this Mac.", views: [
+            card("Carry the app with your games", subtitle: "In Finder, copy CouchCube.app to your SSD and open it there. Or use the DMG to copy it to Applications for this Mac.", views: [
                 text("Keep the app and your game library on the same drive. Launchers use relative paths so they travel together. After moving the app within that drive, open it and update the library.", size: 12, secondary: true),
                 button("Show this app in Finder", #selector(revealApp))
             ]),
@@ -389,7 +389,7 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate {
                 do {
                     let report = try JSONDecoder().decode(UpdateReport.self, from: data)
                     self.updateStatus.stringValue = report.available
-                        ? "Mac Couch Console \(report.version) is available. Download it and replace the app after quitting."
+                        ? "Couch Cube \(report.version) is available. Download it and replace the app after quitting."
                         : "You're up to date. Latest published release: \(report.version)."
                     self.updateURL = URL(string: report.url)
                     self.updateButton.isEnabled = self.updateURL != nil
@@ -1042,7 +1042,7 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate {
     @objc private func homebrew() {
         let alert = NSAlert()
         alert.messageText = "Set up the app download helper?"
-        alert.informativeText = "MCC uses Homebrew, a free tool that installs your game players.\n\nA Terminal window will guide you through the official Homebrew installer. Type INSTALL HOMEBREW when asked. macOS may request your administrator password there, never in MCC.\n\nFinish that step, then return here and install your selection. No disks will be erased."
+        alert.informativeText = "Couch Cube uses Homebrew, a free tool that installs your game players.\n\nA Terminal window will guide you through the official Homebrew installer. Type INSTALL HOMEBREW when asked. macOS may request your administrator password there, never in Couch Cube.\n\nFinish that step, then return here and install your selection. No disks will be erased."
         alert.addButton(withTitle: "Set up Homebrew")
         alert.addButton(withTitle: "Cancel")
         alert.addButton(withTitle: "Official instructions only")
@@ -1137,7 +1137,7 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate {
                               "--typed", typed.stringValue, "--confirm", "--prepare-portable"]) { code, _ in
                     self.status.stringValue = code == 0 ? "Portable app is at the SSD root. Open it there and create your game library." : "Preparation failed/refused. Activity explains which stage failed. Inspect the disk; do not blindly erase again."
                     if code == 0 {
-                        self.preparationResult.stringValue = "Your SSD is prepared. Open MacCouchConsole.app from its root to continue with your portable copy, or choose the new volume below."
+                        self.preparationResult.stringValue = "Your SSD is prepared. Open CouchCube.app from its root to continue with your portable copy, or choose the new volume below."
                         self.preparationResult.isHidden = false
                         self.preferredMode = "portable"
                         self.volumeMenu.select(nil)

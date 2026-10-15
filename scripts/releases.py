@@ -31,7 +31,7 @@ def version(value):
 
 def fetch(url, limit):
     request = urllib.request.Request(url, headers={
-        "User-Agent": "Mac-Couch-Console",
+        "User-Agent": "Couch-Cube",
         "Accept": "application/vnd.github+json" if url.startswith("https://api.github.com/") else "application/octet-stream",
     })
     try:

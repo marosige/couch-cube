@@ -151,7 +151,7 @@ class FormatTests(unittest.TestCase):
                 return [dict(choice, free=100_000_000 - len(discovery_calls) * 1000)]
             def stage(directory, run):
                 events.append("download")
-                app = directory / "MacCouchConsole.app"
+                app = directory / "CouchCube.app"
                 app.mkdir()
                 (app / "fixture").write_text("verified release")
                 return app
@@ -172,7 +172,7 @@ class FormatTests(unittest.TestCase):
                     patch.object(manager, "drives", side_effect=drives), patch.object(manager, "run", side_effect=run):
                 manager.prepare_portable("disk42", plan["token"], "ERASE disk42", True)
             self.assertEqual(events, ["download", "erase", "verify-copy"])
-            self.assertEqual((mount / "MacCouchConsole.app/fixture").read_text(), "verified release")
+            self.assertEqual((mount / "CouchCube.app/fixture").read_text(), "verified release")
             self.assertFalse((mount / "Mac Game Console").exists())
 
     def test_no_mount_after_erase_never_substitutes_another_drive(self):

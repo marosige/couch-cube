@@ -15,8 +15,8 @@ def verify_app(app, working_directory, distribution="local"):
     with (app / "Contents/Info.plist").open("rb") as file:
         info = plistlib.load(file)
     assert info["LSMinimumSystemVersion"] == "13.0"
-    assert info["CFBundleName"] == "Mac Couch Console"
-    assert info["CFBundleDisplayName"] == "Mac Couch Console"
+    assert info["CFBundleName"] == "Couch Cube"
+    assert info["CFBundleDisplayName"] == "Couch Cube"
     assert info["CFBundleIconFile"] == "Console"
     assert info["MCCDistribution"] == distribution
     assert info["CFBundleShortVersionString"] == "0.3.0"
@@ -53,7 +53,7 @@ with tempfile.TemporaryDirectory(prefix="mac-console-release-") as directory:
         run(["/usr/bin/hdiutil", "attach", "-readonly", "-nobrowse", "-mountpoint", str(mount), str(image)],
             stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         attached = True
-        app = mount / "MacCouchConsole.app"
+        app = mount / "CouchCube.app"
         assert (mount / "Applications").is_symlink()
         assert (mount / "Applications").readlink() == Path("/Applications")
         assert (mount / "Start Here.txt").is_file()
@@ -77,11 +77,11 @@ if len(sys.argv) > 2:
         moved = Path(directory) / "Gaming SSD with spaces"
         run(["/usr/bin/ditto", "-x", "-k", str(archive), str(download)])
         download.rename(moved)
-        verify_app(moved / "MacCouchConsole.app", directory, distribution="portable")
-        app = moved / "MacCouchConsole.app"
+        verify_app(moved / "CouchCube.app", directory, distribution="portable")
+        app = moved / "CouchCube.app"
         portable_icon = (app / "Contents/Resources/Console.icns").read_bytes()
         assert portable_icon not in [local_icon, installer_icon], "Portable icon must differ from local and DMG icons"
-        copied = Path(directory) / "Descriptor copy/MacCouchConsole.app"
+        copied = Path(directory) / "Descriptor copy/CouchCube.app"
         copied.mkdir(parents=True)
         run([str(app / "Contents/Resources/python/bin/python3"), "-I", "-B", "-c",
              "import importlib.util,os,sys; from pathlib import Path; "

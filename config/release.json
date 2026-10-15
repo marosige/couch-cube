@@ -1,6 +1,6 @@
 {
-  "repository": "marosige/mac-couch-console",
+  "repository": "marosige/couch-cube",
   "version": "0.3.0",
-  "asset_prefix": "MacCouchConsole",
-  "app_name": "MacCouchConsole.app"
+  "asset_prefix": "CouchCube",
+  "app_name": "CouchCube.app"
 }

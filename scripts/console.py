@@ -525,7 +525,7 @@ def app_files(name, action, root, identifier=None):
         + runtime_assignment(root)
         + 'if [[ ! -x "$PYTHON" ]]; then\n'
         '  /usr/bin/osascript -e \'display alert "Manager app not found" '
-        'message "Keep MacCouchConsole.app on this drive. Open it and update the library after moving the app." as critical\'\n'
+        'message "Keep CouchCube.app on this drive. Open it and update the library after moving the app." as critical\'\n'
         '  exit 1\nfi\n'
         'ERROR_FILE="$(/usr/bin/mktemp)"\n'
         'trap \'rm -f "$ERROR_FILE"\' EXIT\n'
