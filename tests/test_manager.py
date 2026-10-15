@@ -350,6 +350,37 @@ class ManagementTests(unittest.TestCase):
         self.assertFalse((target / "fixture").exists())
 
 
+class DefaultFrontendTests(unittest.TestCase):
+    def test_steam_preferred_when_both_installed(self):
+        with patch.object(manager.Path, "is_dir", return_value=True), \
+                patch.object(manager, "app_binary") as binary:
+            self.assertEqual(manager.default_frontend(), "steam")
+            binary.assert_called_once_with("Steam.app")
+
+    def test_es_de_selected_without_steam(self):
+        with patch.object(manager.Path, "is_dir", lambda path: path.name == "ES-DE.app"), \
+                patch.object(manager, "app_binary") as binary:
+            self.assertEqual(manager.default_frontend(), "retro")
+            binary.assert_called_once_with("ES-DE.app")
+
+    def test_no_frontend_reports_error(self):
+        with patch.object(manager.Path, "is_dir", return_value=False):
+            with self.assertRaisesRegex(manager.SetupError, "Steam or ES-DE"):
+                manager.default_frontend()
+
+    def test_console_dispatches_to_retro_with_managed_home(self):
+        storage = unittest.mock.Mock()
+        storage.root = Path("/games")
+        with patch.object(manager, "default_frontend", return_value="retro"), \
+                patch.object(manager, "read_json", return_value={}), \
+                patch.object(manager, "refresh_generated") as refresh, \
+                patch.object(manager, "app_binary", return_value=Path("/ES-DE")), \
+                patch.object(manager, "run") as run:
+            manager.launch(storage, "console")
+            refresh.assert_called_once_with(storage, {})
+            run.assert_called_once_with(["/ES-DE", "--home", "/games/Frontend"])
+
+
 class AutoLaunchTests(unittest.TestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
@@ -439,6 +470,17 @@ class AutoLaunchTests(unittest.TestCase):
                 manager.login_launcher(True)
             run.assert_not_called()
         self.assertFalse(manager.login_agent().exists())
+
+    def test_es_de_login_saves_library_for_dynamic_frontend(self):
+        with patch.object(manager, "login_helper", return_value=Path("/ConsoleAutoLaunch")), \
+                patch.object(manager, "configured_storage") as storage, \
+                patch.object(manager, "default_frontend", return_value="retro"), \
+                patch.object(manager.subprocess, "run", return_value=subprocess.CompletedProcess([], 113, stderr=b"")):
+            manager.login_launcher(True, root="/games")
+        storage.assert_called_once_with("/games")
+        state = plistlib.loads(manager.login_agent().read_bytes())
+        self.assertEqual(state["EnvironmentVariables"], {"COUCH_CUBE_ROOT": "/games"})
+        self.assertTrue(manager.login_status()["enabled"])
 
 
 if __name__ == "__main__":

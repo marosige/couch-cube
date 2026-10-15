@@ -52,6 +52,7 @@ final class ConsoleAutoLaunch: NSObject, NSApplicationDelegate {
     private let started = ProcessInfo.processInfo.systemUptime
     private let delay: TimeInterval
     private var opening = false
+    private var launcher: Process?
 
     init(delay: TimeInterval) { self.delay = delay }
 
@@ -77,6 +78,32 @@ final class ConsoleAutoLaunch: NSObject, NSApplicationDelegate {
             case .launch:
                 opening = true
                 timer?.invalidate()
+                if let root = ProcessInfo.processInfo.environment["COUCH_CUBE_ROOT"] {
+                    let resources = Bundle.main.resourceURL!
+                    let process = Process()
+                    process.executableURL = resources.appendingPathComponent("python/bin/python3")
+                    process.arguments = ["-I", "-B", resources.appendingPathComponent("scripts/console.py").path,
+                                         "console", "--root", root]
+                    let errors = Pipe()
+                    process.standardError = errors
+                    process.standardInput = FileHandle.nullDevice
+                    launcher = process
+                    do { try process.run() }
+                    catch { fail("Cannot start console mode: " + error.localizedDescription); return }
+                    DispatchQueue.global().async {
+                        let data = errors.fileHandleForReading.readDataToEndOfFile()
+                        process.waitUntilExit()
+                        DispatchQueue.main.async {
+                            if process.terminationStatus != 0 {
+                                self.fail(String(decoding: data, as: UTF8.self))
+                            } else {
+                                log("Console session finished.")
+                                NSApp.terminate(nil)
+                            }
+                        }
+                    }
+                    return
+                }
                 guard let steam = NSWorkspace.shared.urlForApplication(toOpen: URL(string: "steam://open/bigpicture")!) else {
                     fail("Steam is not installed. Open Couch Cube > Game players to install it.")
                     return

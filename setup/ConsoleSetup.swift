@@ -243,7 +243,7 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
         let play = button("Open Steam Big Picture", #selector(playSteam))
         playAction = play
         libraryControls += [openGames, addGame, play]
-        let playDescription = text("Open your games with Steam's controller-friendly interface.", secondary: true)
+        let playDescription = text("Steam Big Picture, or ES-DE when Steam isn't installed.", secondary: true)
         playDescription.alignment = .center
         let library = column([
             hero("Couch Cube", subtitle: "Your games. One big screen."),
@@ -262,7 +262,7 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
         hostSummary.textColor = .secondaryLabelColor
         let appChoices = column([])
         for (id, text) in [
-            ("steam", "Steam — required for the Big Picture menu"),
+            ("steam", "Steam — Big Picture menu & Steam games"),
             ("es-de", "ES-DE — optional retro game browser"),
             ("retroarch-metal", "RetroArch — optional classic console emulator"),
             ("dolphin", "Dolphin — optional GameCube & Wii emulator"),
@@ -286,7 +286,7 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
         helperButton = button("Install Homebrew...", #selector(homebrew))
         helperAdvice.textColor = .secondaryLabelColor
         let apps = column([
-            pageHeading("Apps & emulators", "Start with Steam. Everything else is optional."),
+            pageHeading("Apps & emulators", "Use Steam Big Picture, or ES-DE for a retro-only console."),
             card("Installed on this Mac", subtitle: "Creating your game folders did not install these apps. Existing apps are detected below.", views: [
                 hostSummary, appChoices,
                 primary(button("Install selected apps...", #selector(installApps)))
@@ -303,7 +303,7 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
         let tools = column([
             pageHeading("Settings", "Preferences for this Mac."),
             card("Automatic console mode", subtitle:
-                "Open Steam Big Picture when a controller connects, without a keyboard or mouse.", views: [
+                "Open Steam Big Picture, or ES-DE if Steam isn't installed, when a controller connects.", views: [
                 autoLaunchToggle,
                 row([text("Wait after login:"), autoLaunchDelay, text("seconds (5–300)")]),
                 text("Runs once after login. Keep the app in place and its drive connected. Turn off Steam's own login startup.", size: 12, secondary: true),
@@ -699,16 +699,19 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
         }
         let foldersReady = report.state == "valid layout" && report.issues.isEmpty
         let steamInstalled = !report.missing.contains("steam")
+        let retroInstalled = !report.missing.contains("es-de")
+        playAction.title = steamInstalled ? "Open Steam Big Picture" : retroInstalled ? "Open ES-DE" : "Install Steam or ES-DE to play"
         setupSummary.stringValue = "1. Game folders: \(foldersReady ? "Created" : "Needs setup")\n"
             + "\(drive.root)\n\n"
             + "2. Steam: \(steamInstalled ? "Installed" : "Not installed — open Apps & emulators")\n"
             + "Optional apps: \(packages.filter { $0.0 != "steam" && !report.missing.contains($0.0) }.count) of 4 installed. Not required for Steam games.\n\n"
-            + "3. In Steam: sign in, install a game and check your controller.\n"
-            + (drive.mode == "local"
+            + (steamInstalled || !retroInstalled ? "3. In Steam: sign in, install a game and check your controller.\n" :
+                "3. ES-DE is your console menu. Add ROMs to the game folders and configure the required emulators, BIOS and cores.\n")
+            + (!steamInstalled && retroInstalled ? "Steam is optional for this retro-only setup." : drive.mode == "local"
                 ? "Keep Steam's current storage, or choose another folder yourself."
                 : "Add this SSD's SteamLibrary in Steam → Settings → Storage to use it.")
             + "\nManual steps are not verified. Couch Cube does not move Steam games."
-        playAction.isEnabled = task == nil && foldersReady && steamInstalled
+        playAction.isEnabled = task == nil && foldersReady && (steamInstalled || retroInstalled)
     }
 
     private func text(_ value: String, size: CGFloat = 13, secondary: Bool = false) -> NSTextField {
@@ -946,12 +949,13 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
         let alert = NSAlert()
         alert.messageText = enabled ? "Enable automatic console mode on this Mac?" : "Turn off automatic console mode?"
         alert.informativeText = enabled
-            ? "Starting at your next macOS login, wait \(delay) seconds. If no keyboard or mouse is connected, wait for a controller and open Steam Big Picture once.\n\nNo passwords or automatic macOS login are configured. Keep Couch Cube at:\n\(Bundle.main.bundleURL.path)\n\nIf you move or replace the app, save this setting again. macOS may manage this under Login Items."
+            ? "Starting at your next macOS login, wait \(delay) seconds. If no keyboard or mouse is connected, wait for a controller and open Steam Big Picture, or ES-DE if Steam isn't installed.\n\nNo passwords or automatic macOS login are configured. Keep Couch Cube at:\n\(Bundle.main.bundleURL.path)\n\nIf you move or replace the app or game library, save this setting again. macOS may manage this under Login Items."
             : "Stops this app's waiting login helper and removes its login entry. Steam and your game library are unchanged."
         alert.addButton(withTitle: enabled ? "Enable" : "Turn off")
         alert.addButton(withTitle: "Cancel")
         guard alert.runModal() == .alertFirstButtonReturn else { return }
         var arguments = ["login", "--confirm", "--delay", String(delay)]
+        if enabled, let drive = selected { arguments += ["--root", drive.root] }
         if !enabled { arguments.append("--disable") }
         execute(arguments) { code, _ in
             if code == 0 { self.loadAutoLaunch() }
@@ -1179,7 +1183,7 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
                     precondition(self.task == nil, "Storage issues must never start setup")
                     self.finishOnboarding()
                     precondition(self.tabs.selectedTabViewItem === self.tabs.tabViewItems[4])
-                    self.report = Assessment(state: "valid layout", issues: [], notes: [], missing: ["steam"])
+                    self.report = Assessment(state: "valid layout", issues: [], notes: [], missing: ["steam", "es-de"])
                     self.finishOnboarding()
                     precondition(!self.onboarding && self.tabs.selectedTabViewItem === self.tabs.tabViewItems[0])
                     precondition(self.window === self.mainWindow && !self.setupWindow.isVisible)
@@ -1195,10 +1199,13 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
                     self.selectPage(0)
                     precondition(!self.navigationBar.isHidden)
                     precondition(self.setupBack.isHidden)
-                    self.report = Assessment(state: "valid layout", issues: [], notes: [], missing: ["steam"])
+                    self.report = Assessment(state: "valid layout", issues: [], notes: [], missing: ["steam", "es-de"])
                     self.updateSetupSummary()
                     precondition(!self.playAction.isEnabled)
                     precondition(self.setupSummary.stringValue.contains("Not installed"))
+                    self.report = Assessment(state: "valid layout", issues: [], notes: [], missing: ["steam"])
+                    self.updateSetupSummary()
+                    precondition(self.playAction.isEnabled && self.playAction.title == "Open ES-DE")
                     self.report = Assessment(state: "valid layout", issues: [], notes: [], missing: [])
                     self.updateSetupSummary()
                     precondition(self.playAction.isEnabled)
@@ -1334,7 +1341,9 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
                     self.libraryAction.title = "Update library links..."
                 }
                 self.hostSummary.stringValue = report.missing.contains("steam")
-                    ? "Steam is not installed. Select it below and install it to use Big Picture; other apps are optional."
+                    ? (report.missing.contains("es-de")
+                        ? "Install Steam for Big Picture or ES-DE for a retro-only menu. Retro games also need the appropriate emulator."
+                        : "ES-DE is installed and will be your console menu. Steam is optional. Retro games still need the appropriate emulator.")
                     : "Steam is installed. No other apps are needed for native Steam games. Select optional apps only if you want them."
                 self.helperButton.isHidden = !report.notes.contains { $0.hasPrefix("Homebrew missing") }
                 self.helperAdvice.isHidden = self.helperButton.isHidden
@@ -1407,8 +1416,9 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
 
     @objc private func playSteam() {
         guard let drive = selected else { return }
-        execute(["steam", "--root", drive.root]) { code, _ in
-            self.status.stringValue = code == 0 ? "Steam Big Picture opened." : "Couldn't open Steam. Check Apps & emulators and Activity."
+        let frontend = report?.missing.contains("steam") == true ? "ES-DE" : "Steam Big Picture"
+        execute(["console", "--root", drive.root]) { code, _ in
+            self.status.stringValue = code == 0 ? "\(frontend) session finished or opened." : "Couldn't open console mode. Check Apps & emulators and Activity."
         }
     }
 

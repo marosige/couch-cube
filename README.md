@@ -47,7 +47,10 @@ Steam sign-in, controller configuration or completion of those steps.
 Retro games still need your own ROMs, any required BIOS and emulator cores.
 Add `Launchers/Retro.app` or registered game shortcuts to Steam through
 **Games → Add a Non-Steam Game**; this is not automatic.
-Big Picture remains the console interface; Decky is not included or supported
+Steam Big Picture is preferred when Steam is installed. With ES-DE installed
+but no Steam, **Play** opens ES-DE using this library's retro configuration
+instead. ES-DE still needs the appropriate emulators, games and any BIOS/cores.
+Decky is not included or supported
 on macOS. Windows games need compatible, individually configured wrappers,
 not macOS Proton.
 
@@ -77,7 +80,10 @@ and signatures check integrity, not publisher identity.
 
 **Automatic console mode:** enable it in **Settings** on each Mac. After login,
 wait 5–300 seconds (30 by default). With no keyboard or mouse connected, a
-USB or Bluetooth controller opens Steam Big Picture, even if connected later.
+USB or Bluetooth controller opens Steam Big Picture, or ES-DE if Steam isn't
+installed, even if connected later. Save this setting again after changing
+the selected game library; older Steam-only login entries also need re-saving
+to use ES-DE fallback.
 A keyboard or mouse skips auto-launch for that login. macOS still requires
 your normal login; Couch Cube never changes passwords or automatic login.
 Keep the app at its saved location, with its SSD connected at login. After
@@ -106,3 +112,7 @@ The first build downloads a pinned runtime (`config/runtime.json`).
 Each build clears `build/` first, including previous apps, releases and caches.
 Update settings live in `config/release.json`. The manual GitHub workflow
 builds downloads; publishing a release is a separate, explicit action.
+Pushing a `v0.3.0-alpha.N` tag builds and verifies that tagged commit, then
+publishes a GitHub prerelease with the DMG, portable ZIP and checksums.
+Alpha builds retain internal version `0.3.0`. Stable-only in-app release
+discovery and SSD preparation do not use alpha releases.

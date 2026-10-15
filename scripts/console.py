@@ -741,8 +741,19 @@ def register(storage, name, kind, relative):
     print(f"Created {storage.root / 'Launchers' / (name + '.app')}", flush=True)
 
 
+def default_frontend():
+    for package in ["steam", "es-de"]:
+        name = PACKAGES[package]
+        if any((parent / name).is_dir() for parent in [Path("/Applications"), Path.home() / "Applications"]):
+            app_binary(name)
+            return "steam" if package == "steam" else "retro"
+    raise SetupError("Install Steam or ES-DE from Couch Cube > Apps first.")
+
+
 def launch(storage, action, identifier=None):
     storage.check()
+    if action == "console":
+        action = default_frontend()
     if action == "steam":
         app_binary("Steam.app")
         run(["/usr/bin/open", "steam://open/bigpicture"])
@@ -850,7 +861,7 @@ def login_helper():
     return helper
 
 
-def login_launcher(confirm, enabled=True, delay=30):
+def login_launcher(confirm, enabled=True, delay=30, root=None):
     if not confirm:
         raise SetupError("Login changes require --confirm. No change made.")
     if type(delay) is not int or not 5 <= delay <= 300:
@@ -862,15 +873,22 @@ def login_launcher(confirm, enabled=True, delay=30):
     content = None
     if enabled:
         helper = login_helper()
-        app_binary("Steam.app")
-        content = plistlib.dumps({
+        if root is None:
+            app_binary("Steam.app")  # Compatibility with existing Steam-only login settings.
+        else:
+            configured_storage(root)
+            default_frontend()
+        settings = {
             "Label": LOGIN_LABEL,
             "ProgramArguments": [str(helper), "--delay", str(delay)],
             "RunAtLoad": True,
             "LimitLoadToSessionType": "Aqua",
             "StandardOutPath": str(log_dir / "auto-launch.log"),
             "StandardErrorPath": str(log_dir / "auto-launch.log"),
-        })
+        }
+        if root is not None:
+            settings["EnvironmentVariables"] = {"COUCH_CUBE_ROOT": str(Path(root).absolute())}
+        content = plistlib.dumps(settings)
     domain = f"gui/{os.getuid()}"
     exists = subprocess.run(["/bin/launchctl", "print", domain + "/" + LOGIN_LABEL],
                             stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
@@ -932,13 +950,14 @@ def main():
     login.add_argument("--confirm", action="store_true")
     login.add_argument("--disable", action="store_true")
     login.add_argument("--delay", type=int, default=30)
+    login.add_argument("--root")
     setup = sub.add_parser("setup")
     setup.add_argument("--drive", required=True)
     setup.add_argument("--confirm", action="store_true")
     setup.add_argument("--no-host-config", action="store_true",
                        help="Keep selection on the drive only; do not save it in this Mac's home folder.")
     setup.add_argument("--install", nargs="*", choices=list(PACKAGES), default=[])
-    for action in ["env", "index", "steam", "retro", "launch", "emulate", "register"]:
+    for action in ["env", "index", "steam", "retro", "console", "launch", "emulate", "register"]:
         command = sub.add_parser(action)
         command.add_argument("--root")
         if action == "launch":
@@ -978,7 +997,7 @@ def main():
                 raise SetupError("Installer copying requires explicit --confirm.")
             copy_installer(Storage(select_drive(args.drive)), args.source)
         elif args.command == "login":
-            login_launcher(args.confirm, not args.disable, args.delay)
+            login_launcher(args.confirm, not args.disable, args.delay, args.root)
         elif args.command == "setup":
             if not args.confirm:
                 raise SetupError("No changes made. Setup requires explicit --confirm consent.")
