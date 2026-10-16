@@ -33,41 +33,40 @@ func drawIcon() {
     rounded(NSRect(x: -100, y: 310, width: 742, height: 8), 4, color(0x424D52))
 
     color(0x9C704E).setFill()
-    NSRect(x: 16, y: 730, width: 992, height: 278).fill()
+    NSRect(x: 16, y: 823, width: 992, height: 185).fill()
     color(0xB88B62).setFill()
-    NSRect(x: 16, y: 730, width: 992, height: 30).fill()
-    rounded(NSRect(x: 175, y: 732, width: 708, height: 49), 24, color(0x815B41))
-    rounded(NSRect(x: 250, y: 712, width: 552, height: 44), 22, color(0x303638))
+    NSRect(x: 16, y: 823, width: 992, height: 30).fill()
+    rounded(NSRect(x: 175, y: 825, width: 708, height: 49), 24, color(0x815B41))
+    rounded(NSRect(x: 250, y: 805, width: 552, height: 44), 22, color(0x303638))
 
-    rounded(NSRect(x: 192, y: 455, width: 640, height: 286), 82, color(0xBCC3C8))
-    rounded(NSRect(x: 192, y: 345, width: 640, height: 300), 82, color(0xE6E9EB))
-    rounded(NSRect(x: 225, y: 625, width: 574, height: 6), 3, color(0xCED4D8))
+    rounded(NSRect(x: 192, y: 475, width: 640, height: 359), 60, color(0xBCC3C8))
+    rounded(NSRect(x: 192, y: 475, width: 640, height: 170), 60, color(0xE6E9EB))
     for x in [CGFloat(321), CGFloat(429)] {
-        rounded(NSRect(x: x + 21.5, y: 638.5, width: 21, height: 64), 10, color(0x424B52))
-        rounded(NSRect(x: x + 29.5, y: 648.5, width: 5, height: 44), 2.5, color(0x202A30))
+        rounded(NSRect(x: x + 21.5, y: 745.75, width: 21, height: 48), 10, color(0x424B52))
+        rounded(NSRect(x: x + 29.5, y: 753.25, width: 5, height: 33), 2.5, color(0x202A30))
     }
-    rounded(NSRect(x: 556, y: 657, width: 27, height: 27), 13.5, color(0x424B52))
-    rounded(NSRect(x: 774, y: 663, width: 13, height: 13), 6.5, color(0xF7FAF8))
+    rounded(NSRect(x: 766, y: 756, width: 27, height: 27), 13.5, color(0x424B52))
+    rounded(NSRect(x: 714, y: 762.5, width: 13, height: 13), 6.5, color(0xF7FAF8))
     if CommandLine.arguments.contains("--portable") {
         let cable = NSBezierPath()
-        cable.move(to: NSPoint(x: 353, y: 670))
-        cable.curve(to: NSPoint(x: 276, y: 829),
-                    controlPoint1: NSPoint(x: 355, y: 774),
-                    controlPoint2: NSPoint(x: 186, y: 772))
-        cable.curve(to: NSPoint(x: 440, y: 849),
-                    controlPoint1: NSPoint(x: 308, y: 854),
-                    controlPoint2: NSPoint(x: 390, y: 849))
+        cable.move(to: NSPoint(x: 353, y: 770))
+        cable.curve(to: NSPoint(x: 276, y: 907),
+                    controlPoint1: NSPoint(x: 355, y: 850),
+                    controlPoint2: NSPoint(x: 186, y: 850))
+        cable.curve(to: NSPoint(x: 440, y: 926),
+                    controlPoint1: NSPoint(x: 308, y: 932),
+                    controlPoint2: NSPoint(x: 390, y: 926))
         cable.lineWidth = 18
         cable.lineCapStyle = .round
         color(0x303A3E).setStroke()
         cable.stroke()
-        rounded(NSRect(x: 337, y: 647, width: 32, height: 58), 7, color(0x303A3E))
-        rounded(NSRect(x: 434, y: 838, width: 36, height: 24), 6, color(0x303A3E))
-        rounded(NSRect(x: 455, y: 886, width: 400, height: 48), 23, color(0x815B41))
-        rounded(NSRect(x: 455, y: 805, width: 400, height: 105), 28, color(0x35464E))
-        rounded(NSRect(x: 455, y: 790, width: 400, height: 86), 28, color(0x526771))
-        rounded(NSRect(x: 482, y: 804, width: 346, height: 8), 4, color(0x748890))
-        rounded(NSRect(x: 798, y: 859, width: 16, height: 12), 6, color(0xA7DED4))
+        rounded(NSRect(x: 337, y: 751, width: 32, height: 44), 7, color(0x303A3E))
+        rounded(NSRect(x: 434, y: 915, width: 36, height: 24), 6, color(0x303A3E))
+        rounded(NSRect(x: 455, y: 955, width: 400, height: 38), 19, color(0x815B41))
+        rounded(NSRect(x: 455, y: 890, width: 400, height: 85), 28, color(0x35464E))
+        rounded(NSRect(x: 455, y: 875, width: 400, height: 70), 28, color(0x526771))
+        rounded(NSRect(x: 482, y: 889, width: 346, height: 8), 4, color(0x748890))
+        rounded(NSRect(x: 798, y: 930, width: 16, height: 12), 6, color(0xA7DED4))
     }
     NSGraphicsContext.restoreGraphicsState()
 }

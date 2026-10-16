@@ -166,7 +166,10 @@ avoid a second launch. Turn this feature off in Settings to remove its login
 entry; allow background activity in macOS Login Items if prompted. Logs are in
 `~/Library/Logs/Couch Cube/auto-launch.log`.
 
-**Icon:** [Compact, M4-style Mac mini close-up](assets/icon.svg) beneath a wall-mounted TV, shared
+**Icon:** [Compact, M4-style Mac mini close-up](assets/icon.svg) with a low,
+rectangular case and an unmarked lid, two left USB-C ports and a right headphone jack with
+the white LED immediately to its left. A lowered oak cabinet leaves space beneath
+the wall-mounted TV. The icon is shared
 by the app and DMG. The [portable artwork](assets/portable-icon.svg) adds a
 front-connected USB SSD, not a badge. SVGs and 128/512/1024 px PNGs are in `assets/`.
 
