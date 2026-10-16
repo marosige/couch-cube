@@ -101,6 +101,26 @@ class StorageTests(unittest.TestCase):
         self.assertEqual(custom.read_text(), "user customized")
         self.assertEqual((self.storage.root / console.MARKER).read_bytes(), marker)
 
+    def test_console_toggle_writes_only_changed_files(self):
+        self.initialize()
+        enabled = [system for system in console.SYSTEMS if system != "snes"]
+        with patch.object(self.storage, "write", wraps=self.storage.write) as write, \
+                patch.object(console, "drives", return_value=[self.choice]) as discovery:
+            console.select_systems(self.storage, enabled)
+        written = {call.args[0] for call in write.call_args_list}
+        self.assertEqual(written, {
+            "ROMs/snes/noload.txt",
+            "Frontend/ES-DE/custom_systems/es_systems.xml",
+            console.MARKER,
+        })
+        self.assertLessEqual(discovery.call_count, 15)
+        with patch.object(self.storage, "write", wraps=self.storage.write) as write:
+            console.select_systems(self.storage, list(console.SYSTEMS))
+        self.assertEqual({call.args[0] for call in write.call_args_list}, {
+            "Frontend/ES-DE/custom_systems/es_systems.xml", console.MARKER,
+        })
+        self.assertFalse((self.storage.root / "ROMs/snes/noload.txt").exists())
+
     def test_ps2_launch_does_not_require_retroarch(self):
         self.initialize()
         rom = self.storage.root / "ROMs/ps2/mine.iso"

@@ -13,6 +13,8 @@ RUNTIME="$(bash "$ROOT/scripts/prepare-runtime.sh")"
 ditto "$RUNTIME" "$APP/Contents/Resources/python"
 bash "$ROOT/scripts/build-icons.sh" --reuse-build
 cp "$ROOT/build/Console.icns" "$APP/Contents/Resources/Console.icns"
+cp "$ROOT/assets/header.png" "$APP/Contents/Resources/HomeHeader.png"
+cp "$ROOT/assets/header-portable.png" "$APP/Contents/Resources/HomeHeaderPortable.png"
 xcrun swiftc -target arm64-apple-macos13.0 -swift-version 5 -module-cache-path "$ROOT/build/module-cache" \
   -framework AppKit -framework GameController -framework CoreBluetooth -framework IOBluetooth \
   "$ROOT/setup/ConsoleSetup.swift" -o "$APP/Contents/MacOS/ConsoleSetup"
@@ -23,6 +25,8 @@ cp "$ROOT/scripts/console.py" "$APP/Contents/Resources/scripts/console.py"
 cp "$ROOT/scripts/releases.py" "$APP/Contents/Resources/scripts/releases.py"
 cp "$ROOT/config/release.json" "$APP/Contents/Resources/config/release.json"
 cp "$ROOT/config/bios-map.csv" "$APP/Contents/Resources/config/bios-map.csv"
+ditto "$ROOT/assets/app-icons" "$APP/Contents/Resources/AppIcons"
+ditto "$ROOT/assets/tv-menus" "$APP/Contents/Resources/TVMenus"
 cp "$ROOT/README.md" "$APP/Contents/Resources/README.md"
 cp "$ROOT/setup/Install Homebrew.command" "$APP/Contents/Resources/Install Homebrew.command"
 chmod +x "$APP/Contents/Resources/Install Homebrew.command"

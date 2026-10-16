@@ -5,7 +5,6 @@ on:
     paths:
       - site/**
       - assets/icon-512.png
-      - assets/header.png
       - .github/workflows/pages.yml
   workflow_dispatch:
 permissions:
@@ -26,7 +25,6 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/configure-pages@v5
       - run: cp assets/icon-512.png site/icon.png
-      - run: cp assets/header.png site/header.png
       - uses: actions/upload-pages-artifact@v3
         with:
           path: site

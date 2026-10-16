@@ -1,0 +1,23 @@
+{
+  "notice": "Application marks belong to their respective owners. Used only to identify supported applications. No affiliation or endorsement implied.",
+  "websiteFavicons": {
+    "provider": "https://www.google.com/s2/favicons?domain={domain}&sz=128",
+    "battle-net": "battle.net",
+    "cemu-wiiu": "cemu.info",
+    "crossover": "codeweavers.com",
+    "curseforge": "curseforge.com",
+    "dolphin": "dolphin-emu.org",
+    "ea": "ea.com",
+    "epic-games": "epicgames.com",
+    "es-de": "es-de.org",
+    "gog-galaxy": "gog.com",
+    "pcsx2": "pcsx2.net",
+    "porting-kit": "portingkit.com",
+    "rpcs3": "rpcs3.net",
+    "steam": "store.steampowered.com"
+  },
+  "upstreamArtwork": {
+    "retroarch-metal": "https://raw.githubusercontent.com/libretro/RetroArch/master/media/retroarch-96x96.png",
+    "switch": "https://raw.githubusercontent.com/alula/Ryujinx/qlaunch/src/Ryujinx.UI.Common/Resources/Logo_Ryujinx.png"
+  }
+}

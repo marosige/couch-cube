@@ -25,6 +25,7 @@ PROJECT = Path(__file__).resolve().parent.parent
 BIOS_MAP = PROJECT / ("Config" if Path(__file__).parent.name == "Runtime" else "config") / "bios-map.csv"
 HOST_CONFIG = Path.home() / "Library/Application Support/Mac Game Console/setup.json"
 FRONTEND_CONFIG = Path.home() / "Library/Application Support/Mac Game Console/frontend.json"
+SYSTEM_APPLICATIONS = Path("/Applications")
 MARKER = ".mac-game-console.json"
 FOLDER = "Couch Cube"
 SSD_TEMPLATE = ".couch-cube-ssd-template"
@@ -710,7 +711,7 @@ def generated_files(storage, registrations, systems=None):
     }
     if systems is not None:
         for system in SYSTEMS:
-            if system not in systems and storage.target("ROMs/" + system).is_dir():
+            if system not in systems and storage.read_path("ROMs/" + system).is_dir():
                 files[f"ROMs/{system}/noload.txt"] = (b"Disabled by Couch Cube. Re-enable in Consoles.\n", False)
     files["Config/steam-shortcuts.txt"] = (
         ("Steam > Games > Add a Non-Steam Game > Browse. Add these .app bundles:\n\n"
@@ -726,7 +727,7 @@ def generated_files(storage, registrations, systems=None):
 
 
 def settings_content(storage):
-    path = storage.target("Frontend/ES-DE/settings/es_settings.xml")
+    path = storage.read_path("Frontend/ES-DE/settings/es_settings.xml")
     if path.exists():
         text = re.sub(r"<\?xml[^>]*\?>", "", path.read_text())
         wrapper = ET.fromstring("<settings>" + text + "</settings>")
@@ -742,16 +743,20 @@ def settings_content(storage):
     if parse_only is None:
         parse_only = ET.SubElement(root, "bool", {"name": "ParseGamelistOnly"})
     parse_only.set("value", "false")
+    for child in root:
+        if child.tail is not None and not child.tail.strip():
+            child.tail = None
     # ES-DE 3.x uses sibling XML elements, not a standard XML document root.
     return b'<?xml version="1.0"?>\n' + b"\n".join(ET.tostring(child, encoding="utf-8") for child in root) + b"\n"
 
 
 def refresh_generated(storage, state):
+    storage.check()
     files = generated_files(storage, state.get("games", []), selected_systems(state))
     settings = settings_content(storage)
     managed = state.get("managed", {})
     for relative, (content, _) in files.items():
-        path = storage.target(relative)
+        path = storage.read_path(relative)
         if path.exists():
             actual = hashlib.sha256(path.read_bytes()).hexdigest()
             wanted = hashlib.sha256(content).hexdigest()
@@ -759,9 +764,10 @@ def refresh_generated(storage, state):
                 raise SetupError(f"Preserving modified/unmanaged file: {path}. Move it aside before rerunning.")
     disabled_markers = [key for key in managed if re.fullmatch(r"ROMs/[^/]+/noload\.txt", key) and key not in files]
     for relative in disabled_markers:
-        path = storage.target(relative)
+        path = storage.read_path(relative)
         if path.exists() and hashlib.sha256(path.read_bytes()).hexdigest() != managed[relative]:
             raise SetupError("Preserving modified console visibility marker: " + str(path))
+    storage.check()
     for relative in disabled_markers:
         storage.check()
         path = storage.target(relative)
@@ -769,11 +775,16 @@ def refresh_generated(storage, state):
             path.unlink()
         del managed[relative]
     for relative, (content, executable) in files.items():
-        storage.write(relative, content, executable)
+        path = storage.read_path(relative)
+        if not path.is_file() or path.read_bytes() != content or bool(path.stat().st_mode & 0o111) != executable:
+            storage.write(relative, content, executable)
         managed[relative] = hashlib.sha256(content).hexdigest()
     state["managed"] = managed
     storage.write(MARKER, json_text(state))
-    storage.write("Frontend/ES-DE/settings/es_settings.xml", settings)
+    settings_path = storage.read_path("Frontend/ES-DE/settings/es_settings.xml")
+    if not settings_path.is_file() or settings_path.read_bytes() != settings:
+        storage.write("Frontend/ES-DE/settings/es_settings.xml", settings)
+    storage.check()
 
 def select_systems(storage, systems):
     if len(set(systems)) != len(systems) or any(system not in SYSTEMS for system in systems):
@@ -781,7 +792,8 @@ def select_systems(storage, systems):
     state = read_json(storage.target(MARKER))
     state["systems"] = systems
     for system in systems:
-        storage.mkdir("ROMs/" + system)
+        if not storage.read_path("ROMs/" + system).is_dir():
+            storage.mkdir("ROMs/" + system)
     refresh_generated(storage, state)
     print("Console selection saved. Existing ROMs and saves were kept.", flush=True)
 
@@ -958,6 +970,145 @@ def cleanup_host(confirm):
     print("Couch Cube login entry and local settings removed. Game folders, saves and other apps were kept.")
 
 
+def cleanup_plan():
+    items = []
+
+    def add(path, name, category, package=None):
+        path = Path(path)
+        reject_symlinks(path)
+        if not path.exists() or any(item["path"] == str(path) for item in items):
+            return
+        protected = {Path("/"), Path.home(), Path("/Applications"), Path.home() / "Library",
+                     Path.home() / "Games", Path("/Volumes")}
+        if path in protected or path.parent == path:
+            raise SetupError(f"Unsafe cleanup target: {path}")
+        info = path.stat()
+        items.append({"id": hashlib.sha256(str(path).encode()).hexdigest(),
+                      "name": name, "category": category, "path": str(path),
+                      "package": package, "identity": f"{info.st_dev}:{info.st_ino}"})
+
+    apps = app_status()
+    for app in apps:
+        for base in [SYSTEM_APPLICATIONS, Path.home() / "Applications"]:
+            path = base / PACKAGES[app["id"]]
+            add(path, app["name"], "App",
+                app["id"] if app["managed"] and str(path) == app["path"] else None)
+    home = Path.home()
+    # Only named gaming directories are candidates; never offer a whole Library or volume.
+    data_folders = [
+        ("Library/Application Support/Steam", "Steam games, account data and settings"),
+        ("Library/Application Support/RetroArch", "RetroArch cores, saves and settings"),
+        ("Library/Application Support/Dolphin", "Dolphin saves and settings"),
+        ("Library/Application Support/PCSX2", "PCSX2 BIOS, saves and settings"),
+        ("Library/Application Support/rpcs3", "RPCS3 firmware, games and saves"),
+        ("Library/Application Support/Cemu", "Cemu games, saves and settings"),
+        ("Library/Application Support/Ryujinx", "Ryujinx firmware, games and saves"),
+        ("Library/Application Support/CrossOver", "CrossOver bottles and Windows games"),
+        ("Library/Application Support/Porting Kit", "Porting Kit wrappers and settings"),
+        ("Library/Application Support/Battle.net", "Battle.net data and settings"),
+        ("Library/Application Support/Blizzard", "Blizzard data and settings"),
+        ("Library/Application Support/CurseForge", "CurseForge profiles and addons"),
+        ("Library/Application Support/Epic", "Epic data and settings"),
+        ("Library/Application Support/GOG.com", "GOG data and settings"),
+        ("Library/Application Support/EA app", "EA data and settings"),
+        ("Library/Application Support/Origin", "Origin data and settings"),
+        ("Library/Application Support/Blizzard Entertainment", "Blizzard settings"),
+        ("Library/Application Support/OpenEmu", "OpenEmu games, BIOS and saves"),
+        ("Library/Application Support/com.isaacmarovitz.Whisky", "Whisky bottles and Windows games"),
+        ("Library/Containers/com.isaacmarovitz.Whisky", "Whisky sandbox and Windows games"),
+        ("Documents/PCSX2", "PCSX2 BIOS, saves and settings"),
+        ("Documents/Dolphin Emulator", "Dolphin saves and settings"),
+        (".config/retroarch", "RetroArch configuration"),
+        ("ES-DE", "ES-DE settings and downloaded artwork"),
+        (".emulationstation", "Legacy EmulationStation settings"),
+        ("Library/Application Support/Mac Game Console", "Couch Cube settings"),
+        ("Library/Logs/Couch Cube", "Couch Cube logs"),
+    ]
+    for relative, name in data_folders:
+        add(home / relative, name, "Games and data")
+    for name in ["World of Warcraft", "Warcraft III", "StarCraft", "StarCraft II",
+                 "Diablo III", "Hearthstone", "Heroes of the Storm"]:
+        for base in [SYSTEM_APPLICATIONS, home / "Applications", home / "Games"]:
+            add(base / name, name + " games and addons", "Games and data")
+    bundle_ids = {
+        "org.macgameconsole.setup": "Couch Cube",
+        "com.valvesoftware.steam": "Steam",
+        "org.libretro.RetroArch": "RetroArch",
+        "org.dolphin-emu.dolphin": "Dolphin",
+        "net.pcsx2.pcsx2": "PCSX2",
+        "net.rpcs3.rpcs3": "RPCS3",
+        "info.cemu.Cemu": "Cemu",
+        "org.ryujinx.Ryujinx": "Ryujinx",
+        "com.codeweavers.CrossOver": "CrossOver",
+        "com.blizzard.BattleNet": "Battle.net",
+    }
+    for app in apps:
+        if not app["installed"]:
+            continue
+        with (Path(app["path"]) / "Contents/Info.plist").open("rb") as file:
+            bundle_id = plistlib.load(file).get("CFBundleIdentifier")
+        if not isinstance(bundle_id, str) or not re.fullmatch(r"[A-Za-z0-9.-]+", bundle_id):
+            raise SetupError(f"Invalid bundle identifier for {app['name']}.")
+        bundle_ids[bundle_id] = app["name"]
+    for bundle_id, name in bundle_ids.items():
+        for folder in ["Caches", "Logs", "HTTPStorages", "WebKit", "Saved Application State"]:
+            suffix = ".savedState" if folder == "Saved Application State" else ""
+            add(home / "Library" / folder / (bundle_id + suffix), name + " " + folder, "Supporting files")
+        add(home / "Library/Preferences" / (bundle_id + ".plist"), name + " preferences", "Supporting files")
+    for path in steam_libraries():
+        if path != (home / "Library/Application Support/Steam").resolve():
+            add(path / "steamapps", "Steam library games and downloads", "Games and data")
+    for choice in drives():
+        root = Path(choice["root"])
+        if (root / MARKER).is_file():
+            storage = configured_storage(str(root))
+            add(storage.root, "Couch Cube library - ROMs, BIOS, games and saves", "Games and data")
+    agent = home / "Library/LaunchAgents" / (LOGIN_LABEL + ".plist")
+    add(agent, "Couch Cube automatic console mode", "Supporting files")
+    items = [item for item in items if not any(
+        Path(item["path"]).is_relative_to(Path(parent["path"]))
+        for parent in items if parent["path"] != item["path"])]
+    token = hashlib.sha256(json_text(items).encode()).hexdigest()
+    return {"items": items, "token": token}
+
+
+def prepare_cleanup(identifiers, token, confirm):
+    if not confirm or not identifiers or len(set(identifiers)) != len(identifiers):
+        raise SetupError("Select cleanup items and explicitly confirm removal.")
+    plan = cleanup_plan()
+    if token != plan["token"]:
+        raise SetupError("Cleanup items changed. Review the list again before removing anything.")
+    known = {item["id"]: item for item in plan["items"]}
+    if not set(identifiers).issubset(known):
+        raise SetupError("Unknown cleanup item. Review the list again.")
+    selected = [known[key] for key in identifiers]
+    if any(item["path"].endswith("/" + LOGIN_LABEL + ".plist") or
+           item["path"] == str(HOST_CONFIG.parent) for item in selected):
+        # Keep stdout reserved for the JSON response.
+        import contextlib
+        with contextlib.redirect_stdout(sys.stderr):
+            login_launcher(True, enabled=False)
+    remaining = []
+    for item in selected:
+        if item["package"]:
+            print("Uninstalling " + item["name"], file=sys.stderr, flush=True)
+            run([find_brew(), "uninstall", "--cask", item["package"]], stdout=sys.stderr)
+        else:
+            remaining.append(item["path"])
+    # Selecting a library and a subdirectory should recycle the library only.
+    paths = [path for path in remaining if not any(
+        Path(path).is_relative_to(Path(parent)) for parent in remaining if parent != path)]
+    for path in paths:
+        reject_symlinks(Path(path))
+        if Path(path).exists():
+            info = Path(path).stat()
+            item = next(item for item in selected if item["path"] == path)
+            if f"{info.st_dev}:{info.st_ino}" != item["identity"]:
+                raise SetupError(f"Cleanup target changed: {path}. Scan again.")
+    paths = [path for path in paths if Path(path).exists()]
+    return {"paths": paths}
+
+
 def save_host_config(choice):
     reject_symlinks(HOST_CONFIG)
     HOST_CONFIG.parent.mkdir(parents=True, exist_ok=True)
@@ -965,6 +1116,198 @@ def save_host_config(choice):
         file.write(json_text({"id": choice["id"], "uuid": choice["uuid"]}))
         temporary = file.name
     os.replace(temporary, HOST_CONFIG)
+
+
+def storage_status():
+    reject_symlinks(HOST_CONFIG)
+    active = read_json(HOST_CONFIG) if HOST_CONFIG.is_file() else None
+    if active is not None and (not isinstance(active, dict)
+                               or not all(isinstance(active.get(key), str) for key in ["id", "uuid"])):
+        raise SetupError("Saved storage selection is invalid. Open Activity to review the saved setup.json file.")
+    locations = []
+    for choice in drives():
+        root = Path(choice["root"])
+        reject_symlinks(root)
+        marker = root / MARKER
+        reject_symlinks(marker)
+        configured = False
+        issue = None
+        if marker.exists():
+            try:
+                state = read_json(marker)
+                configured = (state.get("version") == 1 and state.get("uuid") == choice["uuid"]
+                              and state.get("id") == choice["id"] and state.get("mode") == choice["mode"])
+                if not configured:
+                    issue = "Library belongs to another volume or needs setup."
+            except (OSError, ValueError, AttributeError) as exc:
+                issue = f"Couldn't read library: {exc}"
+        locations.append({"drive": choice, "configured": configured, "issue": issue})
+    transfer = None
+    for location in locations:
+        if active and location["configured"] and location["drive"]["id"] == active.get("id"):
+            storage = Storage(location["drive"])
+            receipt_path = storage.read_path("Config/storage-transfer.json")
+            if receipt_path.is_file():
+                receipt = read_json(receipt_path)
+                if any(item["drive"]["root"] == receipt["source"]["root"] and item["configured"]
+                       and item["drive"]["uuid"] == receipt["source"]["uuid"] for item in locations):
+                    transfer = {"source": receipt["source"]["root"], "destination": receipt["destination"]["root"],
+                                "token": hashlib.sha256(json_text(receipt).encode()).hexdigest()}
+    return {"locations": locations, "active": active, "transfer": transfer}
+
+
+def transfer_snapshot(root):
+    """Hash the library without following links or including Steam's managed library."""
+    reject_symlinks(root)
+    result = {}
+    for directory, folders, files in os.walk(root, followlinks=False):
+        parent = Path(directory)
+        if parent == root:
+            folders[:] = [name for name in folders if name != "SteamLibrary"]
+            files = [name for name in files if name != "SteamLibrary"]
+        for name in sorted(folders + files):
+            path = parent / name
+            relative = str(path.relative_to(root))
+            info = path.lstat()
+            if stat.S_ISLNK(info.st_mode):
+                link = os.readlink(path)
+                if Path(link).is_absolute() or not (path.parent / link).resolve().is_relative_to(root.resolve()):
+                    raise SetupError(f"Library link points outside its folder: {path}. Move it manually.")
+                result[relative] = {"link": link}
+            elif stat.S_ISDIR(info.st_mode):
+                result[relative] = {"directory": True}
+            elif stat.S_ISREG(info.st_mode):
+                digest = hashlib.sha256()
+                with path.open("rb") as file:
+                    for chunk in iter(lambda: file.read(1024 * 1024), b""):
+                        digest.update(chunk)
+                result[relative] = {"size": info.st_size, "sha256": digest.hexdigest(),
+                                    "mode": stat.S_IMODE(info.st_mode)}
+            else:
+                raise SetupError(f"Unsupported special file in library: {path}")
+    return result
+
+
+def transfer_plan(source_id, destination_id, include_snapshot=False):
+    source = Storage(select_drive(source_id))
+    destination = Storage(select_drive(destination_id))
+    source.check()
+    destination.check()
+    if source.choice["uuid"] == destination.choice["uuid"] or source.root == destination.root:
+        raise SetupError("Choose a different storage volume for the transfer.")
+    state = read_json(source.target(MARKER))
+    if (state.get("version") != 1 or state.get("uuid") != source.choice["uuid"]
+            or state.get("id") != source_id or state.get("mode") != source.choice["mode"]):
+        raise SetupError("Source library identity does not match. Run setup on it first.")
+    selected_systems(state)
+    if destination.choice["filesystem"] not in ["apfs", "hfs"]:
+        raise SetupError("The destination must use APFS or Mac OS Extended. No formatting performed.")
+    if destination.root.exists():
+        raise SetupError("The destination Couch Cube folder already exists. Use it as a separate library, "
+                         "or move it aside in Finder before transferring. Libraries are never merged or overwritten.")
+    snapshot = transfer_snapshot(source.root)
+    size = sum(item.get("size", 0) for item in snapshot.values())
+    if destination.choice["free"] < size + 1024 ** 3:
+        raise SetupError("Not enough free space at the destination (1 GiB reserve required).")
+    source.check()
+    destination.check()
+    identity = {"source": source.choice, "destination": destination.choice, "files": snapshot}
+    # Free space changes between planning and copying are expected.
+    for key in ["source", "destination"]:
+        identity[key] = {k: v for k, v in identity[key].items() if k != "free"}
+    token = hashlib.sha256(json_text(identity).encode()).hexdigest()
+    plan = {"source": source.choice, "destination": destination.choice, "bytes": size, "token": token}
+    if include_snapshot:
+        plan["_snapshot"] = snapshot
+    return plan
+
+
+def transfer_library(source_id, destination_id, token, confirm):
+    if not confirm:
+        raise SetupError("Library transfer requires explicit confirmation.")
+    plan = transfer_plan(source_id, destination_id, include_snapshot=True)
+    if token != plan["token"]:
+        raise SetupError("The library or drive changed. Review the transfer again; no files copied.")
+    source, destination = Storage(plan["source"]), Storage(plan["destination"])
+    snapshot = plan["_snapshot"]
+    stage = destination.root.parent / (".couch-cube-transfer-" + uuid.uuid4().hex)
+    destination.check()
+    stage.mkdir(mode=0o700)
+    try:
+        for path in source.root.iterdir():
+            if path.name == "SteamLibrary":
+                continue
+            source.check()
+            destination.check()
+            print(f"Copying {path.name}...", file=sys.stderr, flush=True)
+            run(["/usr/bin/ditto", "--rsrc", "--extattr", str(path), str(stage / path.name)])
+        if transfer_snapshot(stage) != snapshot or transfer_snapshot(source.root) != snapshot:
+            raise SetupError("Content changed during copying or verification failed. Source remains unchanged.")
+        source.check()
+        destination.check()
+        if destination.root.exists():
+            raise SetupError("Destination appeared during copying; it will not be overwritten.")
+        # An exclusive directory reservation prevents replacing any existing library.
+        destination.root.mkdir()
+        for path in stage.iterdir():
+            destination.check()
+            path.rename(destination.root / path.name)
+        stage.rmdir()
+        state = read_json(destination.target(MARKER))
+        state.update({"id": destination_id, "uuid": destination.choice["uuid"], "mode": destination.choice["mode"]})
+        destination.write(MARKER, json_text(state))
+        initialize(destination)
+        source.check()
+        destination.check()
+        receipt = {"source": source.choice, "destination": destination.choice,
+                   "source_snapshot": snapshot}
+        receipt_token = hashlib.sha256(json_text(receipt).encode()).hexdigest()
+        destination.write("Config/storage-transfer.json", json_text(receipt))
+        save_host_config(destination.choice)
+        return {"source": str(source.root), "destination": str(destination.root), "token": receipt_token}
+    except (OSError, SetupError, subprocess.CalledProcessError) as exc:
+        raise SetupError(f"Transfer did not finish: {exc}. Source files were kept. "
+                         f"Inspect {stage} and {destination.root} before retrying.") from exc
+
+
+def retire_transferred_library(destination_id, token):
+    destination = Storage(select_drive(destination_id))
+    destination.check()
+    receipt = read_json(destination.target("Config/storage-transfer.json"))
+    if hashlib.sha256(json_text(receipt).encode()).hexdigest() != token:
+        raise SetupError("Transfer receipt changed. Old library will not be removed.")
+    source = Storage(receipt["source"])
+    source.check()
+    active = configured_storage()
+    if active.root != destination.root or source.root == destination.root:
+        raise SetupError("Activate the verified destination before retiring the source.")
+    if receipt["destination"]["uuid"] != destination.choice["uuid"]:
+        raise SetupError("Destination drive identity changed.")
+    if transfer_snapshot(source.root) != receipt["source_snapshot"]:
+        raise SetupError("Source changed since transfer; preserving it.")
+    copied = transfer_snapshot(destination.root)
+    state = read_json(destination.target(MARKER))
+    for relative, digest in state["managed"].items():
+        path = destination.read_path(relative)
+        if not path.is_file() or hashlib.sha256(path.read_bytes()).hexdigest() != digest:
+            raise SetupError(f"Destination generated files need repair: {relative}. Preserving old library.")
+    regenerated = set(state["managed"]) | {MARKER, "Frontend/ES-DE/settings/es_settings.xml",
+                                          "Config/storage-transfer.json"}
+    for relative, expected in receipt["source_snapshot"].items():
+        if relative not in regenerated and copied.get(relative) != expected:
+            raise SetupError(f"Destination content changed or is missing: {relative}. Preserving old library.")
+    steam = source.read_path("SteamLibrary")
+    if steam.exists() and any(steam.iterdir()):
+        raise SetupError("Old library still contains Steam files. Move these using Steam before retiring this folder.")
+    agent = login_agent()
+    reject_symlinks(agent)
+    if agent.exists():
+        settings = plistlib.loads(agent.read_bytes())
+        if settings.get("EnvironmentVariables", {}).get("COUCH_CUBE_ROOT") == str(source.root):
+            raise SetupError("Automatic console mode still uses this library. Save it again in Console Mode first.")
+    destination.check()
+    source.check()
+    return {"path": str(source.root)}
 
 
 def configured_storage(root=None):
@@ -1342,6 +1685,18 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("drives")
+    sub.add_parser("storage-status")
+    transfer = sub.add_parser("transfer-plan")
+    transfer.add_argument("--source", required=True)
+    transfer.add_argument("--destination", required=True)
+    copy_library = sub.add_parser("transfer-library")
+    copy_library.add_argument("--source", required=True)
+    copy_library.add_argument("--destination", required=True)
+    copy_library.add_argument("--token", required=True)
+    copy_library.add_argument("--confirm", action="store_true")
+    retire = sub.add_parser("retire-library")
+    retire.add_argument("--destination", required=True)
+    retire.add_argument("--token", required=True)
     sub.add_parser("disks")
     sub.add_parser("update-check")
     sub.add_parser("login-status")
@@ -1358,6 +1713,11 @@ def main():
     manage.add_argument("--confirm", action="store_true")
     cleanup = sub.add_parser("cleanup-host")
     cleanup.add_argument("--confirm", action="store_true")
+    sub.add_parser("cleanup-plan")
+    full_cleanup = sub.add_parser("cleanup-prepare")
+    full_cleanup.add_argument("--items", nargs="+", required=True)
+    full_cleanup.add_argument("--token", required=True)
+    full_cleanup.add_argument("--confirm", action="store_true")
     systems = sub.add_parser("systems")
     systems.add_argument("--root", required=True)
     systems.add_argument("--enabled", nargs="*", choices=list(SYSTEMS))
@@ -1410,6 +1770,14 @@ def main():
     try:
         if args.command == "drives":
             print(json_text(drives()))
+        elif args.command == "storage-status":
+            print(json_text(storage_status()))
+        elif args.command == "transfer-plan":
+            print(json_text(transfer_plan(args.source, args.destination)))
+        elif args.command == "transfer-library":
+            print(json_text(transfer_library(args.source, args.destination, args.token, args.confirm)))
+        elif args.command == "retire-library":
+            print(json_text(retire_transferred_library(args.destination, args.token)))
         elif args.command == "disks":
             print(json_text(physical_disks()))
         elif args.command == "update-check":
@@ -1431,6 +1799,10 @@ def main():
             manage_app(args.package, args.action, args.confirm)
         elif args.command == "cleanup-host":
             cleanup_host(args.confirm)
+        elif args.command == "cleanup-plan":
+            print(json_text(cleanup_plan()))
+        elif args.command == "cleanup-prepare":
+            print(json_text(prepare_cleanup(args.items, args.token, args.confirm)))
         elif args.command == "systems":
             storage = configured_storage(args.root)
             if args.enabled is not None:
