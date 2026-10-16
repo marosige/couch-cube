@@ -4,9 +4,9 @@
   <defs><clipPath id="tile"><rect x="16" y="16" width="992" height="992" rx="218"/></clipPath></defs>
   <g clip-path="url(#tile)">
     <rect x="16" y="16" width="992" height="992" fill="#718c91"/>
-    <rect x="-160" y="-130" width="840" height="462" rx="42" fill="#242a2d"/>
-    <rect x="-144" y="-114" width="808" height="424" rx="28" fill="#10191e"/>
-    <rect x="-100" y="310" width="742" height="8" rx="4" fill="#424d52"/>
+    <rect x="-160" y="-82" width="840" height="462" rx="42" fill="#242a2d"/>
+    <rect x="-144" y="-66" width="808" height="424" rx="28" fill="#10191e"/>
+    <rect x="-100" y="358" width="742" height="8" rx="4" fill="#424d52"/>
     <rect x="16" y="823" width="992" height="185" fill="#9c704e"/>
     <rect x="16" y="823" width="992" height="30" fill="#b88b62"/>
     <rect x="175" y="825" width="708" height="49" rx="24" fill="#815b41"/>

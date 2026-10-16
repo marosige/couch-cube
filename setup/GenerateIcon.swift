@@ -28,9 +28,9 @@ func drawIcon() {
     silhouette.fill()
     silhouette.addClip()
 
-    rounded(NSRect(x: -160, y: -130, width: 840, height: 462), 42, color(0x242A2D))
-    rounded(NSRect(x: -144, y: -114, width: 808, height: 424), 28, color(0x10191E))
-    rounded(NSRect(x: -100, y: 310, width: 742, height: 8), 4, color(0x424D52))
+    rounded(NSRect(x: -160, y: -82, width: 840, height: 462), 42, color(0x242A2D))
+    rounded(NSRect(x: -144, y: -66, width: 808, height: 424), 28, color(0x10191E))
+    rounded(NSRect(x: -100, y: 358, width: 742, height: 8), 4, color(0x424D52))
 
     color(0x9C704E).setFill()
     NSRect(x: 16, y: 823, width: 992, height: 185).fill()
