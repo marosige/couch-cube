@@ -37,3 +37,21 @@ hdiutil verify "$DMG"
   shasum -a 256 "$(basename "$DMG")" > "$DMG.sha256"
 )
 echo "$DMG"
+SSD_STAGE="$WORK/ssd"
+mkdir "$SSD_STAGE"
+ditto "$APP" "$SSD_STAGE/CouchCube.app"
+"$APP/Contents/Resources/python/bin/python3" -I -B - "$APP" "$SSD_STAGE" <<'PY'
+import importlib.util
+from pathlib import Path
+import sys
+source = Path(sys.argv[1]) / "Contents/Resources/scripts/console.py"
+spec = importlib.util.spec_from_file_location("backend", source)
+backend = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(backend)
+root = Path(sys.argv[2]) / backend.FOLDER
+for folder in backend.SSD_FOLDERS:
+    (root / folder).mkdir(parents=True, exist_ok=True)
+(root / backend.SSD_TEMPLATE).write_text("Couch Cube SSD template v1\n")
+PY
+ditto -c -k --sequesterRsrc "$SSD_STAGE" "$ROOT/build/CouchCube-0.3.0-arm64-SSD.zip"
+echo "$ROOT/build/CouchCube-0.3.0-arm64-SSD.zip"

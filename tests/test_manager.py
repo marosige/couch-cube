@@ -212,11 +212,128 @@ class ManagementTests(unittest.TestCase):
     def test_new_drive_is_not_claimed_to_be_configured(self):
         self.assertEqual(self.assessment()["state"], "not prepared")
 
+    def ssd_template(self):
+        for folder in manager.SSD_FOLDERS:
+            (self.storage.root / folder).mkdir(parents=True, exist_ok=True)
+        (self.storage.root / manager.SSD_TEMPLATE).write_text("Couch Cube SSD template v1\n")
+
+    def test_ssd_pack_empty_folders_can_be_initialized_on_current_drive(self):
+        self.ssd_template()
+        self.assertEqual(self.assessment()["state"], "not prepared")
+        self.assertFalse((self.storage.root / manager.MARKER).exists())
+        self.initialize()
+        self.assertFalse((self.storage.root / manager.SSD_TEMPLATE).exists())
+        self.assertEqual(manager.read_json(self.storage.root / manager.MARKER)["uuid"], "uuid")
+        self.assertEqual(self.assessment()["state"], "valid layout")
+
+    def test_ssd_template_with_user_files_is_preserved(self):
+        self.ssd_template()
+        game = self.storage.root / "ROMs/user-game.zip"
+        game.write_bytes(b"keep")
+        with self.assertRaisesRegex(manager.SetupError, "Preserving"):
+            self.initialize()
+        self.assertEqual(game.read_bytes(), b"keep")
+        self.assertNotEqual(self.assessment()["state"], "not prepared")
+
+    def test_ssd_template_rejects_symlinks_and_unexpected_folders(self):
+        self.ssd_template()
+        (self.storage.root / "Unknown").mkdir()
+        self.assertFalse(manager.is_ssd_template(self.storage.root))
+        (self.storage.root / "Unknown").rmdir()
+        (self.storage.root / "ROMs/link").symlink_to(self.base)
+        with self.assertRaises(manager.SetupError):
+            manager.is_ssd_template(self.storage.root)
+
     def test_prepared_layout_passes_and_missing_directory_fails(self):
         self.initialize()
         self.assertEqual(self.assessment()["state"], "valid layout")
         (self.storage.root / "SteamLibrary").rmdir()
         self.assertIn("Missing directory: SteamLibrary", self.assessment()["issues"])
+
+    def test_assessment_discovers_storage_only_before_and_after_read_batch(self):
+        self.initialize()
+        with patch.object(manager, "drives", return_value=[self.choice]) as discover:
+            self.assertEqual(self.assessment()["state"], "valid layout")
+        self.assertEqual(discover.call_count, 2)
+
+    def test_assessment_rejects_volume_changed_during_read_batch(self):
+        self.initialize()
+        replacement = dict(self.choice, uuid="replacement")
+        with patch.object(manager, "drives", side_effect=[[self.choice], [replacement]]):
+            report = self.assessment()
+        self.assertNotEqual(report["state"], "valid layout")
+        self.assertTrue(any("identity" in issue for issue in report["issues"]))
+
+    def test_assessment_read_batch_still_rejects_symlinks_and_path_escape(self):
+        self.initialize()
+        runtime = self.storage.root / "Runtime/console.py"
+        runtime.unlink()
+        runtime.symlink_to(self.base / "outside.py")
+        self.assertTrue(any("symbolic" in issue.lower() or "symlink" in issue.lower()
+                            for issue in self.assessment()["issues"]))
+        with self.assertRaisesRegex(manager.SetupError, "escapes"):
+            self.storage.read_path("../outside.py")
+
+    def test_write_targets_still_revalidate_storage_each_time(self):
+        self.initialize()
+        with patch.object(manager, "drives", return_value=[self.choice]) as discover:
+            self.storage.target("SteamLibrary")
+            self.storage.target("ROMs")
+        self.assertEqual(discover.call_count, 2)
+
+    def test_bios_checks_only_enabled_consoles(self):
+        manager.initialize(self.storage, ["psx", "segacd", "nes", "ps2"])
+        systems = {item["id"]: item for item in manager.systems_status(self.storage)}
+        self.assertIsNone(systems["dreamcast"]["bios"])
+        self.assertEqual(systems["psx"]["bios"]["state"], "optional")
+        self.assertEqual(systems["segacd"]["bios"]["state"], "missing")
+        self.assertEqual(systems["nes"]["bios"]["state"], "not-needed")
+        self.assertEqual(systems["ps2"]["bios"]["state"], "manual")
+        self.assertTrue(all(item["bios"] is None for item in manager.systems_status()))
+
+    def test_console_status_reports_actual_emulator_installation_once_per_package(self):
+        self.initialize()
+        def installed(name):
+            if name == "Dolphin.app":
+                return Path("/Applications/Dolphin.app/Contents/MacOS/Dolphin")
+            raise manager.SetupError("not installed")
+        with patch.object(manager, "app_binary", side_effect=installed) as detect:
+            systems = {item["id"]: item for item in manager.systems_status(self.storage)}
+        self.assertTrue(systems["gc"]["emulator_installed"])
+        self.assertTrue(systems["wii"]["emulator_installed"])
+        self.assertFalse(systems["psx"]["emulator_installed"])
+        self.assertEqual(detect.call_count, 6)
+
+    def test_bios_filename_presence_accepts_ps1_alternative_without_reading_contents(self):
+        manager.initialize(self.storage, ["psx"])
+        bios = self.storage.root / "BIOS/retroarch/scph5501.bin"
+        bios.write_bytes(b"")
+        result = manager.bios_status(self.storage, "psx")
+        self.assertEqual(result["state"], "present")
+        found = [item for item in result["files"] if item["present"]]
+        self.assertEqual([item["filename"] for item in found], ["scph5501.bin"])
+        self.assertEqual(found[0]["path"], str(bios))
+
+    def test_bios_regional_and_optional_files_are_distinguished(self):
+        self.initialize()
+        (self.storage.root / "BIOS/retroarch/bios_CD_U.bin").write_bytes(b"")
+        self.assertEqual(manager.bios_status(self.storage, "segacd")["state"], "partial")
+        for name in ["bios_CD_E.bin", "bios_CD_J.bin"]:
+            (self.storage.root / "BIOS/retroarch" / name).write_bytes(b"")
+        self.assertEqual(manager.bios_status(self.storage, "segacd")["state"], "present")
+        self.assertEqual(manager.bios_status(self.storage, "dreamcast")["state"], "optional")
+        for name in ["dc_boot.bin", "dc_flash.bin"]:
+            (self.storage.root / "BIOS/retroarch/dc" / name).write_bytes(b"")
+        self.assertEqual(manager.bios_status(self.storage, "dreamcast")["state"], "present")
+
+    def test_bios_directories_and_symlinks_do_not_count_as_files(self):
+        self.initialize()
+        root = self.storage.root / "BIOS/retroarch"
+        (root / "scph1001.bin").mkdir()
+        self.assertEqual(manager.bios_status(self.storage, "psx")["state"], "optional")
+        (root / "scph5501.bin").symlink_to(self.base / "outside")
+        with self.assertRaises(manager.SetupError):
+            manager.bios_status(self.storage, "psx")
 
     def test_changed_file_detected_and_not_repaired_silently(self):
         self.initialize()
@@ -349,7 +466,124 @@ class ManagementTests(unittest.TestCase):
         self.assertFalse((target / "fixture").exists())
 
 
+class SteamStatusTests(unittest.TestCase):
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temporary.cleanup)
+        self.home = Path(self.temporary.name).resolve()
+        self.patch = patch.object(manager.Path, "home", return_value=self.home)
+        self.patch.start()
+        self.addCleanup(self.patch.stop)
+        self.steam = self.home / "Library/Application Support/Steam"
+        self.steamapps = self.steam / "steamapps"
+        self.steamapps.mkdir(parents=True)
+
+    def manifest(self, root, appid, flags, name="Game"):
+        folder = root / "steamapps"
+        folder.mkdir(parents=True, exist_ok=True)
+        (folder / f"appmanifest_{appid}.acf").write_text(
+            '"AppState" { "appid" "' + appid + '" "name" "' + name +
+            '" "StateFlags" "' + flags + '" "SizeOnDisk" "123456" }')
+
+    def test_library_counts_use_manifests_and_deduplicate_paths(self):
+        external = self.home / "External SSD/SteamLibrary"
+        self.manifest(self.steam, "10", "4")
+        self.manifest(external, "20", "6")
+        self.manifest(external, "30", "1026")
+        self.manifest(external, "40", "0")
+        (self.steamapps / "libraryfolders.vdf").write_text(
+            '"libraryfolders" { "0" { "path" "' + str(self.steam) +
+            '" "apps" { "10" "123456" } } "1" { "path" "' + str(external) +
+            '" } "2" { "path" "' + str(external) + '" } }')
+        with patch.object(manager, "run") as run:
+            result = manager.steam_status()
+        run.assert_not_called()
+        self.assertEqual(result["errors"], [])
+        self.assertEqual(len(result["libraries"]), 2)
+        local, ssd = result["libraries"]
+        self.assertEqual(len(local["games"]), 1)
+        self.assertEqual(sum(game["installed"] for game in ssd["games"]), 1)
+        self.assertEqual([game["state"] for game in ssd["games"]],
+                         ["Update required", "Update / install in progress", "Not fully installed"])
+        self.assertEqual(local["games"][0]["bytes"], 123456)
+
+    def test_legacy_paths_and_offline_library_are_retained_without_fake_counts(self):
+        offline = self.home / "Disconnected SSD"
+        (self.steamapps / "libraryfolders.vdf").write_text(
+            '"LibraryFolders" { "1" "' + str(offline) + '" }')
+        result = manager.steam_status()
+        self.assertEqual(result["errors"], [])
+        self.assertFalse(result["libraries"][1]["available"])
+        self.assertEqual(result["libraries"][1]["games"], [])
+        self.assertFalse(offline.exists())
+
+    def test_malformed_metadata_reports_error_instead_of_zero_games(self):
+        for text in ['"libraryfolders" {', '"libraryfolders" { "1" { "path" "relative" } }']:
+            (self.steamapps / "libraryfolders.vdf").write_text(text)
+            result = manager.steam_status()
+            self.assertTrue(result["errors"])
+            self.assertEqual(result["libraries"], [])
+
+    def test_bad_manifest_does_not_hide_other_games_or_claim_missing_flags_installed(self):
+        self.manifest(self.steam, "10", "4", 'A \\"quoted\\" game')
+        (self.steamapps / "appmanifest_20.acf").write_text('"AppState" { "appid" "20" "name" "Unknown" }')
+        (self.steamapps / "appmanifest_30.acf").write_text('"AppState" { "appid" "31" "name" "Mismatch" }')
+        result = manager.steam_status()
+        self.assertEqual(len(result["errors"]), 1)
+        games = result["libraries"][0]["games"]
+        self.assertEqual(games[0]["name"], 'A "quoted" game')
+        self.assertFalse(games[1]["installed"])
+        self.assertEqual(games[1]["state"], "Unknown")
+        self.assertIsNone(games[1]["bytes"])
+
+    def test_vdf_parser_rejects_duplicates_and_truncated_objects(self):
+        for text in ['"a" { "b" "1"', '"a" "1" "A" "2"', '"a" }', "unexpected"]:
+            with self.assertRaises(manager.SetupError):
+                manager.parse_vdf(text)
+        self.assertEqual(manager.parse_vdf('// comment\n"a" { "b" "1" }'), {"a": {"b": "1"}})
+
+    def test_steam_not_installed_is_not_an_offline_library(self):
+        with patch.object(manager.Path, "home", return_value=self.home / "Empty home"):
+            self.assertEqual(manager.steam_status(), {"libraries": [], "errors": []})
+
+
 class AppManagementTests(unittest.TestCase):
+    def test_crossover_uses_official_manual_install_and_detects_existing_app(self):
+        self.assertEqual(manager.PACKAGES["crossover"], "CrossOver.app")
+        self.assertEqual(manager.MANUAL_APPS["crossover"], "https://www.codeweavers.com/crossover")
+        with tempfile.TemporaryDirectory() as temporary:
+            home = Path(temporary)
+            contents = home / "Applications/CrossOver.app/Contents"
+            contents.mkdir(parents=True)
+            with (contents / "Info.plist").open("wb") as file:
+                manager.plistlib.dump({"CFBundleShortVersionString": "1.2.3"}, file)
+            with patch.object(manager, "find_brew", side_effect=manager.SetupError("missing")), \
+                    patch.object(manager.Path, "home", return_value=home), \
+                    patch.object(manager, "PACKAGES", {"crossover": "CrossOver.app"}):
+                apps = manager.app_status()
+            crossover = apps[0]
+            self.assertTrue(crossover["manual"])
+            self.assertTrue(crossover["installed"])
+            self.assertEqual(crossover["version"], "1.2.3")
+        with patch.object(manager, "run") as run:
+            with self.assertRaisesRegex(manager.SetupError, "manual"):
+                manager.install_packages(["crossover"])
+            run.assert_not_called()
+
+    def test_official_mac_launchers_are_known_and_battle_net_uses_official_installer(self):
+        for package, name in {"gog-galaxy": "GOG Galaxy.app", "ea": "EA app.app",
+                              "epic-games": "Epic Games Launcher.app", "battle-net": "Battle.net.app",
+                              "curseforge": "CurseForge.app"}.items():
+            self.assertEqual(manager.PACKAGES[package], name)
+        self.assertEqual(manager.MANUAL_APPS["battle-net"], "https://download.battle.net/")
+
+    def test_automatic_update_check_without_brew_still_returns_app_status(self):
+        with patch.object(manager, "find_brew", side_effect=manager.SetupError("missing")), \
+                patch.object(manager.Path, "is_dir", return_value=False):
+            apps = manager.app_status(check_updates=True)
+        self.assertEqual(len(apps), len(manager.PACKAGES))
+        self.assertTrue(all(not app["brew"] and app["update"] is None for app in apps))
+
     def test_app_management_requires_confirmation(self):
         with patch.object(manager, "run") as run:
             for package, action in [("steam", "remove"), ("unknown", "install"), ("steam", "zap")]:
@@ -382,14 +616,18 @@ class AppManagementTests(unittest.TestCase):
             home = Path(temporary).resolve()
             config = home / "setup.json"
             config.write_text("{}")
+            (home / "frontend.json").write_text('{"default": "steam"}')
             games = home / "Games/ROMs"
             games.mkdir(parents=True)
             (games / "mine.iso").write_bytes(b"keep")
-            with patch.object(manager, "HOST_CONFIG", config), patch.object(manager.Path, "home", return_value=home), \
+            with patch.object(manager, "HOST_CONFIG", config), \
+                    patch.object(manager, "FRONTEND_CONFIG", home / "frontend.json"), \
+                    patch.object(manager.Path, "home", return_value=home), \
                     patch.object(manager, "login_launcher") as login:
                 manager.cleanup_host(True)
             login.assert_called_once_with(True, enabled=False)
             self.assertFalse(config.exists())
+            self.assertFalse((home / "frontend.json").exists())
             self.assertEqual((games / "mine.iso").read_bytes(), b"keep")
 
     def test_copy_app_preserves_existing_destination(self):
@@ -407,6 +645,49 @@ class AppManagementTests(unittest.TestCase):
 
 
 class DefaultFrontendTests(unittest.TestCase):
+    def setUp(self):
+        self.directory = tempfile.TemporaryDirectory()
+        self.addCleanup(self.directory.cleanup)
+        self.config = Path(self.directory.name).resolve() / "frontend.json"
+        patcher = patch.object(manager, "FRONTEND_CONFIG", self.config)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_explicit_es_de_preference_overrides_steam_and_survives_storage_selection(self):
+        with patch.object(manager, "app_binary") as binary:
+            manager.set_frontend("es-de", True)
+            binary.assert_called_once_with("ES-DE.app")
+        with patch.object(manager, "HOST_CONFIG", self.config.parent / "setup.json"):
+            manager.save_host_config({"id": "local", "uuid": "test"})
+        self.assertEqual(manager.frontend_preference(), "es-de")
+        with patch.object(manager.Path, "is_dir", return_value=True), patch.object(manager, "app_binary") as binary:
+            self.assertEqual(manager.default_frontend(), "retro")
+            binary.assert_called_once_with("ES-DE.app")
+
+    def test_missing_explicit_default_does_not_silently_change_menu(self):
+        self.config.write_text('{"default": "es-de"}')
+        with patch.object(manager.Path, "is_dir", lambda path: path.name == "Steam.app"):
+            with self.assertRaisesRegex(manager.SetupError, "default TV menu"):
+                manager.default_frontend()
+
+    def test_default_change_requires_consent_and_installed_app(self):
+        with patch.object(manager, "app_binary", side_effect=manager.SetupError("missing")):
+            for package, consent in [("steam", False), ("couch-cube", True), ("es-de", True)]:
+                with self.assertRaises(manager.SetupError):
+                    manager.set_frontend(package, consent)
+        self.assertFalse(self.config.exists())
+
+    def test_invalid_and_symlink_preferences_are_rejected(self):
+        self.config.write_text('{"default": "unknown"}')
+        with self.assertRaisesRegex(manager.SetupError, "Invalid TV menu"):
+            manager.frontend_preference()
+        self.config.unlink()
+        target = Path(self.directory.name) / "other.json"
+        target.write_text('{"default": "steam"}')
+        self.config.symlink_to(target)
+        with self.assertRaises(manager.SetupError):
+            manager.frontend_preference()
+
     def test_steam_preferred_when_both_installed(self):
         with patch.object(manager.Path, "is_dir", return_value=True), \
                 patch.object(manager, "app_binary") as binary:
@@ -435,6 +716,15 @@ class DefaultFrontendTests(unittest.TestCase):
             manager.launch(storage, "console")
             refresh.assert_called_once_with(storage, {})
             run.assert_called_once_with(["/usr/bin/open", "-a", "/Applications/ES-DE.app", "--args", "--home", "/games/Frontend"])
+
+    def test_explicit_steam_launch_does_not_change_or_use_default(self):
+        self.config.write_text('{"default": "es-de"}')
+        with patch.object(manager, "default_frontend") as default, \
+                patch.object(manager, "app_binary"), patch.object(manager, "run") as run:
+            manager.launch(unittest.mock.Mock(), "steam")
+        default.assert_not_called()
+        run.assert_called_once_with(["/usr/bin/open", "steam://open/bigpicture"])
+        self.assertEqual(manager.frontend_preference(), "es-de")
 
 
 class AutoLaunchTests(unittest.TestCase):

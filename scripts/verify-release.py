@@ -25,6 +25,7 @@ def verify_app(app, working_directory, distribution="local"):
     assert (resources / "Console.icns").is_file()
     assert (resources / "scripts/releases.py").is_file()
     assert (resources / "config/release.json").is_file()
+    assert (resources / "config/bios-map.csv").is_file()
     assert (resources / "Install Homebrew.command").is_file()
     helper = app / "Contents/MacOS/ConsoleAutoLaunch"
     assert helper.is_file()
@@ -94,3 +95,22 @@ with tempfile.TemporaryDirectory(prefix="mac-console-release-") as directory:
             cwd=directory)
         verify_app(copied, directory)
         print("Single DMG app relocation and descriptor-relative SSD copy passed; no Applications installation used.")
+
+archive = image.with_name(image.stem + "-SSD.zip")
+assert archive.is_file(), "SSD pack ZIP missing"
+with tempfile.TemporaryDirectory(prefix="couch-cube-ssd-pack-") as directory:
+    run(["/usr/bin/ditto", "-x", "-k", str(archive), directory])
+    root = Path(directory).resolve()
+    app = root / "CouchCube.app"
+    run(["/usr/bin/codesign", "--verify", "--deep", "--strict", str(app)])
+    resources = app / "Contents/Resources"
+    run([str(resources / "python/bin/python3"), "-I", "-B", "-c",
+         "import importlib.util,sys; from pathlib import Path; "
+         "source=Path(sys.argv[1]); root=Path(sys.argv[2]); "
+         "spec=importlib.util.spec_from_file_location('backend',source); "
+         "module=importlib.util.module_from_spec(spec); spec.loader.exec_module(module); "
+         "assert module.is_ssd_template(root/module.FOLDER); "
+         "assert not (root/module.FOLDER/module.MARKER).exists(); "
+         "assert all((root/module.FOLDER/folder).is_dir() for folder in module.SSD_FOLDERS); "
+         "print('SSD ZIP signature and empty portable template passed')",
+         str(resources / "scripts/console.py"), str(root)], cwd=directory)

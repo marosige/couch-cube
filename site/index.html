@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Turn your Apple Silicon Mac into a couch-friendly gaming console.">
+  <title>Couch Cube — Your Mac console</title>
+  <style>
+    :root { color-scheme: light dark; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #f5f5f7; color: #1d1d1f; }
+    * { box-sizing: border-box; }
+    body { margin: 0; min-height: 100svh; display: grid; place-items: center; padding: 40px 24px; }
+    main { width: min(100%, 960px); text-align: center; }
+    .hero { display: block; width: 100%; height: auto; border-radius: 24px; }
+    main > p, .downloads, main > small { max-width: 560px; margin-left: auto; margin-right: auto; }
+    h1 { font-size: clamp(36px, 8vw, 52px); letter-spacing: -.04em; margin: 16px 0 8px; }
+    p { color: #62626a; line-height: 1.6; }
+    .tagline { font-size: 22px; margin: 0 0 24px; color: inherit; }
+    .downloads { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 32px 0 24px; }
+    .download { display: block; background: #fff; border-radius: 18px; padding: 24px 16px; text-decoration: none; color: inherit; border: 1px solid #dddde2; }
+    .download:hover { border-color: #007aff; }
+    .download strong { display: block; color: #0068d9; font-size: 19px; margin-bottom: 8px; }
+    .download span { display: block; font-size: 14px; line-height: 1.5; color: #62626a; }
+    a { color: #0068d9; }
+    a:focus-visible { outline: 3px solid #007aff; outline-offset: 5px; }
+    small { display: block; color: #62626a; line-height: 1.6; margin: 16px 0; }
+    #release-status { font-size: 14px; }
+    @media (prefers-color-scheme: dark) {
+      :root { background: #1c1c1e; color: #f5f5f7; }
+      p, small, .download span { color: #b0b0b8; }
+      .download { background: #29292c; border-color: #424247; }
+      a, .download strong { color: #69adff; }
+    }
+    @media (max-width: 420px) { .downloads { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+  <main>
+    <img class="hero" src="header.png" alt="Couch Cube and its tagline centered on a full TV above an oak console and a small Mac mini" width="1600" height="900" fetchpriority="high">
+    <h1>Couch Cube</h1>
+    <p class="tagline">Your Mac console.</p>
+    <p>Set up your Mac for gaming on the couch. Steam, retro games, controllers and game storage — in one simple app.</p>
+    <div class="downloads">
+      <a class="download" id="installer" href="https://github.com/marosige/couch-cube/releases">
+        <strong>Installer</strong><span>For this Mac.<br>Open the DMG and drag the app to Applications.</span>
+      </a>
+      <a class="download" id="ssd" href="https://github.com/marosige/couch-cube/releases">
+        <strong>SSD pack</strong><span>For an external SSD.<br>Unzip onto your SSD, open the app and finish Setup.</span>
+      </a>
+    </div>
+    <p id="release-status" role="status">Choose a download from GitHub Releases.</p>
+    <small>Apple Silicon Mac · macOS 13 or newer · Early alpha<br>No games, BIOS or emulators included. Some Windows games need separate compatibility software.</small>
+    <small>Not notarized yet. If macOS blocks the app, review it in System Settings → Privacy &amp; Security.</small>
+    <a href="https://github.com/marosige/couch-cube">View on GitHub</a>
+  </main>
+  <script>
+    (async () => {
+      const status = document.getElementById("release-status");
+      try {
+        const response = await fetch("https://api.github.com/repos/marosige/couch-cube/releases?per_page=20");
+        if (!response.ok) throw new Error("Release lookup failed");
+        const releases = await response.json();
+        const release = releases.find(item => !item.draft && item.assets.some(asset => /^CouchCube-.*-arm64\.dmg$/.test(asset.name)));
+        if (!release) throw new Error("No download available");
+        const installer = release.assets.find(asset => /^CouchCube-.*-arm64\.dmg$/.test(asset.name));
+        const ssd = release.assets.find(asset => /^CouchCube-.*-arm64-SSD\.zip$/.test(asset.name));
+        document.getElementById("installer").href = installer.browser_download_url;
+        if (ssd) document.getElementById("ssd").href = ssd.browser_download_url;
+        status.textContent = release.tag_name + (release.prerelease ? " · Early alpha" : "") +
+          (ssd ? "" : " · SSD pack will be available in a future release.");
+      } catch (error) {
+        status.textContent = "Couldn't check downloads. Both buttons open GitHub Releases.";
+      }
+    })();
+  </script>
+</body>
+</html>

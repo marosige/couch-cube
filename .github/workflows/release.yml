@@ -35,6 +35,7 @@ jobs:
           name: CouchCube-arm64
           path: |
             build/*.dmg
+            build/*-SSD.zip
   publish-release:
     if: github.event_name == 'push' || inputs.publish_draft
     needs: dmg
@@ -57,12 +58,12 @@ jobs:
             [[ "$RELEASE_TAG" =~ ^v0\.3\.0-alpha\.[0-9]+$ ]]
             gh release create "$RELEASE_TAG" --verify-tag --prerelease --latest=false \
               --title "Couch Cube ${RELEASE_TAG#v} (Apple Silicon)" \
-              --notes "Early alpha for Apple Silicon Macs running macOS 13+. One download: open the DMG and drag CouchCube.app to Applications. For an SSD, open Setup in the app to copy this app or explicitly prepare a new drive. Internal app version: 0.3.0. Ad-hoc signed, not notarized: macOS may require explicit approval in Privacy & Security. No games, BIOS, firmware or keys included. Steam storage and shortcuts are configured manually. Switch emulator setup is manual with no verified automatic download. Back up data before testing. Physical SSD erase and login/controller hotplug have not been exercised on a test Mac." \
-              artifacts/*.dmg
+              --notes "Early alpha for Apple Silicon Macs running macOS 13+. Installer: open the DMG and drag CouchCube.app to Applications. SSD pack: unzip onto your SSD, open CouchCube.app and finish Setup before adding games. The ZIP includes empty game folders, not a preconfigured library. Internal app version: 0.3.0. Ad-hoc signed, not notarized: macOS may require explicit approval in Privacy & Security. No games, BIOS, firmware or keys included. Steam storage and shortcuts are configured manually. Switch emulator setup is manual with no verified automatic download. Back up data before testing. Physical SSD erase and login/controller hotplug have not been exercised on a test Mac." \
+              artifacts/*.dmg artifacts/*-SSD.zip
           else
             test "$RELEASE_TAG" = v0.3.0
             gh release create "$RELEASE_TAG" --verify-tag --draft \
               --title "Couch Cube 0.3.0 (Apple Silicon)" \
               --notes "Apple Silicon macOS 13+. Ad-hoc signed; not notarized. See README for storage and SSD-preparation limitations." \
-              artifacts/*.dmg
+              artifacts/*.dmg artifacts/*-SSD.zip
           fi

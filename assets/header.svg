@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="900" viewBox="-1000 -500 1900 1068.75" role="img" aria-labelledby="title desc">
+  <title id="title">Couch Cube</title>
+  <desc id="desc">The Couch Cube icon expanded into a compact wide illustration: a complete television with centered Couch Cube branding and tagline, an oak media console and a small silver Mac mini.</desc>
+  <rect x="-1100" y="-500" width="2720" height="1530" fill="#718c91"/>
+  <!-- Only the hidden top and left edges extend beyond the original icon. -->
+  <rect x="-850" y="-400" width="1530" height="780" rx="42" fill="#242a2d"/>
+  <rect x="-834" y="-384" width="1498" height="742" rx="28" fill="#10191e"/>
+  <rect x="-100" y="358" width="742" height="8" rx="4" fill="#424d52"/>
+  <g text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Helvetica Neue', Arial, sans-serif">
+    <text x="-85" y="-40" font-size="122" font-weight="650" letter-spacing="-4" fill="#f4f1e8">Couch Cube</text>
+    <text x="-85" y="45" font-size="35" fill="#a7bec0">Your Mac. Your games. Your couch.</text>
+  </g>
+  <!-- Cabinet and Mac mini retain the icon's coordinates, shapes and colors. -->
+  <rect x="-950" y="500" width="1800" height="185" rx="8" fill="#9c704e"/>
+  <path d="M-950 508a8 8 0 0 1 8-8H842a8 8 0 0 1 8 8v22H-950Z" fill="#b88b62"/>
+  <g transform="translate(350 281.5) scale(.25)">
+  <rect x="175" y="825" width="708" height="49" rx="24" fill="#815b41"/>
+  <rect x="250" y="805" width="552" height="44" rx="22" fill="#303638"/>
+  <rect x="192" y="475" width="640" height="359" rx="60" fill="#bcc3c8"/>
+  <rect x="192" y="475" width="640" height="170" rx="60" fill="#e6e9eb"/>
+  <g fill="#424b52">
+    <rect x="342.5" y="745.75" width="21" height="48" rx="10"/>
+    <rect x="450.5" y="745.75" width="21" height="48" rx="10"/>
+    <circle cx="779.5" cy="769.5" r="13.5"/>
+  </g>
+  <g fill="#202a30">
+    <rect x="350.5" y="753.25" width="5" height="33" rx="2.5"/>
+    <rect x="458.5" y="753.25" width="5" height="33" rx="2.5"/>
+  </g>
+  <circle cx="720.5" cy="769" r="6.5" fill="#f7faf8"/>
+  </g>
+</svg>

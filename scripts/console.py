@@ -2,6 +2,7 @@
 """Safe storage setup and launch backend for the native macOS setup app."""
 
 import argparse
+import csv
 import hashlib
 import importlib.util
 import json
@@ -21,21 +22,36 @@ import uuid
 import xml.etree.ElementTree as ET
 
 PROJECT = Path(__file__).resolve().parent.parent
+BIOS_MAP = PROJECT / ("Config" if Path(__file__).parent.name == "Runtime" else "config") / "bios-map.csv"
 HOST_CONFIG = Path.home() / "Library/Application Support/Mac Game Console/setup.json"
+FRONTEND_CONFIG = Path.home() / "Library/Application Support/Mac Game Console/frontend.json"
 MARKER = ".mac-game-console.json"
 FOLDER = "Couch Cube"
+SSD_TEMPLATE = ".couch-cube-ssd-template"
+SSD_FOLDERS = [
+    "SteamLibrary", "ROMs", "BIOS/retroarch/dc", "Saves", "Native/Games",
+    "Native/Assets", "Windows/Wrappers", "Windows/Installers",
+]
 PACKAGES = {
     "steam": "Steam.app",
+    "gog-galaxy": "GOG Galaxy.app",
+    "ea": "EA app.app",
+    "epic-games": "Epic Games Launcher.app",
+    "battle-net": "Battle.net.app",
+    "curseforge": "CurseForge.app",
     "es-de": "ES-DE.app",
     "retroarch-metal": "RetroArch.app",
     "dolphin": "Dolphin.app",
     "porting-kit": "Porting Kit.app",
+    "crossover": "CrossOver.app",
     "pcsx2": "PCSX2.app",
     "rpcs3": "RPCS3.app",
     "cemu-wiiu": "Cemu.app",
     "switch": "Ryujinx.app",
 }
 MANUAL_APPS = {
+    "crossover": "https://www.codeweavers.com/crossover",
+    "battle-net": "https://download.battle.net/",
     "rpcs3": "https://rpcs3.net/download",
     "cemu-wiiu": "https://cemu.info/",
     "switch": None,
@@ -153,8 +169,30 @@ def select_drive(identifier):
     return matches[0]
 
 
+def is_ssd_template(root):
+    marker = root / SSD_TEMPLATE
+    reject_symlinks(root)
+    if not marker.is_file():
+        return False
+    reject_symlinks(marker)
+    if marker.read_text() != "Couch Cube SSD template v1\n":
+        return False
+    allowed = {Path(".")}
+    for folder in SSD_FOLDERS:
+        path = Path(folder)
+        allowed.update([path, *path.parents])
+    for path in root.rglob("*"):
+        reject_symlinks(path)
+        if path == marker:
+            continue
+        if not path.is_dir() or path.relative_to(root) not in allowed:
+            return False
+    return True
+
+
 def assess(identifier):
     choice = select_drive(identifier)
+    storage = Storage(choice)
     root = Path(choice["root"])
     issues = []
     notes = []
@@ -182,16 +220,16 @@ def assess(identifier):
             for relative in sorted(required_files - set(manifest["managed"])):
                 issues.append("Manifest does not track required file: " + relative)
             for relative, digest in manifest["managed"].items():
-                path = Storage(choice).target(relative)
+                path = storage.read_path(relative)
                 if not isinstance(digest, str) or not path.is_file() or hashlib.sha256(path.read_bytes()).hexdigest() != digest:
                     issues.append(f"Missing or modified managed file: {relative}")
             for folder in ["ROMs", "BIOS/retroarch", "SteamLibrary", "Saves", "Native/Assets", "Windows/Wrappers"]:
-                if not Storage(choice).target(folder).is_dir():
+                if not storage.read_path(folder).is_dir():
                     issues.append("Missing directory: " + folder)
-            if not Storage(choice).target("Frontend/ES-DE/settings/es_settings.xml").is_file():
+            if not storage.read_path("Frontend/ES-DE/settings/es_settings.xml").is_file():
                 issues.append("ES-DE settings are missing. Rerun setup.")
             else:
-                text = Storage(choice).target("Frontend/ES-DE/settings/es_settings.xml").read_text()
+                text = storage.read_path("Frontend/ES-DE/settings/es_settings.xml").read_text()
                 parsed = ET.fromstring("<settings>" + re.sub(r"<\?xml[^>]*\?>", "", text) + "</settings>")
                 entries = parsed.findall(".//string[@name='ROMDirectory']")
                 if not entries or entries[0].get("value") != str(root / "ROMs"):
@@ -203,15 +241,16 @@ def assess(identifier):
                 issues.append("Incomplete setup: no managed files recorded.")
             cores = Path.home() / "Library/Application Support/RetroArch/cores"
             for system, (_, extensions, core) in SYSTEMS.items():
-                folder = Storage(choice).target("ROMs/" + system)
+                folder = storage.read_path("ROMs/" + system)
                 has_games = folder.is_dir() and any(
                     file.is_file() and file.suffix.lower().lstrip(".") in extensions.split("|")
                     for file in folder.rglob("*")
                 )
                 if has_games and core not in STANDALONE and not (cores / (core + "_libretro.dylib")).is_file():
                     notes.append(f"Missing host core for ROMs/{system}: {core}. Install using RetroArch Core Downloader.")
-        elif root.exists() and any(root.iterdir()):
+        elif root.exists() and any(root.iterdir()) and not is_ssd_template(root):
             issues.append("Existing folder has no setup manifest; it will not be overwritten.")
+        storage.check()
     except (SetupError, OSError, ValueError, KeyError, AttributeError, TypeError, ET.ParseError) as exc:
         state = "invalid setup"
         issues.append(str(exc))
@@ -229,7 +268,8 @@ def assess(identifier):
         issues.append("This release supports Apple Silicon only, not Intel Macs.")
     notes.append("No SSD benchmark, BIOS authenticity or game compatibility is inferred from metadata.")
     return {"state": state if not issues else "needs attention", "issues": issues,
-            "notes": notes, "missing": missing, "root": str(root)}
+            "notes": notes, "missing": missing, "root": str(root),
+            "preferred_frontend": frontend_preference()}
 
 
 def physical_disks():
@@ -532,6 +572,11 @@ class Storage:
 
     def target(self, relative):
         self.check()
+        return self.read_path(relative)
+
+    def read_path(self, relative):
+        # Read-only batches validate volume identity before and after the batch.
+        # Writes must continue to use target(), which revalidates every operation.
         path = self.root / relative
         if not path.is_relative_to(self.root) or ".." in path.parts:
             raise SetupError("Managed path escapes the game folder.")
@@ -646,6 +691,7 @@ def generated_files(storage, registrations, systems=None):
             ET.SubElement(entry, key).text = value
     files = {
         "Runtime/console.py": (Path(__file__).read_bytes(), False),
+        "Config/bios-map.csv": (BIOS_MAP.read_bytes(), False),
         "Runtime/emulate.sh": ((
             '#!/bin/bash\nset -euo pipefail\n'
             'ROOT="$(cd "$(dirname "$0")/.." && pwd)"\n'
@@ -740,9 +786,45 @@ def select_systems(storage, systems):
     print("Console selection saved. Existing ROMs and saves were kept.", flush=True)
 
 
+def bios_status(storage, system):
+    root = storage.read_path("BIOS/retroarch")
+    with BIOS_MAP.open(newline="") as file:
+        entries = [entry for entry in csv.DictReader(file) if entry["system"] == system]
+    files = [{"filename": entry["filename"], "path": str(root / entry["filename"]),
+              "present": storage.read_path("BIOS/retroarch/" + entry["filename"]).is_file(),
+              "note": entry["notes"]} for entry in entries]
+    if files:
+        present = sum(item["present"] for item in files)
+        if system == "psx":
+            state = "present" if present else "optional"
+            message = "BIOS filename found" if present else "BIOS recommended · HLE fallback available"
+        elif system == "dreamcast":
+            state = "present" if present == len(files) else "optional"
+            message = "BIOS filenames found" if present == len(files) else "Optional BIOS files missing · HLE available"
+        else:
+            state = "present" if present == len(files) else "partial" if present else "missing"
+            message = f"{present}/{len(files)} regional BIOS files found" if present else "Regional BIOS files missing"
+        return {"state": state, "summary": message, "files": files}
+    if system in {"ps2", "ps3", "switch"}:
+        return {"state": "manual", "summary": "BIOS setup in PCSX2 · Not checked" if system == "ps2" else
+                "Firmware setup in RPCS3 · Not checked" if system == "ps3" else
+                "Keys & firmware in emulator · Not checked", "files": []}
+    return {"state": "not-needed", "summary": "No BIOS file required for the configured emulator",
+            "files": []}
+
+
 def systems_status(storage=None):
     enabled = selected_systems(read_json(storage.target(MARKER))) if storage else []
-    return [{"id": key, "name": name, "enabled": key in enabled,
+    installed = {}
+    for package in ({core if core in STANDALONE else "retroarch-metal" for _, _, core in SYSTEMS.values()} if storage else []):
+        try:
+            app_binary(PACKAGES[package])
+            installed[package] = True
+        except (SetupError, OSError, KeyError, ValueError):
+            installed[package] = False
+    result = [{"id": key, "name": name, "enabled": key in enabled,
+             "emulator_installed": installed.get(core if core in STANDALONE else "retroarch-metal"),
+             "bios": bios_status(storage, key) if storage and key in enabled else None,
              "package": core if core in STANDALONE else "retroarch-metal",
              "requirement": ("Own console keys/firmware; bring your own compatible macOS emulator. Not automatically downloaded."
                              if key == "switch" else
@@ -752,12 +834,16 @@ def systems_status(storage=None):
                              "Dolphin; configure controllers in the emulator." if core == "dolphin" else
                              f"RetroArch core: {core}. Some systems need your own BIOS.")}
             for key, (name, _, core) in SYSTEMS.items()]
+    if storage:
+        storage.check()
+    return result
 
 
 def initialize(storage, systems=None):
     storage.check()
     marker = storage.target(MARKER)
-    if storage.root.exists() and not marker.exists() and any(storage.root.iterdir()):
+    template = not marker.exists() and is_ssd_template(storage.root)
+    if storage.root.exists() and not marker.exists() and any(storage.root.iterdir()) and not template:
         raise SetupError(f"Preserving existing unrecognized folder: {storage.root}. Rename it or choose another drive.")
     state = read_json(marker) if marker.exists() else {
         "version": 1, "games": [], "managed": {}, "systems": systems if systems is not None else []}
@@ -780,6 +866,8 @@ def initialize(storage, systems=None):
     for folder in folders:
         storage.mkdir(folder)
     refresh_generated(storage, state)
+    if template:
+        storage.target(SSD_TEMPLATE).unlink()
     return state
 
 
@@ -819,11 +907,10 @@ def app_status(check_updates=False):
         managed = {item["token"]: item for item in info.get("casks", [])}
     outdated = {}
     if check_updates:
-        if not brew:
-            raise SetupError("Install Homebrew to check updates for Homebrew-managed apps.")
-        info = json.loads(run([brew, "outdated", "--cask", "--greedy", "--json=v2"],
-                              stdout=subprocess.PIPE, text=True).stdout)
-        outdated = {item["name"]: item.get("current_version", "") for item in info.get("casks", [])}
+        if brew:
+            info = json.loads(run([brew, "outdated", "--cask", "--greedy", "--json=v2"],
+                                  stdout=subprocess.PIPE, text=True).stdout)
+            outdated = {item["name"]: item.get("current_version", "") for item in info.get("casks", [])}
     result = []
     for key, name in PACKAGES.items():
         paths = [base / name for base in [Path("/Applications"), Path.home() / "Applications"]]
@@ -861,6 +948,9 @@ def cleanup_host(confirm):
     reject_symlinks(HOST_CONFIG)
     if HOST_CONFIG.is_file():
         HOST_CONFIG.unlink()
+    reject_symlinks(FRONTEND_CONFIG)
+    if FRONTEND_CONFIG.is_file():
+        FRONTEND_CONFIG.unlink()
     log_path = Path.home() / "Library/Logs/Couch Cube/auto-launch.log"
     reject_symlinks(log_path)
     if log_path.is_file():
@@ -926,12 +1016,38 @@ def register(storage, name, kind, relative):
     print(f"Created {storage.root / 'Launchers' / (name + '.app')}", flush=True)
 
 
+def frontend_preference():
+    reject_symlinks(FRONTEND_CONFIG)
+    if not FRONTEND_CONFIG.exists():
+        return None
+    value = read_json(FRONTEND_CONFIG)
+    if not isinstance(value, dict) or value.get("default") not in {"steam", "es-de"}:
+        raise SetupError("Invalid TV menu preference. Choose Steam or ES-DE in TV menu.")
+    return value["default"]
+
+
+def set_frontend(package, confirm=False):
+    if not confirm or package not in {"steam", "es-de"}:
+        raise SetupError("Choose an installed TV menu and explicitly confirm the change.")
+    app_binary(PACKAGES[package])
+    reject_symlinks(FRONTEND_CONFIG)
+    FRONTEND_CONFIG.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile(dir=FRONTEND_CONFIG.parent, mode="w", delete=False) as file:
+        file.write(json_text({"default": package}))
+        temporary = file.name
+    os.replace(temporary, FRONTEND_CONFIG)
+    print("Default TV menu saved for this Mac. Play and automatic console mode use this choice.")
+
+
 def default_frontend():
-    for package in ["steam", "es-de"]:
+    preferred = frontend_preference()
+    for package in [preferred] if preferred else ["steam", "es-de"]:
         name = PACKAGES[package]
         if any((parent / name).is_dir() for parent in [Path("/Applications"), Path.home() / "Applications"]):
             app_binary(name)
             return "steam" if package == "steam" else "retro"
+    if preferred:
+        raise SetupError(f"Your default TV menu ({PACKAGES[preferred]}) is missing. Install it or choose another in TV menu.")
     raise SetupError("Install Steam or ES-DE from Couch Cube > Apps first.")
 
 
@@ -995,12 +1111,117 @@ def vdf_value(text, key):
     return match.group(1).replace(r"\\", "\\").replace(r'\"', '"')
 
 
+def parse_vdf(text):
+    tokens = []
+    offset = 0
+    pattern = re.compile(r'\s+|//[^\n]*|"(?:\\.|[^"\\])*"|[{}]')
+    while offset < len(text):
+        match = pattern.match(text, offset)
+        if not match:
+            raise SetupError("Unsupported or malformed Steam metadata.")
+        token = match.group()
+        offset = match.end()
+        if token.isspace() or token.startswith("//"):
+            continue
+        tokens.append(token)
+    position = 0
+
+    def object_value(nested=False, depth=0):
+        nonlocal position
+        if depth > 32:
+            raise SetupError("Steam metadata nesting is too deep.")
+        result = {}
+        while position < len(tokens):
+            key = tokens[position]
+            position += 1
+            if key == "}" and nested:
+                return result
+            if not key.startswith('"') or position >= len(tokens):
+                raise SetupError("Malformed Steam metadata key.")
+            key = key[1:-1].replace(r"\\", "\\").replace(r'\"', '"').lower()
+            value = tokens[position]
+            position += 1
+            if value == "{":
+                value = object_value(True, depth + 1)
+            elif value.startswith('"'):
+                value = value[1:-1].replace(r"\\", "\\").replace(r'\"', '"')
+            else:
+                raise SetupError("Malformed Steam metadata value.")
+            if key in result:
+                raise SetupError("Duplicate Steam metadata key: " + key)
+            result[key] = value
+        if nested:
+            raise SetupError("Unclosed Steam metadata object.")
+        return result
+
+    return object_value()
+
+
+def steam_libraries(extra=None):
+    home = Path.home() / "Library/Application Support/Steam"
+    paths = [home]
+    metadata = home / "steamapps/libraryfolders.vdf"
+    if metadata.is_file():
+        folders = parse_vdf(metadata.read_text()).get("libraryfolders")
+        if not isinstance(folders, dict):
+            raise SetupError("Steam libraryfolders metadata is invalid.")
+        for key, entry in folders.items():
+            if not key.isdigit():
+                continue
+            path = entry.get("path") if isinstance(entry, dict) else entry
+            if not isinstance(path, str) or not Path(path).is_absolute():
+                raise SetupError("Steam library path is invalid.")
+            paths.append(Path(path))
+    if extra is not None:
+        paths.append(extra)
+    return list(dict.fromkeys(path.resolve() for path in paths))
+
+
+def steam_status():
+    libraries = []
+    errors = []
+    try:
+        paths = steam_libraries()
+    except (SetupError, OSError, UnicodeError) as exc:
+        return {"libraries": [], "errors": [str(exc)]}
+    for path in paths:
+        if path == (Path.home() / "Library/Application Support/Steam").resolve() and not path.exists():
+            continue
+        games = []
+        available = path.is_dir()
+        if available:
+            try:
+                manifests = sorted((path / "steamapps").glob("appmanifest_*.acf"))
+                for manifest in manifests:
+                    try:
+                        data = parse_vdf(manifest.read_text()).get("appstate")
+                        if not isinstance(data, dict):
+                            raise SetupError("Missing AppState object.")
+                        appid, name = data.get("appid"), data.get("name")
+                        if not isinstance(appid, str) or not appid.isdigit() or not isinstance(name, str):
+                            raise SetupError("Invalid Steam game identity.")
+                        if manifest.name != f"appmanifest_{appid}.acf":
+                            raise SetupError("Steam app ID does not match its manifest filename.")
+                        flags, size = data.get("stateflags"), data.get("sizeondisk")
+                        flags = int(flags) if isinstance(flags, str) and flags.isdigit() else None
+                        size = int(size) if isinstance(size, str) and size.isdigit() else None
+                        state = "Unknown"
+                        if flags is not None:
+                            state = "Update required" if flags & 2 else "Installed" if flags & 4 else "Not fully installed"
+                            if flags & (256 | 512 | 1024 | 131072 | 262144 | 524288 | 1048576 | 2097152 | 4194304 | 8388608):
+                                state = "Update / install in progress"
+                        games.append({"appid": appid, "name": name, "state": state,
+                                      "installed": flags is not None and bool(flags & 4), "bytes": size})
+                    except (SetupError, OSError, UnicodeError) as exc:
+                        errors.append(f"{manifest}: {exc}")
+            except OSError as exc:
+                errors.append(f"{path}: {exc}")
+        libraries.append({"path": str(path), "available": available, "games": games})
+    return {"libraries": libraries, "errors": errors}
+
+
 def index_games(storage):
-    libraries = {Path.home() / "Library/Application Support/Steam", storage.root / "SteamLibrary"}
-    vdf = Path.home() / "Library/Application Support/Steam/steamapps/libraryfolders.vdf"
-    if vdf.exists():
-        for value in re.findall(r'"path"\s+"((?:\\.|[^"\\])*)"', vdf.read_text()):
-            libraries.add(Path(value.replace(r"\\", "\\").replace(r'\"', '"')))
+    libraries = steam_libraries(storage.root / "SteamLibrary")
     steam = {}
     for library in sorted(libraries):
         for manifest in sorted((library / "steamapps").glob("appmanifest_*.acf")):
@@ -1124,7 +1345,11 @@ def main():
     sub.add_parser("disks")
     sub.add_parser("update-check")
     sub.add_parser("login-status")
+    sub.add_parser("steam-status")
     sub.add_parser("system-catalog")
+    frontend = sub.add_parser("frontend")
+    frontend.add_argument("--default", choices=["steam", "es-de"])
+    frontend.add_argument("--confirm", action="store_true")
     apps = sub.add_parser("apps")
     apps.add_argument("--updates", action="store_true")
     manage = sub.add_parser("manage-app")
@@ -1191,8 +1416,15 @@ def main():
             print(json_text(release_tools().latest()))
         elif args.command == "login-status":
             print(json_text(login_status()))
+        elif args.command == "steam-status":
+            print(json_text(steam_status()))
         elif args.command == "system-catalog":
             print(json_text(systems_status()))
+        elif args.command == "frontend":
+            if args.default:
+                set_frontend(args.default, args.confirm)
+            else:
+                print(json_text({"preferred": frontend_preference()}))
         elif args.command == "apps":
             print(json_text(app_status(args.updates)))
         elif args.command == "manage-app":

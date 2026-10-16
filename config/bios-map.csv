@@ -1,5 +1,11 @@
 system,filename,notes
 psx,scph1001.bin,PCSX ReARMed US example; alternatives depend on region/core
+psx,scph5501.bin,PCSX ReARMed alternative; one supported PS1 BIOS is sufficient
+psx,scph7001.bin,PCSX ReARMed alternative; one supported PS1 BIOS is sufficient
+psx,scph101.bin,PCSX ReARMed alternative; one supported PS1 BIOS is sufficient
+psx,PSXONPSP660.bin,PCSX ReARMed alternative; one supported PS1 BIOS is sufficient
 dreamcast,dc/dc_boot.bin,Flycast optional Dreamcast BIOS; see core documentation
 dreamcast,dc/dc_flash.bin,Flycast flash; see core documentation
 segacd,bios_CD_U.bin,Genesis Plus GX US BIOS; other regions use different names
+segacd,bios_CD_E.bin,Genesis Plus GX European games BIOS; only needed for this region
+segacd,bios_CD_J.bin,Genesis Plus GX Japanese games BIOS; only needed for this region

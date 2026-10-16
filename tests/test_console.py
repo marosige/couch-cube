@@ -334,7 +334,7 @@ class StorageTests(unittest.TestCase):
             self.assertEqual(console.main(), 1)
         self.assertFalse(self.storage.root.exists())
 
-    def test_bios_checker_reports_every_missing_example(self):
+    def test_bios_checker_distinguishes_alternatives_optional_and_regional_files(self):
         project = self.base / "bios-test"
         (project / "scripts").mkdir(parents=True)
         (project / "config").mkdir()
@@ -346,7 +346,10 @@ class StorageTests(unittest.TestCase):
         env = dict(os.environ, HOME=str(project))
         result = subprocess.run(["bash", str(project / "scripts/check-bios.sh")], env=env, capture_output=True, text=True)
         self.assertEqual(result.returncode, 2)
-        self.assertEqual(result.stdout.count("[MISSING]"), 4)
+        self.assertEqual(result.stdout.count("[OPTIONAL ALTERNATIVE]"), 5)
+        self.assertEqual(result.stdout.count("[OPTIONAL]"), 2)
+        self.assertEqual(result.stdout.count("[REGION NOT FOUND]"), 3)
+        self.assertIn("Total missing required BIOS groups: 1", result.stdout)
         bios = project / "BIOS"
         (bios / "dc").mkdir(parents=True)
         for name in ["scph1001.bin", "dc/dc_boot.bin", "dc/dc_flash.bin", "bios_CD_U.bin"]:
