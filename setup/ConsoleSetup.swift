@@ -160,27 +160,41 @@ enum ConsoleArtwork {
         ("SEGA", ["megadrive", "segacd", "dreamcast"])
     ]
 
+    // Body colors follow each system's best-known retail edition. Very dark plastics are
+    // lifted slightly in Dark Mode so the silhouette stays visible.
     static func color(for id: String) -> NSColor {
         let colors: (UInt32, UInt32)
         switch id {
-        case "nes": colors = (0x8C7775, 0xC3AFAC)
-        case "snes": colors = (0x8273A4, 0xBBAED6)
-        case "n64": colors = (0x586970, 0xA4B4BB)
-        case "gc": colors = (0x6856A1, 0xAFA0D8)
-        case "wii": colors = (0xBEC5CC, 0xF0F2F4)
-        case "wiiu": colors = (0x466E7B, 0x8FB8C6)
-        case "gb": colors = (0x92938C, 0xC8C9C0)
-        case "gbc": colors = (0xB99535, 0xE4C369)
-        case "gba": colors = (0x6252A0, 0xAFA0E2)
-        case "psx": colors = (0x7D8692, 0xBCC5D0)
-        case "ps2": colors = (0x436BA0, 0x8BAFE0)
-        case "psp", "ps3": colors = (0x606878, 0xADB5C5)
-        case "megadrive": colors = (0x536878, 0x9FB4C4)
-        case "segacd": colors = (0x537B9A, 0x9DC0DA)
-        case "dreamcast": colors = (0xBB7954, 0xE4B18E)
+        case "nes": colors = (0xC9C6BF, 0xD3D0C9)
+        case "snes": colors = (0xC5C3CE, 0xCFCDD8)
+        case "n64": colors = (0x2E3035, 0x62666F)
+        case "gc": colors = (0x4E43A8, 0x7A6EDB)
+        case "wii": colors = (0xEDEFF2, 0xF4F5F7)
+        case "wiiu": colors = (0x27292E, 0x5E626B)
+        case "switch": colors = (0x34363B, 0x5E6168)
+        case "gb": colors = (0xC4C2B8, 0xCDCBC1)
+        case "gbc": colors = (0xF2C318, 0xF5CB2E)
+        case "gba": colors = (0x4B3BA8, 0x7666D6)
+        case "psx": colors = (0xBEBFC3, 0xCACCD0)
+        case "ps2", "psp", "ps3": colors = (0x23252B, 0x5A5E68)
+        case "megadrive", "segacd": colors = (0x232428, 0x5B5E66)
+        case "dreamcast": colors = (0xEEEDE8, 0xF3F2EE)
         default: return .secondaryLabelColor
         }
         return InterfacePalette.adaptive("Console-\(id)", light: colors.0, dark: colors.1)
+    }
+
+    static func accent(_ name: String) -> NSColor {
+        switch name {
+        case "red": return InterfacePalette.adaptive("Console-red", light: 0xD92B32, dark: 0xF0464C)
+        case "purple": return InterfacePalette.adaptive("Console-purple", light: 0x6D4CB3, dark: 0x8E72D6)
+        case "darkGray": return InterfacePalette.adaptive("Console-darkGray", light: 0x45464B, dark: 0x6B6D73)
+        case "joyBlue": return InterfacePalette.adaptive("Console-joyBlue", light: 0x00A7DF, dark: 0x1CBDF0)
+        case "joyRed": return InterfacePalette.adaptive("Console-joyRed", light: 0xF2434D, dark: 0xFF5A62)
+        case "blue": return InterfacePalette.adaptive("Console-blue", light: 0x2766D0, dark: 0x4C8CF0)
+        case "orange": return InterfacePalette.adaptive("Console-orange", light: 0xEE6A1F, dark: 0xFF7F33)
+        default: return .secondaryLabelColor
+        }
     }
 
     static func image(for id: String) -> NSImage {
@@ -215,13 +229,31 @@ enum ConsoleArtwork {
             defer { NSGraphicsContext.restoreGraphicsState() }
             NSColor.white.setStroke()
             color(for: id).setFill()
+            var silhouettes: [NSBezierPath] = []
             func solid(_ x: CGFloat, _ y: CGFloat, _ width: CGFloat, _ height: CGFloat, _ radius: CGFloat) {
+                let path = NSBezierPath(roundedRect: NSRect(x: x, y: y, width: width, height: height),
+                                        xRadius: radius, yRadius: radius)
+                path.fill()
+                silhouettes.append(path)
+            }
+            func paint(_ color: String, _ rect: NSRect, clippedTo x: CGFloat, _ y: CGFloat,
+                       _ width: CGFloat, _ height: CGFloat, _ radius: CGFloat) {
+                NSGraphicsContext.saveGraphicsState()
                 NSBezierPath(roundedRect: NSRect(x: x, y: y, width: width, height: height),
-                             xRadius: radius, yRadius: radius).fill()
+                             xRadius: radius, yRadius: radius).addClip()
+                accent(color).setFill()
+                rect.fill()
+                NSGraphicsContext.restoreGraphicsState()
             }
             switch id {
-            case "nes": solid(3, 7, 26, 18, 2)
-            case "snes": solid(3, 9, 26, 16, 5); solid(9, 7, 14, 9, 2)
+            case "nes":
+                solid(3, 7, 26, 18, 2)
+                paint("darkGray", NSRect(x: 3, y: 18, width: 26, height: 7), clippedTo: 3, 7, 26, 18, 2)
+                paint("red", NSRect(x: 24, y: 20, width: 3, height: 3), clippedTo: 3, 7, 26, 18, 2)
+            case "snes":
+                solid(3, 9, 26, 16, 5); solid(9, 7, 14, 9, 2)
+                paint("purple", NSRect(x: 7, y: 18, width: 7, height: 5), clippedTo: 3, 9, 26, 16, 5)
+                paint("purple", NSRect(x: 18, y: 18, width: 7, height: 5), clippedTo: 3, 9, 26, 16, 5)
             case "n64":
                 let body = NSBezierPath()
                 body.move(to: NSPoint(x: 3, y: 24))
@@ -230,6 +262,7 @@ enum ConsoleArtwork {
                 }
                 body.close()
                 body.fill()
+                silhouettes.append(body)
             case "gc": solid(10, 3, 12, 9, 3); solid(6, 10, 20, 18, 3)
             case "wii":
                 let body = NSBezierPath()
@@ -239,6 +272,7 @@ enum ConsoleArtwork {
                 }
                 body.close()
                 body.fill()
+                silhouettes.append(body)
                 solid(6, 28, 20, 2, 1)
             case "wiiu": solid(6, 4, 22, 9, 3); solid(2, 16, 28, 13, 4)
             case "switch":
@@ -246,20 +280,25 @@ enum ConsoleArtwork {
                 NSGraphicsContext.saveGraphicsState()
                 NSBezierPath(roundedRect: NSRect(x: 2, y: 7, width: 28, height: 18),
                              xRadius: 5, yRadius: 5).addClip()
-                InterfacePalette.adaptive("Console-JoyConBlue", light: 0x348DAA, dark: 0x78C7DE).setFill()
+                accent("joyBlue").setFill()
                 NSRect(x: 2, y: 7, width: 6, height: 18).fill()
-                InterfacePalette.adaptive("Console-JoyConRed", light: 0xCF625D, dark: 0xF3948B).setFill()
+                accent("joyRed").setFill()
                 NSRect(x: 24, y: 7, width: 6, height: 18).fill()
                 NSGraphicsContext.restoreGraphicsState()
             case "gb", "gbc": solid(7, 2, 18, 28, id == "gb" ? 2 : 5)
             case "gba": solid(1, 7, 30, 18, 7)
             case "psx": solid(2, 7, 28, 19, 3)
-            case "ps2": solid(8, 3, 15, 26, 1); solid(5, 28, 22, 2, 1)
+            case "ps2":
+                solid(8, 3, 15, 26, 1); solid(5, 28, 22, 2, 1)
+                paint("blue", NSRect(x: 19, y: 22, width: 3, height: 5), clippedTo: 8, 3, 15, 26, 1)
             case "psp": solid(1, 8, 30, 16, 7)
             case "ps3": solid(6, 3, 20, 26, 7)
             case "megadrive": solid(2, 8, 28, 18, 6)
             case "segacd": solid(2, 4, 28, 14, 4); solid(2, 20, 28, 9, 2)
-            case "dreamcast": solid(3, 5, 26, 23, 4)
+            case "dreamcast":
+                solid(3, 5, 26, 23, 4)
+                accent("orange").setFill()
+                NSBezierPath(ovalIn: NSRect(x: 13.5, y: 12.5, width: 5, height: 5)).fill()
             default: solid(4, 6, 24, 20, 4)
             }
             NSGraphicsContext.current?.compositingOperation = .destinationOut
@@ -373,6 +412,13 @@ enum ConsoleArtwork {
                 box(4, 6, 24, 20, 4)
                 pad(11, 16)
                 dot(22, 15)
+            }
+            // A faint rim keeps white and black hardware readable on matching backgrounds.
+            NSGraphicsContext.current?.compositingOperation = .sourceOver
+            NSColor.labelColor.withAlphaComponent(0.28).setStroke()
+            for path in silhouettes {
+                path.lineWidth = 0.9
+                path.stroke()
             }
             return true
         }
@@ -564,24 +610,164 @@ enum InterfacePalette {
 }
 
 enum ControllerPalette {
-    static let colors: [(String, NSColor)] = [
-        ("Blue", InterfacePalette.adaptive("ControllerBlue", light: 0x437CA5, dark: 0x8AB9D9)),
-        ("Indigo", InterfacePalette.adaptive("ControllerIndigo", light: 0x6256A5, dark: 0xADA0E4)),
-        ("Purple", InterfacePalette.adaptive("ControllerPurple", light: 0x95649C, dark: 0xC9A0CF)),
-        ("Pink", InterfacePalette.adaptive("ControllerPink", light: 0xB86384, dark: 0xE3A0BA)),
-        ("Green", InterfacePalette.adaptive("ControllerGreen", light: 0x50836C, dark: 0x94C4A9)),
-        ("Neon Green", InterfacePalette.adaptive("ControllerNeonGreen", light: 0x548B12, dark: 0xB5F34A)),
-        ("Red", InterfacePalette.adaptive("ControllerRed", light: 0xB66561, dark: 0xE6A09A)),
-        ("Orange", InterfacePalette.adaptive("ControllerOrange", light: 0xAD7540, dark: 0xE4B17F)),
-        ("Yellow", InterfacePalette.adaptive("ControllerYellow", light: 0x977D32, dark: 0xDDC77F)),
-        ("Gray", InterfacePalette.adaptive("ControllerGray", light: 0x737C85, dark: 0xAEB8C1))
+    struct Shade {
+        let name: String
+        let rgb: UInt32
+        let brands: [String]
+    }
+
+    static let brands = ["PlayStation", "Xbox", "8BitDo", "Nintendo"]
+    private static let all = brands
+
+    static let sections: [(String, [Shade])] = [
+        ("Black & White", [
+            Shade(name: "Black", rgb: 0x1E1F24, brands: all),
+            Shade(name: "White", rgb: 0xEFF0F2, brands: all)
+        ]),
+        ("Gray & Silver", [
+            Shade(name: "Classic Gray", rgb: 0xA9A8A6, brands: ["8BitDo", "Nintendo"]),
+            Shade(name: "Sterling Silver", rgb: 0xB6BBC2, brands: ["PlayStation"])
+        ]),
+        ("Camo", [
+            Shade(name: "Gray Camouflage", rgb: 0x7D8070, brands: ["PlayStation"]),
+            Shade(name: "Mineral Camo", rgb: 0x5E6B4A, brands: ["Xbox"])
+        ]),
+        ("Red & Orange", [
+            Shade(name: "Cosmic Red", rgb: 0xB0102E, brands: ["PlayStation"]),
+            Shade(name: "Volcanic Red", rgb: 0xD1261C, brands: ["PlayStation"]),
+            Shade(name: "Pulse Red", rgb: 0xD7262E, brands: ["Xbox"]),
+            Shade(name: "Neon Red", rgb: 0xFF3C28, brands: ["Nintendo"]),
+            Shade(name: "Neon Orange", rgb: 0xFAA005, brands: ["Nintendo"])
+        ]),
+        ("Pink", [
+            Shade(name: "Nova Pink", rgb: 0xF25F9C, brands: ["PlayStation"]),
+            Shade(name: "Deep Pink", rgb: 0xE0347E, brands: ["Xbox"]),
+            Shade(name: "Micro Pink", rgb: 0xF27BAE, brands: ["8BitDo"]),
+            Shade(name: "Neon Pink", rgb: 0xFF3278, brands: ["Nintendo"])
+        ]),
+        ("Purple & Indigo", [
+            Shade(name: "Galactic Purple", rgb: 0x5A3DA6, brands: ["PlayStation"]),
+            Shade(name: "Chroma Indigo", rgb: 0x4B3FB0, brands: ["PlayStation"]),
+            Shade(name: "Astral Purple", rgb: 0x7650C8, brands: ["Xbox"]),
+            Shade(name: "Atomic Purple", rgb: 0x8E52C9, brands: ["8BitDo"]),
+            Shade(name: "SN Purple", rgb: 0x6A5BAF, brands: ["8BitDo", "Nintendo"]),
+            Shade(name: "GameCube Indigo", rgb: 0x524A9C, brands: ["Nintendo"]),
+            Shade(name: "Neon Purple", rgb: 0xB400E6, brands: ["Nintendo"])
+        ]),
+        ("Blue & Teal", [
+            Shade(name: "Starlight Blue", rgb: 0x4AA2DE, brands: ["PlayStation"]),
+            Shade(name: "Cobalt Blue", rgb: 0x1E4FB0, brands: ["PlayStation"]),
+            Shade(name: "Chroma Teal", rgb: 0x16A3A0, brands: ["PlayStation"]),
+            Shade(name: "Shock Blue", rgb: 0x1E7FD8, brands: ["Xbox"]),
+            Shade(name: "Micro Blue", rgb: 0x3D8EE0, brands: ["8BitDo"]),
+            Shade(name: "Neon Blue", rgb: 0x0AB9E6, brands: ["Nintendo"])
+        ]),
+        ("Green & Yellow", [
+            Shade(name: "Micro Green", rgb: 0x8FD42A, brands: ["8BitDo"]),
+            Shade(name: "Velocity Green", rgb: 0x14A05A, brands: ["Xbox"]),
+            Shade(name: "Electric Volt", rgb: 0xD4E82E, brands: ["Xbox"]),
+            Shade(name: "Neon Green", rgb: 0x1EDC00, brands: ["Nintendo"]),
+            Shade(name: "Neon Yellow", rgb: 0xE6FF00, brands: ["Nintendo"])
+        ])
     ]
+
+    private static func rgbColor(_ rgb: UInt32) -> NSColor {
+        let red = CGFloat((rgb >> 16) & 255) / 255
+        let green = CGFloat((rgb >> 8) & 255) / 255
+        let blue = CGFloat(rgb & 255) / 255
+        return NSColor(srgbRed: red, green: green, blue: blue, alpha: 1)
+    }
+
+    static let colors: [(String, NSColor)] = sections.flatMap { $0.1 }.map { (shade: Shade) -> (String, NSColor) in
+        (shade.name, rgbColor(shade.rgb))
+    }
+
+    private static let legacyNames = [
+        "Blue": "Starlight Blue", "Indigo": "Chroma Indigo", "Purple": "Galactic Purple",
+        "Pink": "Nova Pink", "Green": "Velocity Green", "Red": "Pulse Red",
+        "Orange": "Neon Orange", "Yellow": "Electric Volt", "Gray": "Sterling Silver",
+        "Midnight Black": "Black", "Carbon Black": "Black", "Ultimate Black": "Black",
+        "Glacier White": "White", "Robot White": "White", "Ultimate White": "White"
+    ]
+
+    static func canonicalName(_ name: String, for entry: ControllerEntry) -> String {
+        if colors.contains(where: { $0.0 == name }) { return name }
+        if defaultName(for: entry) == "Micro Green" && name == "Green" { return "Micro Green" }
+        return legacyNames[name] ?? defaultName(for: entry)
+    }
+
+    private static func tag(_ brand: String) -> NSImage {
+        let font = NSFont.systemFont(ofSize: 9, weight: .semibold)
+        let width = ceil((brand as NSString).size(withAttributes: [.font: font]).width) + 10
+        return NSImage(size: NSSize(width: width, height: 14), flipped: false) { rect in
+            let pill = NSBezierPath(roundedRect: rect.insetBy(dx: 0.5, dy: 0.5), xRadius: 7, yRadius: 7)
+            NSColor.quaternaryLabelColor.setFill()
+            pill.fill()
+            (brand as NSString).draw(at: NSPoint(x: 5, y: 1.5), withAttributes: [
+                .font: font, .foregroundColor: NSColor.secondaryLabelColor])
+            return true
+        }
+    }
+
+    static func menu(selecting selected: String) -> NSPopUpButton {
+        let popup = NSPopUpButton()
+        popup.autoenablesItems = false
+        for (section, shades) in sections {
+            if popup.numberOfItems > 0 { popup.menu?.addItem(.separator()) }
+            let header = NSMenuItem(title: section, action: nil, keyEquivalent: "")
+            header.isEnabled = false
+            header.attributedTitle = NSAttributedString(string: section, attributes: [
+                .font: NSFont.systemFont(ofSize: 11, weight: .semibold),
+                .foregroundColor: NSColor.secondaryLabelColor])
+            popup.menu?.addItem(header)
+            for shade in shades {
+                let item = NSMenuItem(title: shade.name, action: nil, keyEquivalent: "")
+                item.representedObject = shade.name
+                item.image = swatch(color(named: shade.name))
+                item.indentationLevel = 1
+                let title = NSMutableAttributedString(string: shade.name + "  ",
+                                                      attributes: [.font: NSFont.menuFont(ofSize: 0)])
+                for brand in shade.brands.count == brands.count ? ["All brands"] : shade.brands {
+                    let attachment = NSTextAttachment()
+                    attachment.image = tag(brand)
+                    attachment.bounds = NSRect(x: 0, y: -2, width: attachment.image!.size.width, height: 14)
+                    title.append(NSAttributedString(attachment: attachment))
+                    title.append(NSAttributedString(string: " "))
+                }
+                item.attributedTitle = title
+                item.toolTip = "Fits " + shade.brands.joined(separator: ", ")
+                popup.menu?.addItem(item)
+            }
+        }
+        if let item = popup.itemArray.first(where: { $0.representedObject as? String == selected }) {
+            popup.select(item)
+        }
+        return popup
+    }
+
+    static func selectedName(in popup: NSPopUpButton) -> String? {
+        popup.selectedItem?.representedObject as? String
+    }
+
+    static func applyContrast(to view: NSImageView) {
+        guard let rgb = view.contentTintColor?.usingColorSpace(.sRGB) else { view.shadow = nil; return }
+        let luminance = 0.2126 * rgb.redComponent + 0.7152 * rgb.greenComponent + 0.0722 * rgb.blueComponent
+        let dark = view.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+        guard dark ? luminance < 0.22 : luminance > 0.72 else { view.shadow = nil; return }
+        let halo = NSShadow()
+        halo.shadowColor = (dark ? NSColor.white : NSColor.black).withAlphaComponent(dark ? 0.75 : 0.6)
+        halo.shadowBlurRadius = 1.2
+        halo.shadowOffset = .zero
+        view.shadow = halo
+    }
 
     static func defaultName(for entry: ControllerEntry) -> String {
         switch ControllerArtwork.kind(name: entry.name, preference: nil) {
-        case "8BitDo Micro": return "Neon Green"
-        case "PS5 · DualSense": return "Indigo"
-        default: return "Blue"
+        case "8BitDo Micro": return "Micro Green"
+        case "PS5 · DualSense": return "Chroma Indigo"
+        case "Xbox", "PlayStation", "PS4 · DualShock 4": return "Black"
+        case let kind where kind.hasPrefix("8BitDo"): return "Classic Gray"
+        default: return "Shock Blue"
         }
     }
 
@@ -1262,8 +1448,7 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
         consoleRows.spacing = 16
         addPage("Consoles", content: column([
             consoleStatus,
-            consoleRows,
-            button("App Store", #selector(showPlayers))
+            consoleRows
         ]))
         for rows in [activeControllerRows] {
             rows.orientation = .vertical
@@ -1994,9 +2179,8 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
         }
         controllerCustomizations = preferences.customizations
         for entry in controllerEntries {
-            if ControllerPalette.defaultName(for: entry) == "Neon Green",
-               controllerCustomizations[entry.id]?.color == "Green" {
-                controllerCustomizations[entry.id]?.color = "Neon Green"
+            if let color = controllerCustomizations[entry.id]?.color {
+                controllerCustomizations[entry.id]?.color = ControllerPalette.canonicalName(color, for: entry)
             }
         }
         connectedFirstToggle.state = preferences.connectedFirst ? .on : .off
@@ -2095,10 +2279,11 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
         homeControllerInputLabels[id]?.stringValue = parts.joined(separator: " · ")
         homeControllerInputLabels[id]?.textColor = active ? .systemGreen : .secondaryLabelColor
         let customization = controllerCustomizations[id]
-        let colorName = customization?.color ?? entry.map { ControllerPalette.defaultName(for: $0) } ?? "Blue"
+        let colorName = customization?.color ?? entry.map { ControllerPalette.defaultName(for: $0) } ?? "Shock Blue"
         let color = connected ? ControllerPalette.color(named: colorName) : .systemGray
         for image in homeControllerImages[id] ?? [] {
             image.contentTintColor = color
+            ControllerPalette.applyContrast(to: image)
             image.wantsLayer = true
             if active && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
                 if image.layer?.animation(forKey: "controllerActivity") == nil {
@@ -2123,24 +2308,19 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
         alert.informativeText = "Choose a name and icon color in Couch Cube. Leave the name empty to use \(entry.name)."
         let name = NSTextField(string: previous?.name ?? "")
         name.placeholderString = entry.name
-        let color = NSPopUpButton()
-        for (name, tint) in controllerColors {
-            color.addItem(withTitle: name)
-            color.lastItem?.image = ControllerPalette.swatch(tint)
-        }
-        color.selectItem(withTitle: previous?.color ?? ControllerPalette.defaultName(for: entry))
+        let color = ControllerPalette.menu(selecting: previous?.color ?? ControllerPalette.defaultName(for: entry))
         let artwork = NSPopUpButton()
         artwork.addItems(withTitles: ControllerArtwork.kinds)
         artwork.selectItem(withTitle: previous?.artwork ?? "Automatic")
         let contents = column([name, color, artwork])
-        contents.frame = NSRect(x: 0, y: 0, width: 300, height: 108)
-        name.widthAnchor.constraint(equalToConstant: 300).isActive = true
+        contents.frame = NSRect(x: 0, y: 0, width: 340, height: 108)
+        name.widthAnchor.constraint(equalToConstant: 340).isActive = true
         alert.accessoryView = contents
         alert.addButton(withTitle: "Save")
         alert.addButton(withTitle: "Cancel")
         guard alert.runModal() == .alertFirstButtonReturn else { return }
         controllerCustomizations[id] = ControllerCustomization(name: name.stringValue.trimmingCharacters(in: .whitespacesAndNewlines),
-                                                               color: color.titleOfSelectedItem ?? ControllerPalette.defaultName(for: entry),
+                                                               color: ControllerPalette.selectedName(in: color) ?? ControllerPalette.defaultName(for: entry),
                                                                artwork: artwork.titleOfSelectedItem)
         renderControllerList()
         renderHomeControllers()
@@ -2307,7 +2487,7 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
                 ControllerEntry(id: "preview:2", name: "Xbox Wireless Controller", connected: false, transport: "Bluetooth"),
                 ControllerEntry(id: "preview:3", name: "8BitDo Controller", connected: true, transport: "Wired")
             ]
-            controllerCustomizations["preview:1"] = ControllerCustomization(name: "Purple PS5", color: "Purple")
+            controllerCustomizations["preview:1"] = ControllerCustomization(name: "Purple PS5", color: "Galactic Purple")
             controllerStatus.stringValue = "Read-only preview. No Bluetooth query, pairing or permission request."
             controllerAccessButton.isHidden = true
             renderControllerList()
@@ -2701,6 +2881,7 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
             icon.centerXAnchor.constraint(equalTo: tile.centerXAnchor),
             icon.centerYAnchor.constraint(equalTo: tile.centerYAnchor)
         ])
+        if neutralArtworkBackground { ControllerPalette.applyContrast(to: icon) }
         if artwork != nil {
             icon.widthAnchor.constraint(equalToConstant: 24).isActive = true
             icon.heightAnchor.constraint(equalToConstant: 24).isActive = true
@@ -3032,6 +3213,7 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
         }
         updateAllButton.isEnabled = task == nil && appStates.contains { $0.installed && $0.managed && $0.update?.isEmpty == false }
         updateAllButton.isHidden = !appStates.contains { $0.installed && $0.managed && $0.update?.isEmpty == false }
+        if highlightedAppID != nil { DispatchQueue.main.async { self.highlightAppRow() } }
     }
 
     private let appPurposes = [
@@ -3145,6 +3327,7 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
             first.removeFromSuperview()
             stack.insertArrangedSubview(icon, at: 0)
         }
+        line.identifier = NSUserInterfaceItemIdentifier("app-row-" + app.id)
         rows.addArrangedSubview(line)
         line.widthAnchor.constraint(equalTo: rows.widthAnchor).isActive = true
         let separator = self.separator()
@@ -3253,53 +3436,71 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
         inspectorParent = 7
         inspectorTitle.stringValue = system.name
         clearRows(inspectorRows)
-        let readiness = consoleReadiness(system)
         let emulator = emulatorStatus(system)
-        inspectorRows.addArrangedSubview(row([statusIndicator(emulator.title, color: emulator.color), NSView()]))
-        let guidance = text(readiness.help, secondary: true)
-        inspectorRows.addArrangedSubview(guidance)
-        guidance.widthAnchor.constraint(equalTo: inspectorRows.widthAnchor).isActive = true
-        let requirement = text(system.requirement, secondary: true)
-        inspectorRows.addArrangedSubview(requirement)
-        requirement.widthAnchor.constraint(equalTo: inspectorRows.widthAnchor).isActive = true
-        if let bios = system.bios {
-            let status = biosStatusView(bios)
+        let emulatorRow = row([statusIndicator(emulator.title, color: emulator.color),
+                               appStoreLink(for: system), NSView()])
+        emulatorRow.distribution = .fill
+        inspectorRows.addArrangedSubview(emulatorRow)
+        if let bios = system.bios, bios.state != "not-needed" {
+            let status = biosStatusView(bios, searchQuery: system.name + " BIOS")
             inspectorRows.addArrangedSubview(status)
             status.widthAnchor.constraint(equalTo: inspectorRows.widthAnchor).isActive = true
-            for file in bios.files {
-                let info = column([text(file.path, size: 11, secondary: true)])
-                inspectorRows.addArrangedSubview(info)
-                info.widthAnchor.constraint(equalTo: inspectorRows.widthAnchor).isActive = true
-            }
-            let disclaimer = text("Filename check only. Contents, authenticity and compatibility are not verified. Use only BIOS dumps you are entitled to use.", size: 11, secondary: true)
-            inspectorRows.addArrangedSubview(disclaimer)
-            disclaimer.widthAnchor.constraint(equalTo: inspectorRows.widthAnchor).isActive = true
-            if bios.state != "present" && bios.state != "not-needed" {
-                let query = system.name + " BIOS files"
-                let copy = button("Copy search: \(query)", #selector(copyBIOSNames(_:)))
-                copy.identifier = NSUserInterfaceItemIdentifier(query)
-                let search = button("Google search", #selector(searchConsoleBIOS(_:)))
-                search.identifier = NSUserInterfaceItemIdentifier(query)
-                inspectorRows.addArrangedSubview(row([copy, search]))
-            }
         }
-        inspectorRows.addArrangedSubview(button("Manage emulator in App Store", #selector(inspectorApps)))
         selectPage(9)
     }
 
-    @objc private func searchConsoleBIOS(_ sender: NSButton) {
-        guard let query = sender.identifier?.rawValue else { return }
-        var components = URLComponents(string: "https://www.google.com/search")!
-        components.queryItems = [URLQueryItem(name: "q", value: query)]
-        if let url = components.url, !NSWorkspace.shared.open(url) {
-            status.stringValue = "Couldn't open Google. Copy the search text and paste it into your browser."
-            append(status.stringValue + "\n")
-        }
+    private func appStoreLink(for system: ConsoleSystem) -> NSButton {
+        let name = emulatorName(system)
+        let control = NSButton(image: NSImage(systemSymbolName: "storefront",
+                                              accessibilityDescription: "Show \(name) in App Store")!,
+                               target: self, action: #selector(showEmulatorInAppStore(_:)))
+        control.isBordered = false
+        control.contentTintColor = .controlAccentColor
+        control.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 11, weight: .medium)
+        control.identifier = NSUserInterfaceItemIdentifier(system.package)
+        control.toolTip = "Show \(name) in App Store"
+        control.setAccessibilityLabel(control.toolTip)
+        return control
     }
 
-    @objc private func inspectorApps() {
-        clearRows(inspectorRows)
+    @objc private func showEmulatorInAppStore(_ sender: NSButton) {
+        guard let id = sender.identifier?.rawValue else { return }
+        showAppInStore(id)
+    }
+
+    private var highlightedAppID: String?
+
+    private func showAppInStore(_ id: String) {
+        highlightedAppID = id
         showPlayers()
+        highlightAppRow()
+    }
+
+    private func highlightAppRow() {
+        guard let id = highlightedAppID else { return }
+        func find(_ view: NSView) -> NSView? {
+            if view.identifier?.rawValue == "app-row-" + id { return view }
+            for child in view.subviews { if let match = find(child) { return match } }
+            return nil
+        }
+        guard let line = [appMenuRows, appPCRows, appWindowsRows, appRetroRows].lazy.compactMap({ find($0) }).first else { return }
+        if !appsChecking { highlightedAppID = nil }
+        window.contentView?.layoutSubtreeIfNeeded()
+        line.scrollToVisible(line.bounds.insetBy(dx: 0, dy: -120))
+        line.wantsLayer = true
+        line.layer?.cornerRadius = 8
+        let color = NSColor.controlAccentColor.withAlphaComponent(0.18).cgColor
+        line.layer?.backgroundColor = color
+        let fade = CABasicAnimation(keyPath: "backgroundColor")
+        fade.fromValue = color
+        fade.toValue = NSColor.clear.cgColor
+        fade.beginTime = CACurrentMediaTime() + 1.6
+        fade.duration = 0.8
+        fade.fillMode = .backwards
+        line.layer?.add(fade, forKey: "highlight")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.4) { [weak line] in
+            line?.layer?.backgroundColor = NSColor.clear.cgColor
+        }
     }
 
     @objc private func openCrossOver(_ sender: NSButton) {
@@ -3487,14 +3688,13 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
             info.image = NSImage(systemSymbolName: "info.circle", accessibilityDescription: "Details for \(system.name)")
             info.isBordered = false
             info.tag = index
-            let readiness = consoleReadiness(system)
-            info.toolTip = readiness.help
-            info.setAccessibilityLabel("Help with \(system.name). \(readiness.help)")
+            info.toolTip = "Details"
+            info.setAccessibilityLabel("Details for \(system.name)")
             let controls = row([info, toggle])
             let emulator = emulatorStatus(system)
             let initialCheck = consolesChecking && !consolesLoaded
             var indicators: [NSView] = [statusIndicator(initialCheck ? emulatorName(system) : emulator.title,
-                color: initialCheck ? .systemBlue : emulator.color, pulsing: initialCheck)]
+                color: initialCheck ? .systemBlue : emulator.color, pulsing: initialCheck), appStoreLink(for: system)]
             if system.enabled, let bios = system.bios, bios.state != "not-needed" {
                 indicators.append(initialCheck
                     ? statusIndicator("BIOS", color: .systemBlue, pulsing: true)
@@ -3559,53 +3759,90 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
         return view
     }
 
-    private func biosStatusView(_ bios: BIOSStatus) -> NSView {
+    private func biosStatusView(_ bios: BIOSStatus, searchQuery: String? = nil) -> NSView {
         let indicator = row([biosIndicator(bios), NSView()])
         indicator.distribution = .fill
         let missing = bios.files.filter { !$0.present }
         guard !missing.isEmpty && bios.state != "present" else { return indicator }
-        func copyButton(_ title: String, value: String) -> NSButton {
-            let control = NSButton(title: title, target: self, action: #selector(copyBIOSNames(_:)))
+        func pill(_ title: String, symbol: String, action: Selector, value: String, help: String) -> NSButton {
+            let control = NSButton(title: title, target: self, action: action)
+            control.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)
+            control.imagePosition = .imageLeading
             control.bezelStyle = .inline
             control.controlSize = .small
             control.font = .systemFont(ofSize: 11)
             control.identifier = NSUserInterfaceItemIdentifier(value)
-            control.toolTip = "Copy " + value
-            control.setAccessibilityLabel("Copy " + title)
+            control.toolTip = help
+            control.setAccessibilityLabel(help)
             return control
         }
-        let names = missing.map { URL(fileURLWithPath: $0.filename).lastPathComponent }
-        let copyAll = copyButton("Copy all", value: names.joined(separator: "\n"))
-        let fileRows = NSStackView()
-        fileRows.orientation = .vertical
-        fileRows.alignment = .leading
-        fileRows.spacing = 2
-        for start in stride(from: 0, to: missing.count, by: 2) {
-            let buttons = (start..<min(start + 2, missing.count)).map { index -> NSButton in
-                let control = copyButton(names[index], value: names[index])
-                control.toolTip = "Copy filename · Put the file at " + missing[index].path
-                return control
-            }
-            fileRows.addArrangedSubview(row(buttons))
+        var sections: [NSView] = [indicator]
+        var folders: [String] = []
+        for file in missing {
+            let folder = URL(fileURLWithPath: file.path).deletingLastPathComponent().path
+            if !folders.contains(folder) { folders.append(folder) }
         }
-        let files = row([copyAll, fileRows, NSView()])
-        files.distribution = .fill
-        files.alignment = .top
-        let result = column([indicator, files])
-        result.spacing = 3
+        for folder in folders {
+            var shown = folder
+            if let root = selected?.root, folder.hasPrefix(root) {
+                shown = URL(fileURLWithPath: root).lastPathComponent + folder.dropFirst(root.count)
+            }
+            let place = row([text("Put in", size: 11, secondary: true),
+                             pill(shown, symbol: "folder", action: #selector(openBIOSFolder(_:)),
+                                  value: folder, help: "Open " + folder), NSView()])
+            place.distribution = .fill
+            let names = missing.filter { URL(fileURLWithPath: $0.path).deletingLastPathComponent().path == folder }
+                .map { URL(fileURLWithPath: $0.filename).lastPathComponent }
+            let fileRows = NSStackView()
+            fileRows.orientation = .vertical
+            fileRows.alignment = .leading
+            fileRows.spacing = 4
+            for start in stride(from: 0, to: names.count, by: 3) {
+                fileRows.addArrangedSubview(row(names[start..<min(start + 3, names.count)].map {
+                    pill($0, symbol: "doc.on.doc", action: #selector(copyBIOSNames(_:)), value: $0,
+                         help: "Copy filename " + $0)
+                }))
+            }
+            let files = row([text("Files", size: 11, secondary: true), fileRows, NSView()])
+            files.distribution = .fill
+            files.alignment = .top
+            sections.append(column([place, files]))
+        }
+        if let query = searchQuery {
+            sections.append(row([pill("Copy search", symbol: "magnifyingglass", action: #selector(copyBIOSNames(_:)),
+                                      value: query, help: "Copy search: " + query), NSView()]))
+        }
+        let result = column(sections)
+        result.spacing = 8
         return result
     }
 
+    @objc private func openBIOSFolder(_ sender: NSButton) {
+        guard var url = sender.identifier.map({ URL(fileURLWithPath: $0.rawValue) }) else { return }
+        while !FileManager.default.fileExists(atPath: url.path) && url.path != "/" {
+            url.deleteLastPathComponent()
+        }
+        NSWorkspace.shared.open(url)
+    }
+
     @objc private func copyBIOSNames(_ sender: NSButton) {
-        guard let names = sender.identifier?.rawValue else { return }
+        guard let value = sender.identifier?.rawValue else { return }
         NSPasteboard.general.clearContents()
-        if NSPasteboard.general.setString(names, forType: .string) {
-            consoleStatus.stringValue = "Copied BIOS filenames."
-        } else {
-            consoleStatus.stringValue = "Couldn't copy BIOS filenames. Try again."
-            append(consoleStatus.stringValue + "\n")
+        guard NSPasteboard.general.setString(value, forType: .string) else {
+            append("Couldn't copy \(value). Try again.\n")
+            return
+        }
+        let title = sender.title, image = sender.image
+        sender.title = "Copied"
+        sender.image = NSImage(systemSymbolName: "checkmark", accessibilityDescription: nil)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { [weak sender] in
+            sender?.title = title
+            sender?.image = image
         }
     }
+
+    private var pendingEmulatorInstall: ManagedApp?
+    private var pendingAppStoreID: String?
 
     @objc private func toggleSystem(_ sender: NSSwitch) {
         guard task == nil, !consolesChecking, consolesLoaded else {
@@ -3614,6 +3851,22 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
             }
             consoleStatus.stringValue = "Wait for the current operation before changing consoles."
             return
+        }
+        if sender.state == .on, let index = systemSwitches.firstIndex(of: sender) {
+            let system = consoleSystems[index]
+            let app = appStates.first { $0.id == system.package }
+            if (system.emulator_installed ?? app?.installed) == false {
+                let name = emulatorName(system)
+                let alert = NSAlert()
+                alert.messageText = "Install \(name)?"
+                alert.informativeText = "\(system.name) needs \(name) to play games."
+                alert.addButton(withTitle: "Install \(name)")
+                alert.addButton(withTitle: "Not Now")
+                if alert.runModal() == .alertFirstButtonReturn {
+                    if appsHaveResults, let app = app, !app.manual { pendingEmulatorInstall = app }
+                    else { pendingAppStoreID = system.package }
+                }
+            }
         }
         saveSystems()
     }
@@ -3636,8 +3889,17 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
                     toggle.state = system.enabled ? .on : .off
                 }
                 self.consoleStatus.stringValue = "Couldn't save console selection. Open Activity for details."
+                self.pendingEmulatorInstall = nil
+                self.pendingAppStoreID = nil
                 self.showActivity()
                 return
+            }
+            if let app = self.pendingEmulatorInstall {
+                self.pendingEmulatorInstall = nil
+                self.manage(app, action: "install")
+            } else if let id = self.pendingAppStoreID {
+                self.pendingAppStoreID = nil
+                self.showAppInStore(id)
             }
             self.loadSystems()
         }
@@ -4332,8 +4594,19 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
                             precondition(labels.contains("Purple PS5") && !labels.contains("DualSense Wireless Controller"))
                             precondition(labels.contains("Connected · Bluetooth") && labels.contains("Connected · USB"))
                             precondition(labels.contains("Not connected"))
-                            precondition(self.controllerColors.contains { $0.0 == "Indigo" })
-                            precondition(self.controllerColors.contains { $0.0 == "Neon Green" })
+                            precondition(self.controllerColors.contains { $0.0 == "Chroma Indigo" })
+                            precondition(self.controllerColors.contains { $0.0 == "Micro Green" })
+                            precondition(Set(self.controllerColors.map { $0.0 }).count == self.controllerColors.count)
+                            let picker = ControllerPalette.menu(selecting: "Gray Camouflage")
+                            precondition(ControllerPalette.selectedName(in: picker) == "Gray Camouflage" &&
+                                         picker.itemArray.filter { !$0.isEnabled && !$0.isSeparatorItem }.map(\.title) ==
+                                            ControllerPalette.sections.map { $0.0 })
+                            precondition(ControllerPalette.sections.flatMap { $0.1 }.allSatisfy {
+                                !$0.brands.isEmpty && Set($0.brands).isSubset(of: ControllerPalette.brands) })
+                            let micro = ControllerEntry(id: "micro", name: "8BitDo Micro", connected: true, transport: "Bluetooth")
+                            precondition(ControllerPalette.canonicalName("Green", for: micro) == "Micro Green" &&
+                                         ControllerPalette.canonicalName("Indigo", for: micro) == "Chroma Indigo" &&
+                                         ControllerPalette.canonicalName("Carbon Black", for: micro) == "Black")
                             for appearanceName in [NSAppearance.Name.aqua, .darkAqua] {
                                 NSAppearance(named: appearanceName)!.performAsCurrentDrawingAppearance {
                                     for (_, color) in self.controllerColors {
@@ -4342,8 +4615,8 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
                                 }
                             }
                             precondition(ControllerPalette.defaultName(for: ControllerEntry(
-                                id: "micro", name: "8BitDo Micro", connected: true, transport: "Bluetooth")) == "Neon Green")
-                            precondition(ControllerPalette.defaultName(for: self.controllerEntries[0]) == "Indigo")
+                                id: "micro", name: "8BitDo Micro", connected: true, transport: "Bluetooth")) == "Micro Green")
+                            precondition(ControllerPalette.defaultName(for: self.controllerEntries[0]) == "Chroma Indigo")
                             let controllerLines = self.activeControllerRows.arrangedSubviews.compactMap { $0 as? NSStackView }
                             precondition(controllerLines.count == self.controllerEntries.count)
                             for (entry, line) in zip(self.controllerEntries, controllerLines) {
@@ -4382,7 +4655,7 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
                             let restored = try! JSONDecoder().decode(ControllerPreferences.self,
                                 from: JSONEncoder().encode(preferences))
                             precondition(restored.customizations[entry.id]?.name == "Purple PS5")
-                            precondition(restored.customizations[entry.id]?.color == "Purple")
+                            precondition(restored.customizations[entry.id]?.color == "Galactic Purple")
                             self.mergeControllerList([], paired: [])
                             precondition(self.controllerEntries.allSatisfy { !$0.connected })
                             precondition(self.controllerEntries.map { $0.id } == originalOrder)
@@ -4532,11 +4805,15 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
                     func biosCopyButtons(_ view: NSView) -> [NSButton] {
                         (view as? NSButton).map { [$0] } ?? view.subviews.flatMap { biosCopyButtons($0) }
                     }
-                    let copies = biosCopyButtons(self.biosStatusView(biosPreview))
-                    precondition(copies.map { $0.title } == ["Copy all", "dc_boot.bin", "dc_flash.bin"])
+                    let biosButtons = biosCopyButtons(self.biosStatusView(biosPreview, searchQuery: "Dreamcast BIOS"))
+                    precondition(biosButtons.first?.action == #selector(self.openBIOSFolder(_:)) &&
+                                 biosButtons.first?.identifier?.rawValue == "/BIOS/dc",
+                                 "BIOS details must show the destination folder")
+                    let copies = biosButtons.filter { $0.action == #selector(self.copyBIOSNames(_:)) }
+                    precondition(copies.map { $0.title } == ["dc_boot.bin", "dc_flash.bin", "Copy search"])
                     precondition(copies.map { $0.identifier!.rawValue } ==
-                                 ["dc_boot.bin\ndc_flash.bin", "dc_boot.bin", "dc_flash.bin"])
-                    precondition(copies.allSatisfy { $0.action == #selector(self.copyBIOSNames(_:)) })
+                                 ["dc_boot.bin", "dc_flash.bin", "Dreamcast BIOS"])
+                    precondition(!biosButtons.contains { $0.title.contains("Google") || $0.title == "Copy all" })
                     precondition(biosCopyButtons(self.biosStatusView(BIOSStatus(state: "present",
                         summary: "BIOS found", files: biosPreview.files))).isEmpty)
                     let orderedSystems = ConsoleArtwork.groups.flatMap { $0.systems }
@@ -4609,7 +4886,27 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
                         self.showConsoleDetails(trigger)
                         precondition(labels(in: self.inspectorRows).contains(expectedTitle),
                                      "Console details must explain emulator updates")
+                        precondition(!labels(in: self.inspectorRows).contains { $0.contains("Emulator ready") || $0.contains("core:") },
+                                     "Console details must stay short")
+                        func actions(_ view: NSView) -> [Selector] {
+                            ((view as? NSButton)?.action).map { [$0] } ?? view.subviews.flatMap { actions($0) }
+                        }
+                        precondition(actions(self.inspectorRows) == [#selector(self.showEmulatorInAppStore(_:))],
+                                     "Console details must offer only the App Store link without BIOS")
+                        precondition(actions(self.consoleRows).contains(#selector(self.showEmulatorInAppStore(_:))) &&
+                                     !actions(self.tabs.tabViewItems[7].view!).contains(#selector(self.showPlayers)),
+                                     "Console rows link to App Store; the page has no bottom App Store button")
                         self.closeInspector()
+                        self.appsChecking = false
+                        self.renderApps()
+                        self.highlightedAppID = "pcsx2"
+                        self.highlightAppRow()
+                        precondition(self.highlightedAppID == nil, "App Store highlight must finish after results load")
+                        func row(_ view: NSView, _ id: String) -> NSView? {
+                            view.identifier?.rawValue == id ? view : view.subviews.lazy.compactMap { row($0, id) }.first
+                        }
+                        precondition(row(self.appRetroRows, "app-row-pcsx2")?.layer?.backgroundColor != nil,
+                                     "Opening an emulator in App Store must highlight its row")
                     }
                     self.appStates = savedAppsForConsoleStatus
                     self.consoleSystems = savedSystemsForStatus

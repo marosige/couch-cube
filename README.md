@@ -160,10 +160,14 @@ manually with the controller's pencil button.
 Using a controller pulses its outline and shows “Receiving input”, without button
 or axis details; Reduce Motion uses the text indication without pulsing.
 The pencil in Controllers lets you set its name, connected color and artwork.
-The color picker shows matching square swatches with a softer, appearance-aware
-palette for light and dark mode. Indigo is the default for recognized DualSense
-controllers; Neon Green is the default for 8BitDo Micro (its older Green choice
-migrates to Neon Green). Other saved color choices remain unchanged.
+The color picker lists real retail controller colors in color-family sections
+(Black & White, Gray & Silver, Camo, Red & Orange, Pink, Purple & Indigo, Blue &
+Teal, Green & Yellow). Brand tags show which hardware each color comes from:
+PlayStation (e.g. Cosmic Red, Nova Pink, Gray Camouflage), Xbox (Electric Volt,
+Deep Pink…), 8BitDo (Micro Green, Atomic Purple…) and Nintendo Joy-Con colors;
+colors shared by several brands carry several tags. Very dark or light colors get
+a thin contrast halo. Defaults: Chroma Indigo for DualSense, Micro Green for 8BitDo
+Micro, Black for Xbox and other PlayStation controllers; older choices migrate automatically.
 On the Controllers page, the selected color tints the
 line drawing while its rounded icon background stays gray.
 These preferences persist by the existing HID serial/Bluetooth address identity;
@@ -198,14 +202,19 @@ yellow with an explicit **Update available** label when a known managed update i
 available, both in the console list and its details. BIOS never changes the emulator
 dot: its own indicator is green when present, red when required files are missing,
 yellow for optional BIOS with a fallback, and gray for manually checked firmware.
-The info button explains the next step, links to App Store and shows BIOS
-filenames to copy individually or with **Copy all**, plus a copyable console-name
-search and Google search button. Copying never downloads or moves a BIOS file.
+Every console row has an App Store icon next to the emulator status; it opens App
+Store, scrolls to that emulator and briefly highlights it. Switching on a console
+whose emulator is missing asks whether to install it.
+The info button keeps details short: emulator status, the App Store icon and, when
+BIOS files are missing, the destination folder (click to open), the filenames
+(click one to copy it) and **Copy search**. Copying never downloads or moves a BIOS file.
 Nintendo shares one rounded card with Home consoles and Handhelds sections;
-console icons use filled hardware silhouettes with cutout details and restrained,
-appearance-aware colors inspired by recognizable editions: white Wii, gray original
-Game Boy, yellow Game Boy Color, indigo Game Boy Advance and GameCube, and separate
-blue/red Switch Joy-Cons. Icon backgrounds stay clear; the sidebar stays monochrome.
+console icons use filled hardware silhouettes in each system's best-known retail
+colors: gray/charcoal NES, purple-accented SNES, charcoal N64, indigo GameCube and
+Game Boy Advance, white Wii and Dreamcast, gray original Game Boy, yellow Game Boy
+Color, black PlayStation 2/3/PSP and SEGA hardware, and blue/red Switch Joy-Cons.
+Dark plastics are lifted slightly in Dark Mode. Icon backgrounds stay clear; the
+sidebar stays monochrome.
 PlayStation and SEGA each have their own card.
 
 1. **Create game folders in Settings → Library storage.** Choose this Mac or an SSD. This creates Couch Cube's
@@ -225,8 +234,8 @@ PlayStation and SEGA each have their own card.
    CurseForge appears immediately below Battle.net for WoW addon management.
    Choose the WoW installation and manage addons in CurseForge itself.
    The TV menus category shares Steam Big Picture's installation with Steam.
-   Console rows show only the emulator,
-   an info button for requirements and the enable switch.
+   Console rows show the emulator with an App Store icon,
+   an info button for BIOS details and the enable switch.
    Opening App Store or TV menu checks installed versions and Homebrew-managed updates.
    **Update all** confirms and updates only the listed outdated Homebrew-managed apps,
    stopping on errors. Nothing is installed or upgraded merely by opening a page.
