@@ -21,7 +21,7 @@ collection with **ES-DE**, and connect up to **4 controllers** in supported game
 | On this Mac | On an external SSD |
 |---|---|
 | One Mac, one cozy gaming spot. | More room for games on smaller Macs, such as 256 GB models — or take your app and games between Macs. |
-| Open the **DMG** and drag **CouchCube.app** to Applications. | Unzip the **SSD pack** onto the SSD and configure **Settings → Library storage**. Or use the installed app → **Settings → Library storage → External SSD** to copy the app or explicitly prepare a new SSD. |
+| Open the **DMG** and drag **CouchCube.app** to Applications. | Unzip the **SSD pack** onto the SSD and configure **Settings → Game library**. Or use the installed app → **Settings → Game library → Add or prepare an SSD** to copy the app or explicitly prepare a new SSD. |
 
 Downloads appear once the first [release](https://github.com/marosige/couch-cube/releases)
 is published. Some game players require newer macOS.
@@ -43,9 +43,82 @@ view, not buttons positioned inside the content. AppKit manages their glass,
 spacing and overflow; View menu commands also support Command-[ and Command-].
 The page title is an unbordered informational toolbar item. Content uses the
 system safe area instead of a fixed-height imitation titlebar.
-Your console groups Couch Cube (the home screen), Game library, App Store and Retro
-consoles, in that order.
-Settings groups Controllers, Console Mode, Library storage and App Settings.
+The Couch Cube section groups Play (the home screen), Controllers and Cube Shop.
+Settings groups Game library, App Store, Retro consoles, Console Mode and App Settings,
+in that order. Game library also contains what used to be Library storage.
+
+**Cube Shop** (it replaced the Deals page and remembers which Deals tab you used) is a native,
+read-only shop window for PC games with five tabs: **Home**, **Deals**, **Free Games**,
+**Search** and **Wishlist**. It never buys anything, signs in anywhere or claims that a game
+runs on a Mac. Every row is one clickable row (hover, pointer, keyboard and VoiceOver) that
+opens your **default browser**: store deals use CheapShark's `cheapshark.com/redirect` link
+(their terms require it, Steam deals included), giveaways open on gamerpower.com, Mac App
+Store results open apps.apple.com (which hands off to the App Store app). Any other host or
+scheme is refused. There is no in-app browser and no store-app deep linking.
+
+- **Sources.** [CheapShark](https://www.cheapshark.com) store deals and per-store prices (USD),
+  [GamerPower](https://www.gamerpower.com) giveaways, and Apple's keyless
+  [iTunes Search API](https://performance-partners.apple.com/search-api) for Mac App Store
+  apps (`entity=macSoftware`, your region's storefront and currency). All are public and
+  keyless and are credited on the page.
+- **PC stores only.** Steam, GOG, Epic, EA, Battle.net, Ubisoft, Humble, Fanatical and the other
+  CheapShark PC stores, itch.io/DRM-free and the Mac App Store. GamerPower is asked only for PC
+  platforms and replies are filtered again, so PlayStation, Xbox, Switch, Android and iOS
+  giveaways never appear.
+- **My Stores / All Stores.** Home, Deals and Free Games share one saved toggle. My Stores keeps
+  the stores whose Mac app or Windows launcher is installed (detected like App Store does). With
+  none installed, All Stores is used and a hint explains why.
+- **Home** shows Wishlist deals, Featured deals, Price drops and Free now, picked locally from
+  discount, ratings, recency and your wishlist. Nothing about you is sent anywhere.
+- **Deals rows** use compact badges (Steam rating, Metacritic, deal rating, Installed). Installed
+  means a deal's Steam app ID matches a game installed in a Steam library on this Mac.
+- **Expiry and Reminders.** Only GamerPower provides end dates (`end_date`, read as UTC because
+  the API doesn't state a time zone; "N/A" means no badge). CheapShark has none, so store deals
+  never show one. The badge (“3 days left”, “Ends tomorrow”, orange within two days) is its own
+  control: clicking it adds a reminder to your default Apple Reminders list at 09:00 on the day
+  before the end (or the soonest sensible time, which the confirmation states). Access is asked on
+  first use; if denied, a note links to Privacy & Security › Reminders. A second click offers
+  removal, and a reminder you delete in Reminders resets the badge.
+- **Search** runs on Return or after a short pause, combines identical searches and caches
+  replies. Each game gets a section with one row per store, cheapest first. CheapShark prices are
+  USD and App Store prices use your storefront's currency, labelled; without a Shop currency the
+  App Store rows are grouped after the USD stores instead of being mixed into the sort.
+- **Wishlist** is Couch Cube's own, saved on the active Couch Cube drive in
+  `Couch Cube/Wishlist/wishlist.json` (schema version, title, CheapShark game ID, Steam app ID,
+  App Store ID, date added, optional target price in USD, last known best price with its currency).
+  It moves with the drive and works offline. Writes are atomic (temp file + rename, coordinated);
+  when the drive is unplugged or read-only the last copy is shown read-only with a note, and lists
+  from different drives are merged when you switch. Add or remove with the heart on any row.
+  Prices are checked in batches only when you open Cube Shop or press Refresh, never in the
+  background, and hits (“On sale at <store> −X%”, target reached) appear on Home. There are no
+  notifications or e-mail alerts.
+- **Caching.** Replies are cached in `~/Library/Caches/Couch Cube/deals`; rate limits
+  (including 429 Retry-After) and connection failures keep the last results with a message.
+
+**Shop currency** (App Settings › Cube Shop) converts prices for display only. Choose Original
+prices or a currency (default: your Mac's locale currency) and an optional card/FX fee %
+(0–20, e.g. a weekend markup). Rates are the [ECB reference rates via Frankfurter](https://frankfurter.dev)
+(`api.frankfurter.dev/v1`, keyless; Revolut has no public keyless rate API). They are fetched when
+Cube Shop opens and cached for 12 hours in `~/Library/Caches/Couch Cube`; offline, the last rates are
+used with a “rates from <date>” note, and with no rates at all prices stay original. Conversion uses
+Decimal math and the currency's own rounding (HUF has no decimals). Converted prices are marked
+“≈” and keep the original in the tooltip and VoiceOver label, Search sorts every store by the
+converted price, free items always say Free, and the wishlist file only ever stores original prices.
+Bank and Revolut rates may differ slightly.
+
+**Store Accounts** (App Settings) shows which game clients are signed in using local client
+files only, with no web view: the Mac Steam client's account names from `loginusers.vdf` (the
+most recent one marked; tokens and other fields are never read or stored), and the Windows
+launchers in the Couch Cube Wine prefix as Installed (sign in inside the launcher) or Not
+installed, because their files don't expose a reliable non-secret account name. Open launches the
+client, Check Again re-reads the files, and a guided walkthrough goes through the clients one by
+one. Checks run only when the page opens, on Check Again or when a launched client quits.
+Web store logins and launcher logins are separate: signing in to one doesn't sign in the other.
+
+**Activity** (View → Activity) is the technical log. It opens only when you choose it:
+installs, updates, refreshes, errors, launch and guided setup never open it, and macOS
+doesn't restore it. Problems show on the page or in an alert with a **Show Activity**
+button. Developers can set `COUCH_CUBE_DEBUG_ACTIVITY=1` to bring back automatic opening.
 The sidebar uses monochrome symbols without colored square backgrounds,
 inspired by Apple Music. Red/yellow attention badges remain distinct.
 Home has two compact cards: Play (opens the selected TV menu) and controllers.
@@ -60,7 +133,13 @@ Consoles also shows its full list immediately, with pulsing blue emulator dots
 while refreshing. Switches stay unavailable until the saved selection is loaded.
 emulators list only their consoles. **Get** uses a native macOS button
 with system-managed contrast. Installed apps have a discreet ellipsis menu for
-managed **Update** and **Remove…** actions. **Update all** appears above the list
+managed **Update** and **Remove…** actions. While an install, update or removal runs, a spinner takes
+the place of that row's button and the status shows the current Homebrew step
+(Downloading, Installing…). Homebrew doesn't report download percentages to apps, so the
+spinner never shows an invented percentage. When it finishes, Couch Cube re-checks only
+that app; the dot turns green (and the sidebar badge updates) only after the re-check
+confirms the app is installed and up to date. Otherwise the row shows the failure and
+Get/Update stays available to try again. **Update all** appears above the list
 only when updates are available; routine update-check summaries are omitted.
 All have tooltips and accessible labels. App logos are bundled for uninstalled apps;
 installed apps use their own macOS icons. An available update keeps Remove alongside it;
@@ -76,7 +155,7 @@ removal still asks for confirmation. Version details are available on hover.
 The app's Couch Cube branding opens this page. It links to the newest published
 release (including alpha releases) with an Installer DMG and SSD pack ZIP.
 For the SSD pack, unzip its contents onto your SSD, open `CouchCube.app` and
-configure Settings → Library storage before adding games. The empty `Couch Cube` folders are a template:
+configure Settings → Game library before adding games. The empty `Couch Cube` folders are a template:
 storage setup checks and binds them to the current volume; it does not erase the SSD.
 A modified template with extra files is preserved rather than overwritten.
 Emulators, games and BIOS are not included.
@@ -107,8 +186,8 @@ counts recommended ones, so a page with both shows two dots with their own numbe
 Hover a dot for the task list grouped by severity. Dots update in place: titles
 and icons keep their position whether a row shows none, one or two dots.
 **App Settings → Guided setup** (on by default) keeps the sidebar simple: only one
-page is marked at a time, in order Library storage, App Store, Console Mode, Retro
-consoles, Controllers, Game library, App Settings. That page's dots include all its
+page is marked at a time, in order Game library (storage first), App Store, Console Mode, Retro
+consoles, Controllers, App Settings. That page's dots include all its
 tasks, setup and maintenance alike (red and yellow counts can both show); the next page is marked once it is done. Every
 page stays freely reachable, and warnings inside pages are unchanged. Turn Guided
 setup off to see every page's dots at once. Guided markers appear only after the
@@ -123,21 +202,34 @@ only while the controller reports charging; unknown battery or transport is not 
 Each row's **…** menu offers Customize, Move Up/Down, Connect/Disconnect (Bluetooth),
 Same Controller As / Separate USB Connection, and Forget Device (Bluetooth) or
 Remove from List. Forget uses macOS's Bluetooth device removal and checks the result;
-if macOS refuses, it says so and opens Bluetooth Settings. Controllers in pairing mode
-appear at the bottom with a **Connect** button while the page is open (classic
+if macOS refuses, it says so and opens Bluetooth Settings. Forget keeps the controller's
+name, color and icon (keyed by its Bluetooth address, which is the controller's own hardware
+address), so pairing it again restores them; **Forget and Delete Profile** in the same dialog,
+or Remove from List, deletes them. Controllers in pairing mode
+appear right under the list with a **Connect** button while Home or Controllers is open (classic
 Bluetooth inquiry; Xbox and other Bluetooth LE pads may only appear in Bluetooth
-Settings). The header's sort button switches between **Your Order** and **Connected
+Settings). **Connect** pairs inside Couch Cube and never opens Bluetooth Settings: failures
+and PIN-code pads show an in-app message, and Bluetooth Settings opens only from its own
+header button. A controller that macOS reports as connected over Bluetooth but that exposes
+no HID gamepad/joystick input shows **Bluetooth only** instead of an error or a false
+“Connected”; check the pad's input mode switch (for example X/D) or reconnect it. Couch Cube
+reads input through HID rather than the GameController framework, so DirectInput-style HID
+pads still count as connected. The header's sort button switches between **Your Order** and **Connected
 First**; Connected First groups connected controllers above the rest without changing
 your saved order, and dragging works within each group. Header icons open Bluetooth
 and Game Controller settings. Missing Bluetooth permission or Bluetooth turned off
 shows an alert on the page and a Controllers task in the sidebar.
-One profile can cover both Bluetooth and USB: the USB connection is joined to the
-Bluetooth entry automatically only when the controller reports the same Bluetooth
-address as its USB serial. Otherwise use **Same Controller As** to join them
-yourself; two controllers of the same model are never merged by name alone.
-Settings → Library storage opens the local/SSD choices directly, with the active
-library, available libraries, disconnected state and first-library guidance.
-There is no separate Setup overview or intermediate Choose storage screen.
+One profile can cover both Bluetooth and USB. The USB connection joins the Bluetooth
+profile automatically only when the controller itself proves its Bluetooth address:
+DualSense, DualSense Edge and DualShock 4 report it over USB in a feature report (the same
+one SDL/Steam read), and some pads use it as their USB serial. A name, color or icon set
+over USB moves onto that profile in place. Xbox, Switch Pro and most other pads expose no
+shared ID across USB and Bluetooth on macOS, so use **Same Controller As** to join them
+yourself; two controllers of the same model are never merged by name alone, and Joy-Cons
+are never joined to anything.
+Library storage is merged into **Settings → Game library**: one Where your games live
+overview with Refresh connected drives, Add or prepare an SSD, your games and Move library.
+There is no separate Library storage page, Setup overview or intermediate Choose storage screen.
 The app can stay installed on the Mac while managing either local or SSD content.
 Move library copies the active Couch Cube folder to another connected volume
 whose Couch Cube folder does not yet exist. It never merges or overwrites libraries.
@@ -153,9 +245,12 @@ or automatic console mode still points to the old library. It never empties Tras
 An interrupted transfer keeps the source and reports any staging/destination
 folder to inspect before retrying; it does not silently delete partial files.
 App Store manages software; Retro consoles manages visible systems and BIOS checks.
-Game library manages folders and installed Steam games, with a Steam setup guide.
+In Retro consoles, the All consoles, manufacturer and Nintendo family headings have a switch that
+shows or hides every console beneath them in one batch (a mixed group shows "3 of 7"); showing
+consoles never installs emulators.
+Game library shows where your games live and each drive's games, with a Steam setup guide.
 Console Mode holds the default TV menu, automatic launch and optional macOS login
-guidance. Library storage sets up and switches the drive; App Settings groups app updates,
+guidance. Game library also sets up and switches the drive; App Settings groups app updates,
 app location, installer copy, uninstall and gaming cleanup.
 Nothing is installed or erased until you confirm it. Storage is checked on launch,
 explicit refresh, volume changes and returning Home, not whenever the app gains focus.
@@ -179,17 +274,31 @@ extra search-bar-sized top spacer.
 Home shows the first four controllers of the Controllers list, in the same order
 and sort mode (Your Order or Connected First); removed controllers disappear from
 both, and a “N more in Controllers” note appears when the list is longer. An entirely empty tile says “Connect via USB or Bluetooth”.
+The Home tile has no **+** button: controllers in pairing mode appear in it
+automatically with the same **Connect** button as the Controllers page.
+Input activity only flashes the controller's icon; other rows never move.
 Connected devices show “Connected” with a Bluetooth or cable icon, unchanged during
 input activity. Disconnected devices remain gray. The four-row controller tile uses original, logo-free
 line drawings for Xbox, PlayStation, Nintendo, 8BitDo and generic controllers.
 PS4 / DualShock 4, PS5 / DualSense (including Edge), Switch Pro Controller,
-Joy-Con and Steam Controller have separate outlines. 8BitDo SN30 Pro, Micro,
+Joy-Con and Steam Controller have separate outlines. Joy-Con (L) and (R) each show their own
+side with a small outline of the partner beside it (a pair outline is also available); the
+default Nintendo outline is a SNES-style pad, and Steam Controller uses the current dual-trackpad
+design. The artwork picker groups choices by company (Microsoft, Sony, Nintendo, Valve, 8BitDo,
+Other) like the color menu. 8BitDo SN30 Pro, Micro,
 Pro 2 and Ultimate also have distinct outlines selected automatically from the
 reported model name; other 8BitDo models use the general 8BitDo outline.
 Generic PlayStation and Nintendo choices remain available. If the device reports
 only a generic name, select the model manually rather than guessing its identity.
 If a device reports a generic name in its connection mode, choose its model
 manually with the controller's pencil button.
+Nintendo controllers are identified by HID vendor ID 0x057E: product 0x2009 is the
+Switch Pro Controller (Bluetooth name “Pro Controller”), 0x2006/0x2007 are Joy-Con (L)/(R)
+and stay separate entries: Joy-Cons are never linked automatically and never offer
+**Same Controller As**. A pad called “Pro Controller” with another vendor ID gets the
+generic outline; Switch-mode clones that report Nintendo's IDs are indistinguishable and
+are not guaranteed to work. Before pairing only the Bluetooth name is known, so the pairing
+list's outline is a best guess.
 Using a controller only flashes its controller icon (VoiceOver reads “Receiving
 input”), without button or axis details. Short statuses such as “Not connected”
 always fit; long controller names truncate first. The status text stays “Connected”, so rows
@@ -200,11 +309,36 @@ The color picker lists real retail controller colors in color-family sections
 Teal, Green & Yellow). Brand tags show which hardware each color comes from:
 PlayStation (e.g. Cosmic Red, Nova Pink, Gray Camouflage), Xbox (Electric Volt,
 Deep Pink…), 8BitDo (Micro Green, Atomic Purple…) and Nintendo Joy-Con colors;
-colors shared by several brands carry several tags. Very dark or light colors get
-a thin contrast halo. Defaults: Chroma Indigo for DualSense, Micro Green for 8BitDo
-Micro, Black for Xbox and other PlayStation controllers; older choices migrate automatically.
-On the Controllers page, the selected color tints the
-line drawing while its rounded icon background stays gray.
+colors shared by several brands carry several tags.
+The first color choice is **Automatic (…)**, the model's standard launch/marketing color:
+White for DualSense, Black for DualShock 4, other PlayStation, Xbox, Switch Pro, Steam
+Controller, 8BitDo Ultimate and unrecognized pads, Neon Blue/Neon Red for Joy-Con (L)/(R),
+gray for the Joy-Con pair, SNES-style Nintendo and other 8BitDo, Micro Green for 8BitDo Micro.
+Automatic follows the chosen artwork type. It is a default, not a detection: macOS exposes
+no shell-color field, and the open DualSense/DualShock drivers (Linux `hid-playstation`,
+SDL) read only firmware/hardware versions from the controller, with no color or retail
+variant. Joy-Con body color lives in the controller's SPI flash and can only be read by
+sending it subcommands, which Couch Cube doesn't do. A color you pick yourself always wins.
+Before Automatic existed Couch Cube saved the inferred default (e.g. Chroma Indigo for
+DualSense); such saved values become Automatic once, any other saved color is kept.
+Camo colors (Gray Camouflage, Mineral Camo) are drawn with a fixed, seeded camo pattern in
+close tones of the color; at very small sizes the art falls back to the flat average tone.
+Two outline styles exist: **A · Outline** (default; black lines, light lines only on black
+bodies) and **B · Double wall** (black lines on every body plus a subtle offset white wall).
+`ConsoleSetup --controller-sheet <dir>` renders comparison sheets of every controller in
+both styles.
+Controller art is drawn on its own, with no background, in a fixed-size frame on
+Home, Controllers, discovered rows and the customize preview. The body is filled with the
+controller's color (Automatic or your choice), clipped to its silhouette, and the line drawing
+sits on top. Outlines are black for every body color, including dark colors such as purple or
+cobalt blue; only black/near-black (neutral) bodies get light outlines on their charcoal fill. When a body would blend into the window background (e.g. white
+in Light Mode, black in Dark Mode) a subtle contrasting rim keeps the silhouette visible.
+Light outlines on black and partner Joy-Con/shoulder strokes keep at least 3:1 contrast against
+the fill or background; Increase Contrast uses pure black/white ink and thicker lines, and fills are
+always opaque, so Reduce Transparency changes nothing. Controllers use a single body color;
+two-tone shells aren't modeled, so none are guessed. Rendered images are cached per
+controller, color, appearance and size and redrawn when the appearance changes.
+Input flashing animates the drawing only.
 These preferences persist by the existing HID serial/Bluetooth address identity;
 USB location is the fallback, and devices without either have session-only identity.
 Recent Home slots and their order persist alongside saved customizations.
@@ -219,6 +353,25 @@ and CrossOver together. Existing CrossOver installations in `/Applications` or
 `~/Applications` are detected and can be opened directly. Otherwise Install opens
 CodeWeavers' official site; use your existing license or its trial. Games and
 bottles are configured in CrossOver, and compatibility is not guaranteed.
+Windows games also offers the official **Windows installers** of Steam, Epic Games
+Launcher, GOG Galaxy, EA app and Battle.net. These are separate from the macOS
+Steam app. **Get** downloads the installer into `Downloads` inside the active game
+library's Couch Cube folder (never the drive root), with real byte progress and
+Cancel. Only the vendors' own hosts are used: `cdn.akamai.steamstatic.com`
+(linked from store.steampowered.com/about), `webinstallers.gog-statics.com`
+(gog.com/galaxy), `origin-a.akamaihd.net` (ea.com/ea-app),
+`downloader.battle.net` (download.battle.net), and Epic's
+`launcher-public-service-prod06.ol.epicgames.com`, which redirects to
+`epicgames-download1.akamaized.net`. Epic's download page blocks scripted access,
+so that endpoint could not be cross-checked against the page. Epic ships an MSI
+(about 260 MB), and the others ship small EXE web installers. Redirects to any other host
+are refused. Downloads go to a hidden partial file and are published atomically
+only after a free-space check. The file must also be a Windows PE/MSI. An existing
+file is reused if identical, otherwise the new file is saved as `Name (2).exe`. Size and
+SHA-256 are recorded. Authenticode signatures are not checked, because macOS has no
+reliable verifier. Couch Cube never runs or installs these files: they show as
+**Downloaded** with Show in Finder, and need Porting Kit or CrossOver to run.
+These rows never create sidebar tasks, and an installed Windows launcher is never claimed.
 PC games also lists **FX Steam Launcher** ([fxgl/steamac](https://github.com/fxgl/steamac),
 v1.9.1) directly below Steam. It is a separate app that runs Valve's SteamOS in a
 lightweight VM for Windows Steam games; it needs Apple silicon and macOS 15 or newer
@@ -233,6 +386,12 @@ Console switches respond instantly and can be flipped one after another without
 waiting: the list is updated in place, and the latest choices are saved in the
 background shortly after you stop. If saving fails, the switches return to the
 last saved selection and the error is shown.
+Switches at the top of the page (All consoles), on each company card (Nintendo, PlayStation,
+SEGA) and on the Nintendo Home consoles/Handhelds subsections show or hide every console
+beneath them at once. A group switch is on only when all its consoles are shown; a mixed
+group is off with an "N of M" count, and switching it shows all. Group switches use the same
+instant in-place update and a single batched background save (failures revert them too), and
+showing consoles never installs anything.
 Enabled consoles also show BIOS filename-check results. Their info page lists
 each expected filename, destination and Found/Not found state in the selected
 storage's `BIOS/retroarch` folder. PS1 accepts any listed alternative; Sega CD
@@ -262,7 +421,7 @@ Dark plastics are lifted slightly in Dark Mode. Icon backgrounds stay clear; the
 sidebar stays monochrome.
 PlayStation and SEGA each have their own card.
 
-1. **Create game folders in Settings → Library storage.** Choose this Mac or an SSD. This creates Couch Cube's
+1. **Create game folders in Settings → Game library.** Choose this Mac or an SSD. This creates Couch Cube's
    folders and launcher files only: no apps are installed, no games are moved,
    and Steam's settings are unchanged.
 2. **Choose Consoles and App Store.** Switch on only the systems you want; new
@@ -299,14 +458,49 @@ PlayStation and SEGA each have their own card.
    edit Steam's library database; these settings have no supported public
    automation interface.
 
-**Game library** puts games first: **Your games** summarizes Steam games and ready
-retro consoles, with **+** (add a game) and a folder button. **Steam** lists games
-per library with a **Play** button for installed ones, and an empty state that opens
-Steam. **Retro games** links to the game folders and Retro consoles. **Where your
-games live** shows the same icon and name as Library Settings — **This Mac** or
-**External SSD**, marked **Active** for the active library — with storage health
-and library updates; its **…** menu has Check
-Library and Change Storage. App Store categories collapse with the chevron in their
+**Game library** starts with **Where your games live**, the drive overview
+for setup, switching and transfers. **This Mac** is always listed; every
+connected external drive gets its own row, and with none connected a disabled
+**External SSD — Connect one** row appears. The icon carries the readiness mark
+(ready, not set up, needs attention, disconnected or still checking — an
+unchecked drive is never called ready or empty), the active library is marked
+**Active**, and an existing library's path is a pill that opens it in Finder
+without opening the drive. Click the row or its chevron to open the drive page:
+
+- **Couch Cube library**: whether the drive has a library. Without one,
+  **Initialize…** creates only the missing Couch Cube folders (APFS/Mac OS
+  Extended) and never overwrites existing files. With one, it shows the path,
+  **Use this library…** or **Move library…**, and **Remove…**.
+- **Remove…** removes only that drive's Couch Cube folder — never the drive,
+  SteamLibrary or anything outside it. It lists size and file count, offers Show
+  in Finder and **Copy to another drive** (the verified transfer below) first,
+  then needs a second confirmation that you backed up what you want to keep.
+  The folder goes to the Trash; the running app inside it is refused.
+- **Storage**: drive size, used (all files), Couch Cube files and free space.
+- **Steam**: games in Steam libraries on that drive, with **Play** and **Manage**
+  (opens the game's page in Steam via `steam://nav/games/details/<appid>`) and
+  **Open Steam Storage**.
+- **Retro games**: only systems that actually have games on that drive.
+- **Game storage** (bottom): a bar plus a list showing each game's share of the games
+  found on *that* drive — the denominator is the found games' total, not the drive's size.
+  Two remembered checkboxes, usable together, change only the presentation (no rescan):
+  **Group ROMs by system** (e.g. all PS3 games) and **Group PC games by launcher**
+  (Steam, GOG, Battle.net, EA, Epic — only those actually found). The 8 largest entries
+  get colors, the rest share a gray "Other" segment; every entry stays in the list
+  (**Show all**), tiny ones as "<0.1%". It's insight only: nothing is deleted or moved.
+  Sizes are measured off the main thread on the same volume only, skipping symlinks and
+  counting hardlinked/shared files once. Coverage: Couch Cube ROMs (when the library is
+  ready; multi-disc sets and `.cue/.gdi/.m3u` files are grouped), Steam (`steamapps/common`
+  plus Workshop; Steam's reported size if the folder is missing), Battle.net, EA and GOG
+  via their install marker files in the drive's Applications/Games folders, Epic via its
+  manifests, and CrossOver/Whisky bottles as whole bottles in a "launcher unknown" group
+  (internal drive only). Not detected: Amazon, Ubisoft, custom folders and games inside
+  bottles individually. Unknown or unreadable sizes are stated and left out of the bar,
+  never counted as zero.
+
+Empty sections are hidden. **Your games** summarizes Steam games and ready retro
+consoles, with **+** (add a game) and a folder button. The overview's **…** menu
+has Check Library and Change Storage. App Store categories collapse with the chevron in their
 header; collapsed categories still show installed apps, and the choice is remembered.
 
 **Steam integration:** Game library shows installed Steam game counts
@@ -335,7 +529,7 @@ shown there as coming soon too.
 Consoles controls system visibility in ES-DE, not emulator installation. The future
 Couch Cube menu will use the same saved selection. Steam's own library is unchanged.
 
-**Settings → Library storage** manages storage setup and transfers. The **Steam setup guide** in Game library
+**Settings → Game library** manages storage setup and transfers. The **Steam setup guide** in Game library
 shows the exact storage path and manual steps; Couch Cube does not verify
 Steam sign-in, controller configuration or completion of those steps.
 
@@ -343,7 +537,9 @@ Steam sign-in, controller configuration or completion of those steps.
 game controllers and previously seen devices under **Connected Controllers**.
 Green means connected, gray means disconnected; connected entries show
 **USB** or **Bluetooth** (other transports are labeled separately).
-Choose the pencil to save a custom name and icon color in Couch Cube. The original
+Choose the pencil to save a custom name and icon color (or Automatic) in Couch Cube. The sheet previews the
+controller's own outline in the chosen color and artwork as you change them; Cancel keeps
+the saved look. The original
 device/Bluetooth name is available when editing rather than repeated in the list.
 Connection and activity appear directly below the displayed name. Names do not rename the device
 in macOS or Steam. **Show connected first** brings connected devices to the top;

@@ -21,9 +21,20 @@ def verify_app(app, working_directory, distribution="local"):
     assert info["MCCDistribution"] == distribution
     assert info["NSBluetoothAlwaysUsageDescription"]
     assert info["CFBundleShortVersionString"] == "0.3.0"
+    # Activity must never open by itself in release: no debug flag baked in, no window restoration.
+    assert "COUCH_CUBE_DEBUG_ACTIVITY" not in (info.get("LSEnvironment") or {})
+    assert not info.get("NSQuitAlwaysKeepsWindows")
+    for key in ("NSRemindersUsageDescription", "NSRemindersFullAccessUsageDescription"):
+        assert "reminder" in (info.get(key) or "").lower(), key
     resources = app / "Contents/Resources"
     assert (resources / "Console.icns").is_file()
     assert (resources / "scripts/releases.py").is_file()
+    assert (resources / "scripts/deals.py").is_file()
+    assert (resources / "scripts/windows_downloads.py").is_file()
+    assert (resources / "scripts/store_accounts.py").is_file()
+    assert (resources / "scripts/shop.py").is_file()
+    assert (resources / "scripts/wishlist.py").is_file()
+    assert (resources / "scripts/rates.py").is_file()
     assert (resources / "config/release.json").is_file()
     assert (resources / "config/bios-map.csv").is_file()
     assert (resources / "Install Homebrew.command").is_file()

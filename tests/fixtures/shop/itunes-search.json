@@ -1,0 +1,72 @@
+{
+ "resultCount": 4,
+ "results": [
+  {
+   "kind": "mac-software",
+   "trackId": 439924718,
+   "trackName": "Civilization\u00ae V",
+   "price": 12990.0,
+   "currency": "HUF",
+   "formattedPrice": "HUF12,990.00",
+   "genreIds": [
+    "6014",
+    "6017",
+    "7017"
+   ],
+   "primaryGenreName": "Games",
+   "trackViewUrl": "https://apps.apple.com/hu/app/civilization-v/id439924718?mt=12&uo=4",
+   "artworkUrl100": "https://is1-ssl.mzstatic.com/image/thumb/Purple113/v4/fe/99/56/fe995641-fd14-b2be-b666-b1fe8f318f07/App.png/100x100bb.png",
+   "sellerName": "Aspyr Media (iDP)"
+  },
+  {
+   "kind": "mac-software",
+   "trackId": 1123795278,
+   "trackName": "Civilization\u00ae VI",
+   "price": 24990.0,
+   "currency": "HUF",
+   "formattedPrice": "HUF24,990.00",
+   "genreIds": [
+    "6014",
+    "7017",
+    "7015"
+   ],
+   "primaryGenreName": "Games",
+   "trackViewUrl": "https://apps.apple.com/hu/app/civilization-vi/id1123795278?mt=12&uo=4",
+   "artworkUrl100": "https://is1-ssl.mzstatic.com/image/thumb/Purple221/v4/78/cd/87/78cd879d-5958-ad0b-2e09-620b9a9d5397/App.png/100x100bb.png",
+   "sellerName": "Aspyr Media (iDP)"
+  },
+  {
+   "kind": "mac-software",
+   "trackId": 926919592,
+   "trackName": "Civilization: Beyond Earth",
+   "price": 17990.0,
+   "currency": "HUF",
+   "formattedPrice": "HUF17,990.00",
+   "genreIds": [
+    "6014",
+    "7015",
+    "7017"
+   ],
+   "primaryGenreName": "Games",
+   "trackViewUrl": "https://apps.apple.com/hu/app/civilization-beyond-earth/id926919592?mt=12&uo=4",
+   "artworkUrl100": "https://is1-ssl.mzstatic.com/image/thumb/Purple69/v4/5d/d6/cc/5dd6cc6a-7c38-6f7a-66ba-a265d9a06c77/App.png/100x100bb.png",
+   "sellerName": "Aspyr Media (iDP)"
+  },
+  {
+   "kind": "software",
+   "trackId": 1514658494,
+   "trackName": "Freeciv Go",
+   "price": 0.0,
+   "currency": "HUF",
+   "formattedPrice": "Free",
+   "genreIds": [
+    "6014",
+    "7017"
+   ],
+   "primaryGenreName": "Games",
+   "trackViewUrl": "https://apps.apple.com/hu/app/freeciv-go/id1514658494?uo=4",
+   "artworkUrl100": "https://is1-ssl.mzstatic.com/image/thumb/Purple211/v4/11/ad/11/11ad111e-a86f-2acd-f0e6-641936bbe45c/AppIcon-0-0-1x_U007emarketing-0-5-85-220.png/100x100bb.jpg",
+   "sellerName": "Vladimir Davidovich"
+  }
+ ]
+}

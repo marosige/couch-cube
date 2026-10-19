@@ -1,0 +1,26 @@
+[
+ {
+  "gameID": "100",
+  "steamAppID": "367520",
+  "cheapest": "9.99",
+  "cheapestDealID": "AAAAAAAAAAAA",
+  "external": "Hollow Knight",
+  "thumb": "https://example.com/a.jpg"
+ },
+ {
+  "gameID": "200",
+  "steamAppID": null,
+  "cheapest": "4.99",
+  "cheapestDealID": "BBBBBBBBBBBB",
+  "external": "Hollow Knight Fan Pack",
+  "thumb": "https://example.com/b.jpg"
+ },
+ {
+  "gameID": "300",
+  "steamAppID": null,
+  "cheapest": "1.00",
+  "cheapestDealID": "CCCCCCCCCCCC",
+  "external": "Hollow Expired",
+  "thumb": "https://example.com/c.jpg"
+ }
+]

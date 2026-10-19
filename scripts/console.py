@@ -356,6 +356,212 @@ def release_tools():
     return module
 
 
+def deal_tools():
+    spec = importlib.util.spec_from_file_location("console_deals", Path(__file__).with_name("deals.py"))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def windows_tools():
+    spec = importlib.util.spec_from_file_location("console_windows_downloads", Path(__file__).with_name("windows_downloads.py"))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def store_accounts_tools():
+    spec = importlib.util.spec_from_file_location("console_store_accounts", Path(__file__).with_name("store_accounts.py"))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def open_store_client(client_id):
+    """Opens one game client so the user can sign in there, and returns once it quits."""
+    try:
+        command = store_accounts_tools().open_command(client_id)
+    except ValueError as exc:
+        raise SetupError(str(exc)) from exc
+    subprocess.run(command, check=False, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
+def windows_downloads_status():
+    """Read-only: which official Windows launcher installers are already in the library's Downloads folder."""
+    tools = windows_tools()
+    try:
+        storage = configured_storage()
+    except (SetupError, OSError, KeyError, ValueError):
+        return {"library": None, "folder": None, "items": tools.status(None)}
+    folder = storage.read_path(tools.FOLDER)
+    return {"library": str(storage.root), "folder": str(folder), "items": tools.status(folder)}
+
+
+def windows_download(package, confirm=False):
+    """Downloads one installer into <library>/Downloads. It is never opened or run."""
+    if not confirm:
+        raise SetupError("Downloading an installer requires --confirm.")
+    tools = windows_tools()
+    storage = configured_storage()
+    folder = storage.target(tools.FOLDER)
+    try:
+        return tools.download(package, folder, progress=lambda line: print(line, flush=True), check=storage.check)
+    except tools.DownloadError as exc:
+        raise SetupError(str(exc)) from None
+
+
+def installed_steam_app_ids():
+    """Steam app IDs with a fully installed local manifest; an unreadable library simply contributes nothing."""
+    return frozenset(game["appid"] for library in steam_status()["libraries"] for game in library["games"]
+                     if game.get("installed"))
+
+
+def shop_tools():
+    spec = importlib.util.spec_from_file_location("console_shop", Path(__file__).with_name("shop.py"))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def wishlist_tools():
+    spec = importlib.util.spec_from_file_location("console_wishlist", Path(__file__).with_name("wishlist.py"))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def my_stores(shop=None):
+    """Stores whose Mac app or Couch Cube Wine launcher is installed (local checks only)."""
+    shop = shop or shop_tools()
+    try:
+        clients = store_accounts_tools().status()["clients"]
+    except (OSError, ValueError, KeyError):
+        clients = []
+    return shop.installed_stores(clients)
+
+
+def deals_report(source, page=0, sort=None, store=None, search=None, platform=None, kind=None, refresh=False,
+                 mine=False):
+    shop = shop_tools()
+    tools = shop.deals
+    stores = my_stores(shop) if mine else []
+    ids, labels = shop.scope_filter(stores)
+    scope = {"scope": "mine" if mine and stores else "all", "my_stores": stores}
+    if source == "cheapshark":
+        report = tools.store_deals(page, sort or "rating", store or (",".join(ids) if mine and ids else None),
+                                   search, refresh, installed_steam_app_ids())
+        return {**report, **scope}
+    report = tools.giveaways(platform, kind, sort or "date", refresh)
+    if mine and labels:
+        report["giveaways"] = [item for item in report["giveaways"] if shop.in_scope(item, labels)]
+    return {**report, **scope}
+
+
+def shop_home(scope="mine", refresh=False):
+    shop = shop_tools()
+    report = shop.home(my_stores(shop), scope, refresh, installed_steam_app_ids())
+    return {**report, "wishlist": wishlist_status()}
+
+
+def shop_search(query, country="US", refresh=False):
+    shop = shop_tools()
+    try:
+        return shop.search(query, country, refresh)
+    except shop.deals.DealsError as exc:
+        raise SetupError(str(exc)) from None
+
+
+def rates_tools():
+    spec = importlib.util.spec_from_file_location("console_rates", Path(__file__).with_name("rates.py"))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def exchange_rates(refresh=False):
+    tools = rates_tools()
+    try:
+        return tools.latest(refresh)
+    except tools.deals.DealsError as exc:
+        raise SetupError(str(exc)) from None
+
+
+def wishlist_location():
+    """(path, library) on the active Couch Cube drive, or (None, None) when no drive is connected."""
+    tools = wishlist_tools()
+    try:
+        storage = configured_storage()
+        return storage.target(tools.RELATIVE), str(storage.root)
+    except (SetupError, OSError, KeyError, ValueError):
+        return None, None
+
+
+def wishlist_status():
+    tools = wishlist_tools()
+    path, library = wishlist_location()
+    try:
+        return tools.status(path, library)
+    except tools.WishlistError as exc:
+        return {**tools.report(tools.empty()), "library": library, "read_only": True, "offline": path is None,
+                "merged": 0, "note": str(exc)}
+
+
+def wishlist_change(action, item=None, key=None, price=None):
+    tools = wishlist_tools()
+    path, library = wishlist_location()
+    if path is None:
+        raise SetupError("Connect your Couch Cube drive to change the wishlist. It's saved on the drive.")
+    try:
+        if action == "add":
+            data = tools.add(path, item)
+        elif action == "remove":
+            data = tools.remove(path, key)
+        else:
+            data = tools.set_target(path, key, price)
+    except tools.WishlistError as exc:
+        raise SetupError(str(exc)) from None
+    tools.mirror(library, data)
+    return tools.report(data, library=library, read_only=False, offline=False, merged=0, note=None)
+
+
+def wishlist_check(country="US", refresh=False):
+    """Look up current prices for every wishlist item (only when the Shop opens or on refresh)."""
+    tools, shop = wishlist_tools(), shop_tools()
+    current = wishlist_status()
+    items = current["items"]
+    resolved = {}
+    for item in [item for item in items if not item.get("game_id") and not item.get("app_store_id")][:10]:
+        try:
+            game_id = shop.resolve_title(item["title"], refresh)
+        except shop.deals.DealsError:
+            continue
+        if game_id:
+            resolved[item["key"]] = game_id
+    lookup = [{**item, "game_id": item.get("game_id") or resolved.get(item["key"])} for item in items]
+    prices = shop.wishlist_prices(lookup, country, refresh)
+
+    def change(data):
+        for item in data["items"]:
+            if item["key"] in resolved:
+                item["game_id"] = resolved[item["key"]]
+        tools.apply_prices(data, prices)
+        for item in data["items"]:
+            item["key"] = tools.item_key(item)
+    path, library = wishlist_location()
+    if path is not None and not current.get("read_only"):
+        try:
+            data = tools.update(path, change)
+            tools.mirror(library, data)
+            return {**tools.report(data, library=library, read_only=False, offline=False, merged=current.get("merged", 0),
+                                   note=current.get("note")), "errors": prices["errors"]}
+        except tools.WishlistError as exc:
+            current = {**current, "note": str(exc), "read_only": True}
+    data = {"schema": tools.SCHEMA, "items": [tools.normalize_item(item) for item in items]}
+    change(data)
+    return {**tools.report(data, **{key: current.get(key) for key in ("library", "read_only", "offline", "merged", "note")}),
+            "errors": prices["errors"]}
+
+
 def copy_bundle_contents(source, directory_fd):
     for entry in source.iterdir():
         mode = entry.lstat().st_mode
@@ -909,7 +1115,10 @@ def install_packages(packages):
         print(f"Installing host component: {package}", flush=True)
         run([brew, "install", "--cask", package])
 
-def app_status(check_updates=False):
+def app_status(check_updates=False, package=None):
+    """Installed/managed/update state for every known app, or only `package` (a targeted post-install re-check)."""
+    if package is not None and package not in PACKAGES:
+        raise SetupError("Unknown package selection.")
     brew = None
     try:
         brew = find_brew()
@@ -923,11 +1132,13 @@ def app_status(check_updates=False):
     outdated = {}
     if check_updates:
         if brew:
-            info = json.loads(run([brew, "outdated", "--cask", "--greedy", "--json=v2"],
+            info = json.loads(run([brew, "outdated", "--cask", "--greedy", "--json=v2"] + ([package] if package and package in managed else []),
                                   stdout=subprocess.PIPE, text=True).stdout)
             outdated = {item["name"]: item.get("current_version", "") for item in info.get("casks", [])}
     result = []
     for key, name in PACKAGES.items():
+        if package is not None and key != package:
+            continue
         paths = [base / name for base in [SYSTEM_APPLICATIONS, Path.home() / "Applications"]]
         path = next((path for path in paths if path.is_dir()), None)
         version = ""
@@ -1144,7 +1355,13 @@ def storage_status():
                     issue = "Library belongs to another volume or needs setup."
             except (OSError, ValueError, AttributeError) as exc:
                 issue = f"Couldn't read library: {exc}"
-        locations.append({"drive": choice, "configured": configured, "issue": issue})
+        environment, environment_issue = library_environment(choice)
+        try:
+            total = shutil.disk_usage(choice["mount"]).total
+        except OSError:
+            total = None
+        locations.append({"drive": choice, "configured": configured, "issue": issue or environment_issue,
+                          "environment": environment, "total": total})
     transfer = None
     for location in locations:
         if active and location["configured"] and location["drive"]["id"] == active.get("id"):
@@ -1311,6 +1528,463 @@ def retire_transferred_library(destination_id, token):
     destination.check()
     source.check()
     return {"path": str(source.root)}
+
+
+def library_environment(choice):
+    """Classify a drive's Couch Cube folder without writing; unknown content is never called absent."""
+    root = Path(choice["root"])
+    try:
+        reject_symlinks(root)
+        marker = root / MARKER
+        reject_symlinks(marker)
+        if marker.exists():
+            state = read_json(marker)
+            if (isinstance(state, dict) and state.get("version") == 1 and state.get("uuid") == choice["uuid"]
+                    and state.get("id") == choice["id"] and state.get("mode") == choice["mode"]):
+                return "ready", None
+            return "invalid", "Library belongs to another volume or needs setup."
+        if not root.exists():
+            return "absent", None
+        if not root.is_dir():
+            return "invalid", "A file is in the way of the Couch Cube folder. It will not be overwritten."
+        if not any(root.iterdir()) or is_ssd_template(root):
+            return "absent", None
+        return "occupied", "A Couch Cube folder without setup information exists here. It will not be overwritten."
+    except (SetupError, OSError, ValueError, AttributeError) as exc:
+        return "invalid", f"Couldn't read library: {exc}"
+
+
+def allocated_bytes(root):
+    """Disk space used below root without following links."""
+    total = 0
+    if not root.is_dir() or root.is_symlink():
+        return 0
+    for directory, folders, files in os.walk(root, followlinks=False):
+        for name in folders + files:
+            try:
+                total += os.lstat(Path(directory) / name).st_blocks * 512
+            except OSError:
+                continue
+    return total + os.lstat(root).st_blocks * 512
+
+
+def populated_systems(root):
+    systems = []
+    for system, (name, extensions, _) in SYSTEMS.items():
+        folder = root / "ROMs" / system
+        if folder.is_symlink() or not folder.is_dir():
+            continue
+        allowed = extensions.split("|")
+        count = sum(1 for file in folder.rglob("*")
+                    if file.is_file() and not file.is_symlink() and file.suffix.lower().lstrip(".") in allowed)
+        if count:
+            systems.append({"id": system, "name": name, "games": count, "path": str(folder)})
+    return systems
+
+
+def same_volume(path, mount):
+    try:
+        return path.exists() and os.stat(path).st_dev == os.stat(mount).st_dev
+    except OSError:
+        return False
+
+
+def drive_detail(identifier):
+    """Read one drive's library, capacity and games without changing the active library."""
+    choice = select_drive(identifier)
+    root = Path(choice["root"])
+    environment, issue = library_environment(choice)
+    usage = shutil.disk_usage(choice["mount"])
+    errors = []
+    couch = allocated_bytes(root) if environment != "absent" or root.is_dir() else 0
+    steam = []
+    try:
+        for path in steam_libraries():
+            if same_volume(path, choice["mount"]):
+                games = steam_library_games(path, errors)
+                if games:
+                    steam.append({"path": str(path), "games": games})
+    except (SetupError, OSError, UnicodeError) as exc:
+        errors.append(str(exc))
+    retro = populated_systems(root) if environment == "ready" else []
+    active = None
+    if HOST_CONFIG.is_file() and not HOST_CONFIG.is_symlink():
+        try:
+            active = read_json(HOST_CONFIG)
+        except (OSError, ValueError):
+            active = None
+    select_drive(identifier)
+    return {"drive": choice, "environment": environment, "issue": issue,
+            "active": isinstance(active, dict) and active.get("id") == choice["id"] and active.get("uuid") == choice["uuid"],
+            "capacity": {"total": usage.total, "used": usage.used, "free": usage.free, "couch": couch},
+            "steam": steam, "retro": retro, "errors": errors}
+
+
+DISC_SUFFIX = re.compile(r"\s*[\(\[](?:disc|disk|cd)\s*\d+[^\)\]]*[\)\]]", re.I)
+LAUNCHER_NAMES = {"steam": "Steam", "gog": "GOG", "blizzard": "Battle.net", "ea": "EA app",
+                  "epic": "Epic Games", "bottle": "Windows bottles"}
+
+
+class StorageMeter:
+    """Allocated-size measurement that stays on one volume, never follows links and counts each inode once."""
+
+    def __init__(self, device):
+        self.device = device
+        self.seen = set()
+        self.shared = 0
+
+    def _entry(self, path):
+        info = os.lstat(path)
+        if stat.S_ISLNK(info.st_mode) or info.st_dev != self.device:
+            return 0, False
+        key = (info.st_dev, info.st_ino)
+        size = info.st_blocks * 512
+        if key in self.seen:
+            self.shared += size
+            return 0, stat.S_ISDIR(info.st_mode)
+        self.seen.add(key)
+        return size, stat.S_ISDIR(info.st_mode)
+
+    def measure(self, paths):
+        """Return (bytes or None, unreadable count); None means nothing could be read at all."""
+        total, unreadable, readable = 0, 0, False
+        for path in paths:
+            try:
+                size, is_dir = self._entry(path)
+            except OSError:
+                unreadable += 1
+                continue
+            readable = True
+            total += size
+            if not is_dir:
+                continue
+            failures = []
+            for directory, folders, files in os.walk(path, followlinks=False, onerror=failures.append):
+                for name in folders + files:
+                    try:
+                        size, _ = self._entry(os.path.join(directory, name))
+                        total += size
+                    except OSError:
+                        unreadable += 1
+                folders[:] = [name for name in folders
+                              if not os.path.islink(os.path.join(directory, name))]
+            unreadable += len(failures)
+        return (total if readable else None), unreadable
+
+
+def rom_references(descriptor, folder):
+    """Files a .m3u/.cue/.gdi names, limited to existing regular files inside its system folder."""
+    try:
+        text = descriptor.read_text(errors="replace")
+    except OSError:
+        return []
+    suffix = descriptor.suffix.lower()
+    names = []
+    for line in text.splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if suffix == ".cue":
+            match = re.match(r'FILE\s+"([^"]+)"|FILE\s+(\S+)', line, re.I)
+            if match:
+                names.append(match.group(1) or match.group(2))
+        elif suffix == ".gdi":
+            quoted = re.findall(r'"([^"]+)"', line)
+            parts = line.split()
+            if quoted:
+                names.append(quoted[0])
+            elif len(parts) >= 5:
+                names.append(parts[4])
+        else:
+            names.append(line)
+    base = folder.resolve()
+    found = []
+    for name in names:
+        if os.path.isabs(name):
+            continue
+        target = descriptor.parent / name
+        try:
+            resolved = target.resolve()
+        except OSError:
+            continue
+        if (target.is_symlink() or not target.is_file() or resolved == base
+                or base not in resolved.parents):
+            continue
+        found.append(target)
+    return found
+
+
+def rom_games(folder, allowed):
+    """Group one system folder into games: folders, descriptor sets, multi-disc names and leftovers."""
+    files, folders = [], []
+    for entry in sorted(folder.iterdir()):
+        if entry.name.startswith(".") or entry.is_symlink():
+            continue
+        (folders if entry.is_dir() else files if entry.is_file() else []).append(entry)
+    claimed = {}
+    for file in files:
+        if file.suffix.lower() in {".m3u", ".cue", ".gdi"}:
+            claimed[file] = rom_references(file, folder)
+    referenced = {target.resolve() for targets in claimed.values() for target in targets}
+    groups = {}
+    used = set()
+    for file in files:
+        if file.resolve() in referenced or file.suffix.lower().lstrip(".") not in allowed:
+            continue
+        stack, members = [file], []
+        while stack:
+            current = stack.pop()
+            if current.resolve() in used:
+                continue
+            used.add(current.resolve())
+            members.append(current)
+            stack.extend(claimed.get(current, []))
+        name = DISC_SUFFIX.sub("", file.stem).strip() or file.stem
+        groups.setdefault(name, []).extend(members)
+    games = [(name, members) for name, members in groups.items()]
+    games += [(entry.name, [entry]) for entry in folders]
+    leftovers = [file for file in files if file.resolve() not in used and file.resolve() not in referenced]
+    for targets in claimed.values():
+        leftovers += [target for target in targets if target.resolve() not in used]
+    return games, list(dict.fromkeys(leftovers))
+
+
+def launcher_roots(choice):
+    mount = Path(choice["mount"])
+    if choice["mode"] == "local":
+        home = Path.home()
+        return [SYSTEM_APPLICATIONS, home / "Applications", home / "Games"]
+    return [mount / "Applications", mount / "Games", mount]
+
+
+def marker_games(choice, device, errors):
+    """Battle.net, EA and GOG installs identified by the files their installers leave in each game folder."""
+    found = {}
+    for base in launcher_roots(choice):
+        try:
+            if base.is_symlink() or not base.is_dir() or os.stat(base).st_dev != device:
+                continue
+            entries = sorted(base.iterdir())
+        except OSError as exc:
+            errors.append(f"{base}: {exc}")
+            continue
+        for entry in entries:
+            try:
+                if entry.is_symlink() or not entry.is_dir() or os.lstat(entry).st_dev != device:
+                    continue
+                source = None
+                if (entry / ".build.info").is_file():
+                    source = "blizzard"
+                elif (entry / "__Installer" / "installerdata.xml").is_file():
+                    source = "ea"
+                elif any(entry.glob("goggame-*.info")) or any((entry / "Contents" / "Resources").glob("goggame-*.info")):
+                    source = "gog"
+                if source:
+                    name = entry.name[:-4] if entry.suffix == ".app" else entry.name
+                    found.setdefault(str(entry.resolve()), (source, name, entry))
+            except OSError as exc:
+                errors.append(f"{entry}: {exc}")
+    return list(found.values())
+
+
+def epic_games(device, errors):
+    manifests = Path.home() / "Library/Application Support/Epic/EpicGamesLauncher/Data/Manifests"
+    games = []
+    if manifests.is_symlink() or not manifests.is_dir():
+        return games, False
+    for manifest in sorted(manifests.glob("*.item")):
+        try:
+            data = read_json(manifest)
+            location, name = data.get("InstallLocation"), data.get("DisplayName")
+            if not isinstance(location, str) or not isinstance(name, str) or not os.path.isabs(location):
+                raise SetupError("Missing install location or name.")
+            path = Path(location)
+            if path.is_symlink() or not path.exists() or os.lstat(path).st_dev != device:
+                continue
+            games.append((name, path))
+        except (SetupError, OSError, ValueError, AttributeError) as exc:
+            errors.append(f"{manifest}: {exc}")
+    return games, True
+
+
+def bottle_folders(choice, device):
+    if choice["mode"] != "local":
+        return []
+    home = Path.home()
+    bottles = []
+    for base, app in [(home / "Library/Application Support/CrossOver/Bottles", "CrossOver"),
+                      (home / "Library/Containers/com.isaacmarovitz.Whisky/Bottles", "Whisky")]:
+        try:
+            if base.is_symlink() or not base.is_dir():
+                continue
+            for entry in sorted(base.iterdir()):
+                if not entry.is_symlink() and entry.is_dir() and os.lstat(entry).st_dev == device:
+                    bottles.append((f"{entry.name} ({app} bottle)", entry))
+        except OSError:
+            continue
+    return bottles
+
+
+def drive_games(identifier):
+    """Read-only per-game storage on one drive. Specific games are measured before shared containers,
+    so a game inside a bottle is counted once, and an inode is never counted twice."""
+    choice = select_drive(identifier)
+    mount = Path(choice["mount"])
+    device = os.stat(mount).st_dev
+    meter = StorageMeter(device)
+    items, errors, coverage = [], [], []
+
+    def add(source, name, paths, system=None, system_name=None, kind="pc", estimated=None, item_id=None):
+        size, unreadable = meter.measure(paths)
+        if estimated is not None and (size is None or size == 0):
+            size, measured = estimated, False
+        else:
+            measured = True
+        items.append({"id": item_id or f"{source}:{paths[0]}", "kind": kind, "source": source,
+                      "source_name": "ROMs" if kind == "rom" else LAUNCHER_NAMES[source],
+                      "name": name, "system": system, "system_name": system_name,
+                      "bytes": size, "measured": measured, "unreadable": unreadable, "path": str(paths[0])})
+
+    def cover(source, name, status, count=0, note=None):
+        coverage.append({"source": source, "name": name, "status": status, "games": count, "note": note})
+
+    environment, _ = library_environment(choice)
+    root = Path(choice["root"])
+    if environment == "ready":
+        before = len(items)
+        for system, (system_name, extensions, _) in SYSTEMS.items():
+            folder = root / "ROMs" / system
+            if folder.is_symlink() or not folder.is_dir():
+                continue
+            try:
+                games, leftovers = rom_games(folder, extensions.split("|"))
+            except OSError as exc:
+                errors.append(f"{folder}: {exc}")
+                continue
+            for name, members in games:
+                add("rom", name, members, system, system_name, "rom", item_id=f"rom:{system}:{name}")
+            if leftovers:
+                add("rom", f"Other {system_name} files", leftovers, system, system_name, "rom",
+                    item_id=f"rom:{system}:*other")
+        cover("rom", "ROMs", "scanned" if len(items) > before else "none", len(items) - before)
+    else:
+        cover("rom", "ROMs", "none", note="No Couch Cube library on this drive.")
+
+    before = len(items)
+    try:
+        for library in steam_libraries():
+            if not same_volume(library, mount):
+                continue
+            for manifest in sorted((library / "steamapps").glob("appmanifest_*.acf")):
+                try:
+                    data = parse_vdf(manifest.read_text()).get("appstate")
+                    appid, name, folder = (data or {}).get("appid"), (data or {}).get("name"), (data or {}).get("installdir")
+                    if (not isinstance(appid, str) or not appid.isdigit() or not isinstance(name, str)
+                            or not isinstance(folder, str) or not folder or "/" in folder or folder in {".", ".."}):
+                        raise SetupError("Invalid Steam game manifest.")
+                    size = (data or {}).get("sizeondisk")
+                    reported = int(size) if isinstance(size, str) and size.isdigit() else None
+                    paths = [path for path in [library / "steamapps/common" / folder,
+                                               library / "steamapps/workshop/content" / appid]
+                             if path.exists() and not path.is_symlink()]
+                    if paths:
+                        add("steam", name, paths, item_id=f"steam:{appid}")
+                    else:
+                        items.append({"id": f"steam:{appid}", "kind": "pc", "source": "steam", "source_name": "Steam",
+                                      "name": name, "system": None, "system_name": None, "bytes": reported,
+                                      "measured": False, "unreadable": 0, "path": str(library)})
+                except (SetupError, OSError, UnicodeError) as exc:
+                    errors.append(f"{manifest}: {exc}")
+        cover("steam", "Steam", "scanned" if len(items) > before else "none", len(items) - before)
+    except (SetupError, OSError, UnicodeError) as exc:
+        errors.append(str(exc))
+        cover("steam", "Steam", "error", note=str(exc))
+
+    found = marker_games(choice, device, errors)
+    for source in ["blizzard", "ea", "gog"]:
+        matches = [(name, path) for kind, name, path in found if kind == source]
+        for name, path in matches:
+            add(source, name, [path])
+        cover(source, LAUNCHER_NAMES[source], "scanned" if matches else "none", len(matches),
+              "Found by installer files in Applications and Games folders.")
+
+    epic, readable = epic_games(device, errors)
+    for name, path in epic:
+        add("epic", name, [path])
+    cover("epic", "Epic Games", "scanned" if epic else "none", len(epic),
+          None if readable else "Epic Games Launcher has no install list on this Mac.")
+
+    bottles = bottle_folders(choice, device)
+    for name, path in bottles:
+        add("bottle", name, [path])
+    cover("bottle", "Windows bottles", "scanned" if bottles else "none", len(bottles),
+          "Whole CrossOver and Whisky bottles; games inside them aren't split by launcher.")
+    cover("other", "Other launchers", "unsupported",
+          note="Amazon, Ubisoft and custom game folders aren't detected.")
+    known = [item["bytes"] for item in items if item["bytes"] is not None]
+    return {"drive": {"id": choice["id"], "uuid": choice["uuid"]}, "items": items, "coverage": coverage,
+            "total": sum(known), "unknown": sum(1 for item in items if item["bytes"] is None),
+            "partial": sum(1 for item in items if item["unreadable"]),
+            "shared": meter.shared, "errors": errors}
+
+
+def initialize_drive(identifier, confirm):
+    """Create a new library only where nothing would be overwritten; the active library is unchanged."""
+    if not confirm:
+        raise SetupError("No changes made. Initializing requires explicit confirmation.")
+    choice = select_drive(identifier)
+    if choice["filesystem"] not in ["apfs", "hfs"]:
+        raise SetupError("Use an APFS or Mac OS Extended volume. No formatting performed.")
+    environment, issue = library_environment(choice)
+    if environment != "absent":
+        raise SetupError(issue or "A Couch Cube library already exists here. Nothing was changed.")
+    initialize(Storage(choice))
+    return {"path": choice["root"]}
+
+
+def removal_plan(identifier):
+    """Describe exactly what Remove would move to Trash; ambiguous ownership fails closed."""
+    choice = select_drive(identifier)
+    storage = Storage(choice)
+    storage.check()
+    root = storage.root
+    if library_environment(choice)[0] != "ready":
+        raise SetupError("This folder's Couch Cube ownership can't be verified. Nothing will be removed.")
+    expected = Path.home() / "Games" / FOLDER if choice["mode"] == "local" else Path(choice["mount"]) / FOLDER
+    if root != expected or root in [Path("/"), Path.home(), Path(choice["mount"])]:
+        raise SetupError("Unexpected library location. Nothing will be removed.")
+    if HOST_CONFIG.is_file():
+        reject_symlinks(HOST_CONFIG)
+        active = read_json(HOST_CONFIG)
+        if isinstance(active, dict) and active.get("uuid") == choice["uuid"] and active.get("id") == choice["id"]:
+            raise SetupError("This is your active library. Activate or move to another library first.")
+    for running in [Path(__file__).resolve(), Path(sys.executable).resolve()]:
+        if running.is_relative_to(root.resolve()):
+            raise SetupError("Couch Cube is running from this library. Quit it and open the copy on this Mac first.")
+    agent = login_agent()
+    reject_symlinks(agent)
+    if agent.exists():
+        settings = plistlib.loads(agent.read_bytes())
+        if settings.get("EnvironmentVariables", {}).get("COUCH_CUBE_ROOT") == str(root):
+            raise SetupError("Automatic console mode still uses this library. Save it again in Console Mode first.")
+    steam = storage.read_path("SteamLibrary")
+    if steam.exists() and (not steam.is_dir() or any(steam.iterdir())):
+        raise SetupError("This library still contains Steam games. Uninstall or move them in Steam first.")
+    snapshot = transfer_snapshot(root)
+    identity = {"drive": {k: v for k, v in choice.items() if k != "free"}, "files": snapshot}
+    token = hashlib.sha256(json_text(identity).encode()).hexdigest()
+    storage.check()
+    return {"path": str(root), "bytes": sum(item.get("size", 0) for item in snapshot.values()),
+            "files": sum(1 for item in snapshot.values() if "size" in item), "token": token}
+
+
+def removal_verify(identifier, token, confirm):
+    if not confirm:
+        raise SetupError("No changes made. Removing a library requires explicit confirmation.")
+    plan = removal_plan(identifier)
+    if plan["token"] != token:
+        raise SetupError("The library changed since you reviewed it. Nothing was removed.")
+    return {"path": plan["path"]}
 
 
 def configured_storage(root=None):
@@ -1523,6 +2197,38 @@ def steam_libraries(extra=None):
     return list(dict.fromkeys(path.resolve() for path in paths))
 
 
+def steam_library_games(path, errors):
+    """Read one Steam library's app manifests; unreadable entries are reported, not guessed."""
+    games = []
+    try:
+        manifests = sorted((path / "steamapps").glob("appmanifest_*.acf"))
+        for manifest in manifests:
+            try:
+                data = parse_vdf(manifest.read_text()).get("appstate")
+                if not isinstance(data, dict):
+                    raise SetupError("Missing AppState object.")
+                appid, name = data.get("appid"), data.get("name")
+                if not isinstance(appid, str) or not appid.isdigit() or not isinstance(name, str):
+                    raise SetupError("Invalid Steam game identity.")
+                if manifest.name != f"appmanifest_{appid}.acf":
+                    raise SetupError("Steam app ID does not match its manifest filename.")
+                flags, size = data.get("stateflags"), data.get("sizeondisk")
+                flags = int(flags) if isinstance(flags, str) and flags.isdigit() else None
+                size = int(size) if isinstance(size, str) and size.isdigit() else None
+                state = "Unknown"
+                if flags is not None:
+                    state = "Update required" if flags & 2 else "Installed" if flags & 4 else "Not fully installed"
+                    if flags & (256 | 512 | 1024 | 131072 | 262144 | 524288 | 1048576 | 2097152 | 4194304 | 8388608):
+                        state = "Update / install in progress"
+                games.append({"appid": appid, "name": name, "state": state,
+                              "installed": flags is not None and bool(flags & 4), "bytes": size})
+            except (SetupError, OSError, UnicodeError) as exc:
+                errors.append(f"{manifest}: {exc}")
+    except OSError as exc:
+        errors.append(f"{path}: {exc}")
+    return games
+
+
 def steam_status():
     libraries = []
     errors = []
@@ -1533,35 +2239,8 @@ def steam_status():
     for path in paths:
         if path == (Path.home() / "Library/Application Support/Steam").resolve() and not path.exists():
             continue
-        games = []
         available = path.is_dir()
-        if available:
-            try:
-                manifests = sorted((path / "steamapps").glob("appmanifest_*.acf"))
-                for manifest in manifests:
-                    try:
-                        data = parse_vdf(manifest.read_text()).get("appstate")
-                        if not isinstance(data, dict):
-                            raise SetupError("Missing AppState object.")
-                        appid, name = data.get("appid"), data.get("name")
-                        if not isinstance(appid, str) or not appid.isdigit() or not isinstance(name, str):
-                            raise SetupError("Invalid Steam game identity.")
-                        if manifest.name != f"appmanifest_{appid}.acf":
-                            raise SetupError("Steam app ID does not match its manifest filename.")
-                        flags, size = data.get("stateflags"), data.get("sizeondisk")
-                        flags = int(flags) if isinstance(flags, str) and flags.isdigit() else None
-                        size = int(size) if isinstance(size, str) and size.isdigit() else None
-                        state = "Unknown"
-                        if flags is not None:
-                            state = "Update required" if flags & 2 else "Installed" if flags & 4 else "Not fully installed"
-                            if flags & (256 | 512 | 1024 | 131072 | 262144 | 524288 | 1048576 | 2097152 | 4194304 | 8388608):
-                                state = "Update / install in progress"
-                        games.append({"appid": appid, "name": name, "state": state,
-                                      "installed": flags is not None and bool(flags & 4), "bytes": size})
-                    except (SetupError, OSError, UnicodeError) as exc:
-                        errors.append(f"{manifest}: {exc}")
-            except OSError as exc:
-                errors.append(f"{path}: {exc}")
+        games = steam_library_games(path, errors) if available else []
         libraries.append({"path": str(path), "available": available, "games": games})
     return {"libraries": libraries, "errors": errors}
 
@@ -1700,16 +2379,65 @@ def main():
     retire = sub.add_parser("retire-library")
     retire.add_argument("--destination", required=True)
     retire.add_argument("--token", required=True)
+    detail = sub.add_parser("drive-detail")
+    detail.add_argument("--drive", required=True)
+    games = sub.add_parser("drive-games")
+    games.add_argument("--drive", required=True)
+    create = sub.add_parser("initialize-drive")
+    create.add_argument("--drive", required=True)
+    create.add_argument("--confirm", action="store_true")
+    removal = sub.add_parser("removal-plan")
+    removal.add_argument("--drive", required=True)
+    remove = sub.add_parser("removal-verify")
+    remove.add_argument("--drive", required=True)
+    remove.add_argument("--token", required=True)
+    remove.add_argument("--confirm", action="store_true")
     sub.add_parser("disks")
     sub.add_parser("update-check")
     sub.add_parser("login-status")
     sub.add_parser("steam-status")
     sub.add_parser("system-catalog")
+    deals = sub.add_parser("deals")
+    deals.add_argument("--source", choices=["cheapshark", "gamerpower"], required=True)
+    deals.add_argument("--page", type=int, default=0)
+    deals.add_argument("--sort")
+    deals.add_argument("--store")
+    deals.add_argument("--search")
+    deals.add_argument("--platform")
+    deals.add_argument("--type", dest="kind")
+    deals.add_argument("--refresh", action="store_true")
+    deals.add_argument("--mine", action="store_true")
+    shop_home_parser = sub.add_parser("shop-home")
+    shop_home_parser.add_argument("--scope", choices=["mine", "all"], default="mine")
+    shop_home_parser.add_argument("--refresh", action="store_true")
+    shop_search_parser = sub.add_parser("shop-search")
+    shop_search_parser.add_argument("--query", required=True)
+    shop_search_parser.add_argument("--country", default="US")
+    shop_search_parser.add_argument("--refresh", action="store_true")
+    rates_parser = sub.add_parser("rates")
+    rates_parser.add_argument("--refresh", action="store_true")
+    wish = sub.add_parser("wishlist")
+    wish_action = wish.add_mutually_exclusive_group()
+    wish_action.add_argument("--add", metavar="JSON")
+    wish_action.add_argument("--remove", metavar="KEY")
+    wish_action.add_argument("--target", metavar="KEY")
+    wish_action.add_argument("--check", action="store_true")
+    wish.add_argument("--price", type=float)
+    wish.add_argument("--country", default="US")
+    wish.add_argument("--refresh", action="store_true")
+    sub.add_parser("windows-downloads")
+    sub.add_parser("store-accounts")
+    store_open = sub.add_parser("store-account-open")
+    store_open.add_argument("--id", required=True)
+    windows = sub.add_parser("windows-download")
+    windows.add_argument("--package", required=True)
+    windows.add_argument("--confirm", action="store_true")
     frontend = sub.add_parser("frontend")
     frontend.add_argument("--default", choices=["steam", "es-de"])
     frontend.add_argument("--confirm", action="store_true")
     apps = sub.add_parser("apps")
     apps.add_argument("--updates", action="store_true")
+    apps.add_argument("--package", choices=list(PACKAGES))
     manage = sub.add_parser("manage-app")
     manage.add_argument("--package", choices=list(PACKAGES), required=True)
     manage.add_argument("--action", choices=["install", "update", "remove"], required=True)
@@ -1781,6 +2509,16 @@ def main():
             print(json_text(transfer_library(args.source, args.destination, args.token, args.confirm)))
         elif args.command == "retire-library":
             print(json_text(retire_transferred_library(args.destination, args.token)))
+        elif args.command == "drive-detail":
+            print(json_text(drive_detail(args.drive)))
+        elif args.command == "drive-games":
+            print(json_text(drive_games(args.drive)))
+        elif args.command == "initialize-drive":
+            print(json_text(initialize_drive(args.drive, args.confirm)))
+        elif args.command == "removal-plan":
+            print(json_text(removal_plan(args.drive)))
+        elif args.command == "removal-verify":
+            print(json_text(removal_verify(args.drive, args.token, args.confirm)))
         elif args.command == "disks":
             print(json_text(physical_disks()))
         elif args.command == "update-check":
@@ -1791,13 +2529,45 @@ def main():
             print(json_text(steam_status()))
         elif args.command == "system-catalog":
             print(json_text(systems_status()))
+        elif args.command == "store-accounts":
+            print(json_text(store_accounts_tools().status()))
+        elif args.command == "store-account-open":
+            open_store_client(args.id)
+        elif args.command == "windows-downloads":
+            print(json_text(windows_downloads_status()))
+        elif args.command == "windows-download":
+            print("RESULT " + json.dumps(windows_download(args.package, args.confirm)), flush=True)
+        elif args.command == "deals":
+            print(json_text(deals_report(args.source, args.page, args.sort, args.store, args.search,
+                                         args.platform, args.kind, args.refresh, args.mine)))
+        elif args.command == "rates":
+            print(json_text(exchange_rates(args.refresh)))
+        elif args.command == "shop-home":
+            print(json_text(shop_home(args.scope, args.refresh)))
+        elif args.command == "shop-search":
+            print(json_text(shop_search(args.query, args.country, args.refresh)))
+        elif args.command == "wishlist":
+            if args.add:
+                try:
+                    item = json.loads(args.add)
+                except ValueError:
+                    raise SetupError("The wishlist item isn't valid JSON.") from None
+                print(json_text(wishlist_change("add", item=item)))
+            elif args.remove:
+                print(json_text(wishlist_change("remove", key=args.remove)))
+            elif args.target:
+                print(json_text(wishlist_change("target", key=args.target, price=args.price)))
+            elif args.check:
+                print(json_text(wishlist_check(args.country, args.refresh)))
+            else:
+                print(json_text(wishlist_status()))
         elif args.command == "frontend":
             if args.default:
                 set_frontend(args.default, args.confirm)
             else:
                 print(json_text({"preferred": frontend_preference()}))
         elif args.command == "apps":
-            print(json_text(app_status(args.updates)))
+            print(json_text(app_status(args.updates, args.package)))
         elif args.command == "manage-app":
             manage_app(args.package, args.action, args.confirm)
         elif args.command == "cleanup-host":

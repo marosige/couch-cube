@@ -6,6 +6,7 @@ import plistlib
 from pathlib import Path
 import subprocess
 import tempfile
+from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 from types import SimpleNamespace
@@ -466,6 +467,261 @@ class ManagementTests(unittest.TestCase):
         self.assertFalse((target / "fixture").exists())
 
 
+class DriveLibraryTests(unittest.TestCase):
+    """Per-drive overview, initialize and remove use temp folders only; nothing real is erased."""
+
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temporary.cleanup)
+        self.base = Path(self.temporary.name).resolve()
+        self.home = self.base / "home"
+        self.home.mkdir()
+        self.mount = self.base / "Volumes/Game SSD"
+        self.mount.mkdir(parents=True)
+        self.choice = {"id": "uuid", "uuid": "uuid", "mode": "portable", "filesystem": "apfs", "name": "Game SSD",
+                       "free": 100 * 1024 ** 3, "root": str(self.mount / "Couch Cube"), "mount": str(self.mount)}
+        self.second = dict(self.choice, id="uuid2", uuid="uuid2", name="Other SSD",
+                           root=str(self.base / "Volumes/Other/Couch Cube"), mount=str(self.base / "Volumes/Other"))
+        Path(self.second["mount"]).mkdir(parents=True)
+        patches = [patch.object(manager, "drives", return_value=[self.choice, self.second]),
+                   patch.object(manager.Path, "home", return_value=self.home),
+                   patch.object(manager, "HOST_CONFIG", self.home / "setup.json")]
+        for item in patches:
+            item.start()
+            self.addCleanup(item.stop)
+        self.root = Path(self.choice["root"])
+
+    def make_library(self, choice=None):
+        manager.initialize(manager.Storage(choice or self.choice), ["snes", "psx"])
+
+    def test_overview_classifies_every_drive_without_activating_any(self):
+        self.make_library()
+        status = manager.storage_status()
+        environments = {item["drive"]["id"]: item["environment"] for item in status["locations"]}
+        self.assertEqual(environments, {"uuid": "ready", "uuid2": "absent"})
+        self.assertIsNone(status["active"])
+        self.assertFalse((self.home / "setup.json").exists())
+        self.assertTrue(all(item["total"] for item in status["locations"]))
+
+    def test_existing_unrecognized_folder_is_occupied_not_absent(self):
+        self.root.mkdir()
+        (self.root / "notes.txt").write_text("mine")
+        self.assertEqual(manager.library_environment(self.choice)[0], "occupied")
+        with self.assertRaises(manager.SetupError):
+            manager.initialize_drive("uuid", True)
+        self.assertEqual((self.root / "notes.txt").read_text(), "mine")
+        self.assertFalse((self.root / manager.MARKER).exists())
+
+    def test_foreign_manifest_is_invalid(self):
+        self.make_library(self.second)
+        marker = Path(self.second["root"]) / manager.MARKER
+        state = json.loads(marker.read_text())
+        state["uuid"] = "someone-else"
+        marker.write_text(json.dumps(state))
+        self.assertEqual(manager.library_environment(self.second)[0], "invalid")
+        with self.assertRaises(manager.SetupError):
+            manager.removal_plan("uuid2")
+        self.assertTrue(marker.exists())
+
+    def test_initialize_is_nondestructive_and_keeps_active_library(self):
+        with self.assertRaises(manager.SetupError):
+            manager.initialize_drive("uuid", False)
+        self.assertFalse(self.root.exists())
+        (self.mount / "Unrelated.txt").write_text("keep")
+        manager.initialize_drive("uuid", True)
+        self.assertEqual(manager.library_environment(self.choice)[0], "ready")
+        self.assertEqual((self.mount / "Unrelated.txt").read_text(), "keep")
+        self.assertFalse((self.home / "setup.json").exists())
+        managed = (self.root / manager.MARKER).read_bytes()
+        with self.assertRaises(manager.SetupError):
+            manager.initialize_drive("uuid", True)
+        self.assertEqual((self.root / manager.MARKER).read_bytes(), managed)
+
+    def test_detail_reports_capacity_and_only_populated_systems(self):
+        self.make_library()
+        (self.root / "ROMs/snes/Game.sfc").write_bytes(b"x" * 5000)
+        (self.root / "ROMs/snes/readme.txt").write_text("not a game")
+        (self.root / "ROMs/psx/notes.txt").parent.mkdir(parents=True, exist_ok=True)
+        (self.root / "ROMs/psx/notes.txt").write_text("not a game")
+        with patch.object(manager, "steam_libraries", return_value=[]):
+            detail = manager.drive_detail("uuid")
+        self.assertEqual(detail["environment"], "ready")
+        self.assertEqual([(item["id"], item["games"]) for item in detail["retro"]], [("snes", 1)])
+        capacity = detail["capacity"]
+        self.assertGreater(capacity["couch"], 5000)
+        self.assertLessEqual(capacity["used"] + capacity["free"], capacity["total"])
+        self.assertFalse(detail["active"])
+
+    def test_detail_lists_steam_games_only_from_this_volume(self):
+        library = self.mount / "SteamLibrary"
+        (library / "steamapps").mkdir(parents=True)
+        (library / "steamapps/appmanifest_70.acf").write_text('"AppState" { "appid" "70" "name" "Half-Life" "StateFlags" "4" }')
+        with patch.object(manager, "steam_libraries", return_value=[library, self.home / "Elsewhere"]), \
+                patch.object(manager, "same_volume", side_effect=lambda path, mount: path == library):
+            detail = manager.drive_detail("uuid")
+        self.assertEqual([(item["path"], [game["appid"] for game in item["games"]]) for item in detail["steam"]],
+                         [(str(library), ["70"])])
+        self.assertEqual(detail["environment"], "absent")
+        self.assertEqual(detail["retro"], [])
+
+    def test_removal_is_scoped_tokenized_and_refuses_active_or_steam_libraries(self):
+        self.make_library()
+        (self.root / "ROMs/snes/Game.sfc").write_bytes(b"rom")
+        (self.mount / "Unrelated.txt").write_text("keep")
+        plan = manager.removal_plan("uuid")
+        self.assertEqual(plan["path"], str(self.root))
+        self.assertGreater(plan["files"], 0)
+        with self.assertRaises(manager.SetupError):
+            manager.removal_verify("uuid", plan["token"], False)
+        (self.root / "ROMs/snes/Other.sfc").write_bytes(b"new")
+        with self.assertRaises(manager.SetupError):
+            manager.removal_verify("uuid", plan["token"], True)
+        plan = manager.removal_plan("uuid")
+        self.assertEqual(manager.removal_verify("uuid", plan["token"], True), {"path": str(self.root)})
+        self.assertTrue(self.root.exists(), "Verification never deletes; the app moves the folder to Trash")
+        (self.home / "setup.json").write_text(json.dumps({"id": "uuid", "uuid": "uuid"}))
+        with self.assertRaises(manager.SetupError):
+            manager.removal_plan("uuid")
+        (self.home / "setup.json").unlink()
+        (self.root / "SteamLibrary/steamapps").mkdir(parents=True)
+        with self.assertRaises(manager.SetupError):
+            manager.removal_plan("uuid")
+
+    def test_removal_refuses_escaping_links_and_unexpected_locations(self):
+        self.make_library()
+        outside = self.base / "outside.txt"
+        outside.write_text("outside")
+        (self.root / "ROMs/link").symlink_to(outside)
+        with self.assertRaises(manager.SetupError):
+            manager.removal_plan("uuid")
+        (self.root / "ROMs/link").unlink()
+        moved = dict(self.choice, root=str(self.mount / "Elsewhere"))
+        with patch.object(manager, "drives", return_value=[moved]):
+            manager.initialize(manager.Storage(moved))
+            with self.assertRaises(manager.SetupError):
+                manager.removal_plan("uuid")
+
+    def test_absent_and_disconnected_drives_cannot_be_removed(self):
+        with self.assertRaises(manager.SetupError):
+            manager.removal_plan("uuid")
+        with self.assertRaises(manager.SetupError):
+            manager.removal_plan("missing")
+
+
+class DriveGamesTests(unittest.TestCase):
+    """Per-game storage breakdown reads temp folders only and never counts a file twice."""
+
+    setUp = DriveLibraryTests.setUp
+    make_library = DriveLibraryTests.make_library
+
+    def scan(self, libraries=()):
+        with patch.object(manager, "steam_libraries", return_value=list(libraries)), \
+                patch.object(manager, "SYSTEM_APPLICATIONS", self.base / "Applications"):
+            return manager.drive_games("uuid")
+
+    def by_name(self, result):
+        return {item["name"]: item for item in result["items"]}
+
+    def test_roms_group_multipart_sets_folders_and_leftovers(self):
+        self.make_library()
+        psx = self.root / "ROMs/psx"
+        (psx / "Game (Disc 1).bin").write_bytes(b"a" * 9000)
+        (psx / "Game (Disc 1).cue").write_text('FILE "Game (Disc 1).bin" BINARY\n')
+        (psx / "Game (Disc 2).bin").write_bytes(b"b" * 9000)
+        (psx / "Game (Disc 2).cue").write_text('FILE "Game (Disc 2).bin" BINARY\n')
+        (psx / "Game.m3u").write_text("Game (Disc 1).cue\nGame (Disc 2).cue\n../../escape.cue\n")
+        (psx / "Solo.chd").write_bytes(b"c" * 5000)
+        (psx / "readme.txt").write_text("notes")
+        (self.root / "ROMs/snes/Pack").mkdir()
+        (self.root / "ROMs/snes/Pack/a.sfc").write_bytes(b"d" * 5000)
+        result = self.scan()
+        items = self.by_name(result)
+        self.assertEqual(set(items), {"Game", "Solo", "Other PlayStation files", "Pack"})
+        self.assertEqual(items["Game"]["system"], "psx")
+        self.assertGreaterEqual(items["Game"]["bytes"], 18000)
+        self.assertEqual(items["Pack"]["kind"], "rom")
+        self.assertEqual(result["total"], sum(item["bytes"] for item in result["items"]))
+        self.assertEqual(result["coverage"][0], {"source": "rom", "name": "ROMs", "status": "scanned",
+                                                 "games": 4, "note": None})
+
+    def test_hardlinks_and_overlapping_paths_count_once(self):
+        self.make_library()
+        rom = self.root / "ROMs/snes/A.sfc"
+        rom.write_bytes(b"x" * 40000)
+        os.link(rom, self.root / "ROMs/snes/B.sfc")
+        (self.root / "ROMs/snes/Link.sfc").symlink_to(self.base / "outside.sfc")
+        (self.base / "outside.sfc").write_bytes(b"y" * 40000)
+        items = self.by_name(self.scan())
+        self.assertEqual(set(items), {"A", "B"})
+        self.assertEqual(sorted(item["bytes"] > 0 for item in items.values()), [False, True],
+                         "A hard-linked ROM is counted for one game only; links outside are ignored")
+
+    def test_steam_measures_install_folder_or_marks_reported_size(self):
+        library = self.mount / "SteamLibrary"
+        (library / "steamapps/common/HL").mkdir(parents=True)
+        (library / "steamapps/common/HL/data.bin").write_bytes(b"x" * 20000)
+        (library / "steamapps/appmanifest_70.acf").write_text(
+            '"AppState" { "appid" "70" "name" "Half-Life" "installdir" "HL" "sizeondisk" "1" }')
+        (library / "steamapps/appmanifest_80.acf").write_text(
+            '"AppState" { "appid" "80" "name" "Missing" "installdir" "Gone" "sizeondisk" "777" }')
+        (library / "steamapps/appmanifest_90.acf").write_text(
+            '"AppState" { "appid" "90" "name" "Escape" "installdir" ".." }')
+        with patch.object(manager, "same_volume", side_effect=lambda path, mount: path == library):
+            result = self.scan([library, self.home / "Elsewhere"])
+        items = self.by_name(result)
+        self.assertTrue(items["Half-Life"]["measured"])
+        self.assertGreaterEqual(items["Half-Life"]["bytes"], 20000)
+        self.assertEqual((items["Missing"]["bytes"], items["Missing"]["measured"]), (777, False))
+        self.assertNotIn("Escape", items)
+        self.assertTrue(any("appmanifest_90" in error for error in result["errors"]))
+        self.assertEqual(items["Half-Life"]["source_name"], "Steam")
+
+    def test_launcher_markers_epic_manifests_and_bottles(self):
+        apps = self.mount / "Applications"
+        (apps / "World of Warcraft").mkdir(parents=True)
+        (apps / "World of Warcraft/.build.info").write_text("x")
+        (apps / "The Sims 4/__Installer").mkdir(parents=True)
+        (apps / "The Sims 4/__Installer/installerdata.xml").write_text("<x/>")
+        (apps / "Witcher.app/Contents/Resources").mkdir(parents=True)
+        (apps / "Witcher.app/Contents/Resources/goggame-1.info").write_text("{}")
+        (apps / "Unknown Game").mkdir()
+        epic_folder = self.mount / "Epic/Fortnite"
+        epic_folder.mkdir(parents=True)
+        manifests = self.home / "Library/Application Support/Epic/EpicGamesLauncher/Data/Manifests"
+        manifests.mkdir(parents=True)
+        (manifests / "a.item").write_text(json.dumps({"DisplayName": "Fortnite", "InstallLocation": str(epic_folder)}))
+        (manifests / "b.item").write_text("not json")
+        result = self.scan()
+        sources = {item["name"]: item["source"] for item in result["items"]}
+        self.assertEqual(sources, {"World of Warcraft": "blizzard", "The Sims 4": "ea", "Witcher": "gog",
+                                   "Fortnite": "epic"})
+        self.assertTrue(any("b.item" in error for error in result["errors"]))
+        bottle = self.home / "Library/Application Support/CrossOver/Bottles/Steam"
+        (bottle / "drive_c").mkdir(parents=True)
+        local = dict(self.choice, mode="local", root=str(self.home / "Games/Couch Cube"), mount=str(self.base))
+        with patch.object(manager, "drives", return_value=[local]):
+            items = self.by_name(self.scan())
+        self.assertEqual(items["Steam (CrossOver bottle)"]["source"], "bottle")
+
+    def test_other_volumes_and_unreadable_folders_are_reported_not_zeroed(self):
+        self.make_library()
+        locked = self.root / "ROMs/snes/Locked"
+        (locked / "inner").mkdir(parents=True)
+        (locked / "inner/a.sfc").write_bytes(b"x" * 5000)
+        os.chmod(locked / "inner", 0)
+        self.addCleanup(os.chmod, locked / "inner", 0o755)
+        with patch.object(manager.os, "stat", wraps=os.stat) as fake:
+            result = self.scan()
+        item = self.by_name(result)["Locked"]
+        if os.geteuid() != 0:
+            self.assertGreater(item["unreadable"], 0)
+            self.assertEqual(result["partial"], 1)
+        meter = manager.StorageMeter(os.stat(self.mount).st_dev + 1)
+        self.assertEqual(meter.measure([locked]), (0, 0), "Folders on another volume aren't counted")
+        self.assertEqual(manager.StorageMeter(1).measure([self.base / "missing"]), (None, 1))
+        self.assertTrue(fake.called)
+
+
 class SteamStatusTests(unittest.TestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
@@ -599,6 +855,25 @@ class AppManagementTests(unittest.TestCase):
                               "curseforge": "CurseForge.app"}.items():
             self.assertEqual(manager.PACKAGES[package], name)
         self.assertEqual(manager.MANUAL_APPS["battle-net"], "https://download.battle.net/")
+
+    def test_targeted_app_recheck_reads_only_that_package_and_its_update(self):
+        calls = []
+
+        def fake_run(args, **kwargs):
+            calls.append(args)
+            if "info" in args:
+                return SimpleNamespace(stdout=json.dumps({"casks": [{"token": "dolphin"}]}))
+            return SimpleNamespace(stdout=json.dumps({"casks": [{"name": "dolphin", "current_version": "2"}]}))
+
+        with patch.object(manager, "find_brew", return_value="/opt/homebrew/bin/brew"), \
+                patch.object(manager, "run", side_effect=fake_run), \
+                patch.object(manager.Path, "is_dir", return_value=False):
+            apps = manager.app_status(check_updates=True, package="dolphin")
+        self.assertEqual([app["id"] for app in apps], ["dolphin"])
+        self.assertEqual(apps[0]["update"], "2")
+        self.assertEqual(calls[1][-1], "dolphin", "Only the re-checked cask is queried for updates")
+        with self.assertRaises(manager.SetupError):
+            manager.app_status(package="not-a-package")
 
     def test_automatic_update_check_without_brew_still_returns_app_status(self):
         with patch.object(manager, "find_brew", side_effect=manager.SetupError("missing")), \

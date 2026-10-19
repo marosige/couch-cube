@@ -1,5 +1,6 @@
 import AppKit
 import CoreBluetooth
+import EventKit
 import GameController
 import IOBluetooth
 import IOKit.hid
@@ -30,6 +31,8 @@ struct StorageStatus: Decodable {
         let drive: Drive
         let configured: Bool
         let issue: String?
+        var environment: String? = nil
+        var total: Int64? = nil
     }
     struct Active: Decodable { let id: String; let uuid: String }
     let locations: [Location]
@@ -51,6 +54,197 @@ struct LibraryTransferResult: Decodable {
 }
 
 struct RetiredLibrary: Decodable { let path: String }
+
+/// One drive's library, capacity and games, read without changing the active library.
+struct DriveDetail: Decodable {
+    struct Capacity: Decodable { let total: Int64; let used: Int64; let free: Int64; let couch: Int64 }
+    struct SteamFolder: Decodable { let path: String; let games: [SteamGame] }
+    struct RetroSystem: Decodable { let id: String; let name: String; let games: Int; let path: String }
+    let drive: Drive
+    let environment: String
+    let issue: String?
+    let active: Bool
+    let capacity: Capacity
+    let steam: [SteamFolder]
+    let retro: [RetroSystem]
+    let errors: [String]
+}
+
+final class SmokeScanLog { var calls: [(String, (Int32, Data) -> Void)] = [] }
+
+/// Per-game storage on one drive from `drive-games`; sizes are allocated bytes, nil when nothing could be read.
+struct DriveGames: Decodable {
+    struct Item: Decodable {
+        let id: String
+        let kind: String
+        let source: String
+        let sourceName: String
+        let name: String
+        let system: String?
+        let systemName: String?
+        let bytes: Int64?
+        let measured: Bool
+        let unreadable: Int
+        let path: String
+    }
+    struct Coverage: Decodable { let source: String; let name: String; let status: String; let games: Int; let note: String? }
+    struct Identity: Decodable { let id: String; let uuid: String }
+    let drive: Identity
+    let items: [Item]
+    let coverage: [Coverage]
+    let total: Int64
+    let unknown: Int
+    let partial: Int
+    let shared: Int64
+    let errors: [String]
+
+    static func decode(_ data: Data) -> DriveGames? {
+        let decoder = JSONDecoder()
+        decoder.keyDecodingStrategy = .convertFromSnakeCase
+        return try? decoder.decode(DriveGames.self, from: data)
+    }
+}
+
+/// One bar segment and list row. Grouping is presentation only and always derived from the cached scan.
+struct GameStorageSlice: Equatable {
+    let id: String
+    let title: String
+    let detail: String
+    let bytes: Int64?
+    let games: Int
+    let unknown: Int
+    let partial: Bool
+    /// Share of the known total in tenths of a percent; all known slices add up to exactly 1000.
+    var tenths = 0
+
+    static func launcherTitle(_ source: String, _ name: String) -> String {
+        source == "bottle" ? "Windows bottles (launcher unknown)" : name + " games"
+    }
+
+    static func slices(_ games: DriveGames, romsBySystem: Bool, pcByLauncher: Bool) -> [GameStorageSlice] {
+        var order: [String] = []
+        var groups: [String: [DriveGames.Item]] = [:]
+        for item in games.items {
+            let key: String
+            if item.kind == "rom" && romsBySystem { key = "system:" + (item.system ?? "?") }
+            else if item.kind != "rom" && pcByLauncher { key = "launcher:" + item.source }
+            else { key = "item:" + item.id }
+            if groups[key] == nil { order.append(key) }
+            groups[key, default: []].append(item)
+        }
+        var slices = order.map { key -> GameStorageSlice in
+            let members = groups[key]!
+            let known = members.compactMap(\.bytes)
+            let unknown = members.count - known.count
+            let partial = members.contains { $0.unreadable > 0 }
+            let first = members[0]
+            if key.hasPrefix("item:") {
+                let detail = first.kind == "rom" ? (first.systemName ?? "ROM") : first.sourceName + (first.measured ? "" : " · reported by Steam")
+                return GameStorageSlice(id: key, title: first.name, detail: detail, bytes: first.bytes, games: 1,
+                                        unknown: unknown, partial: first.unreadable > 0)
+            }
+            let title = first.kind == "rom" ? (first.systemName ?? "ROMs") + " ROMs" : launcherTitle(first.source, first.sourceName)
+            let count = members.count == 1 ? "1 item" : "\(members.count) items"
+            return GameStorageSlice(id: key, title: title, detail: count, bytes: known.isEmpty ? nil : known.reduce(0, +),
+                                    games: members.count, unknown: unknown, partial: partial)
+        }
+        slices.sort { ($0.bytes ?? -1, $1.title) > ($1.bytes ?? -1, $0.title) }
+        let total = slices.compactMap(\.bytes).reduce(0, +)
+        guard total > 0 else { return slices }
+        // Largest remainder keeps rounded shares adding up to 100.0%.
+        var remainders: [(Int, Int64)] = []
+        var assigned = 0
+        for index in slices.indices {
+            guard let bytes = slices[index].bytes else { continue }
+            let scaled = bytes * 1000
+            slices[index].tenths = Int(scaled / total)
+            assigned += slices[index].tenths
+            remainders.append((index, scaled % total))
+        }
+        for (index, _) in remainders.sorted(by: { $0.1 != $1.1 ? $0.1 > $1.1 : $0.0 < $1.0 }).prefix(1000 - assigned) {
+            slices[index].tenths += 1
+        }
+        return slices
+    }
+
+    var percent: String {
+        guard bytes != nil else { return "—" }
+        if tenths == 0 { return (bytes ?? 0) > 0 ? "<0.1%" : "0%" }
+        return String(format: "%.1f%%", Double(tenths) / 10)
+    }
+}
+
+/// Segmented bar for game shares; drawn like the capacity bar, with a few calm colors and one gray "Other" segment.
+final class GameStorageBar: NSView {
+    static let colors: [NSColor] = [.systemBlue, .systemPurple, .systemTeal, .systemOrange, .systemPink, .systemGreen, .systemIndigo, .systemYellow]
+    static let colored = 8
+    var segments: [(title: String, bytes: Int64, color: NSColor)] = [] {
+        didSet { needsDisplay = true; updateToolTips() }
+    }
+
+    static func segments(for slices: [GameStorageSlice]) -> [(title: String, bytes: Int64, color: NSColor)] {
+        let known = slices.filter { ($0.bytes ?? 0) > 0 }
+        var result = known.prefix(colored).enumerated().map { (title: $1.title, bytes: $1.bytes!, color: colors[$0]) }
+        let rest = known.dropFirst(colored)
+        if !rest.isEmpty {
+            result.append((title: "Other (\(rest.count))", bytes: rest.compactMap(\.bytes).reduce(0, +), color: .tertiaryLabelColor))
+        }
+        return result
+    }
+
+    override var intrinsicContentSize: NSSize { NSSize(width: NSView.noIntrinsicMetric, height: 14) }
+    override var isFlipped: Bool { true }
+
+    private func rects() -> [NSRect] {
+        let total = segments.map(\.bytes).reduce(0, +)
+        guard total > 0 else { return [] }
+        let gap: CGFloat = segments.count > 1 ? 1.5 : 0
+        let usable = bounds.width - gap * CGFloat(segments.count - 1)
+        var x: CGFloat = 0
+        return segments.map { segment in
+            let width = max(2, usable * CGFloat(segment.bytes) / CGFloat(total))
+            defer { x += width + gap }
+            return NSRect(x: x, y: 0, width: min(width, max(bounds.width - x, 0)), height: bounds.height)
+        }
+    }
+
+    private func updateToolTips() {
+        removeAllToolTips()
+        for (rect, segment) in zip(rects(), segments) {
+            addToolTip(rect, owner: segment.title + " · " + ByteCountFormatter.string(fromByteCount: segment.bytes, countStyle: .file) as NSString, userData: nil)
+        }
+    }
+
+    override func layout() { super.layout(); updateToolTips() }
+
+    override func draw(_ dirtyRect: NSRect) {
+        let clip = NSBezierPath(roundedRect: bounds, xRadius: 4, yRadius: 4)
+        NSColor.quaternaryLabelColor.setFill()
+        clip.fill()
+        clip.addClip()
+        for (rect, segment) in zip(rects(), segments) {
+            segment.color.setFill()
+            rect.fill()
+        }
+    }
+
+    override func isAccessibilityElement() -> Bool { true }
+    override func accessibilityRole() -> NSAccessibility.Role? { .image }
+    override func accessibilityLabel() -> String? {
+        "Game storage: " + segments.map { $0.title + " " + ByteCountFormatter.string(fromByteCount: $0.bytes, countStyle: .file) }.joined(separator: ", ")
+    }
+}
+
+struct DriveRemovalPlan: Decodable { let path: String; let bytes: Int64; let files: Int; let token: String }
+
+struct StorageOverviewEntry: Equatable {
+    let id: String?
+    let mode: String
+    let title: String
+    let state: String
+    let active: Bool
+    let path: String?
+}
 
 struct FrontendPreference: Decodable {
     let preferred: String?
@@ -438,7 +632,14 @@ struct ControllerEntry: Codable {
     var name: String
     var connected: Bool
     var transport: String
+    /// false = macOS reports a Bluetooth connection but no HID gamepad/joystick input device for it.
+    var inputDetected: Bool? = nil
+    /// Artwork model proven by HID vendor/product IDs; takes priority over name guesses.
+    var model: String? = nil
+    /// The controller's own Bluetooth address, read from the device itself over USB. Never stored or guessed.
+    var hardwareAddress: String? = nil
 
+    enum CodingKeys: String, CodingKey { case id, name, connected, transport, inputDetected, model }
     var connectionLabel: String {
         transport == "Wired" ? "USB" : transport
     }
@@ -451,7 +652,11 @@ struct ControllerCustomization: Codable {
 }
 
 enum ControllerArtwork {
-    static let kinds = ["Automatic", "Xbox", "PS4 · DualShock 4", "PS5 · DualSense", "PlayStation", "Switch Pro Controller", "Joy-Con", "Nintendo", "Steam Controller", "8BitDo SN30 Pro", "8BitDo Micro", "8BitDo Pro 2", "8BitDo Ultimate", "8BitDo", "Generic"]
+    static let kinds = ["Automatic", "Xbox", "PS4 · DualShock 4", "PS5 · DualSense", "PlayStation", "Switch Pro Controller", "Joy-Con (L)", "Joy-Con (R)", "Joy-Con", "Nintendo", "Steam Controller", "8BitDo SN30 Pro", "8BitDo Micro", "8BitDo Pro 2", "8BitDo Ultimate", "8BitDo", "Generic"]
+
+    static func kind(for entry: ControllerEntry, artwork: String?) -> String {
+        kind(name: entry.name, preference: artwork.flatMap { $0 == "Automatic" ? nil : $0 } ?? entry.model)
+    }
 
     static func kind(name: String, preference: String?) -> String {
         if let preference = preference, kinds.dropFirst().contains(preference) { return preference }
@@ -468,6 +673,8 @@ enum ControllerArtwork {
         if model.contains("dualsense") || model.contains("ps5") { return "PS5 · DualSense" }
         if model.contains("dualshock4") || model.contains("ps4") { return "PS4 · DualShock 4" }
         if name.contains("dualshock") || name.contains("playstation") { return "PlayStation" }
+        if model.contains("joyconl") { return "Joy-Con (L)" }
+        if model.contains("joyconr") { return "Joy-Con (R)" }
         if model.contains("joycon") { return "Joy-Con" }
         if name.contains("pro controller") || model.contains("switchpro") { return "Switch Pro Controller" }
         if model.contains("steamcontroller") { return "Steam Controller" }
@@ -475,126 +682,475 @@ enum ControllerArtwork {
         return "Generic"
     }
 
-    static func image(_ kind: String) -> NSImage {
+    /// Template line art (menus); `filledImage` adds the body color as a silhouette fill.
+    static func image(_ kind: String) -> NSImage { draw(kind, fill: nil, line: .black, context: .black, rim: nil, boost: 0) }
+
+    /// Body paths are closed silhouettes: the fill never leaves the outline. Details are strokes on top.
+    /// Drawn in passes: rims and fills (flat or camo, clipped to each body), then the optional offset
+    /// highlight ("double wall"), then the outline/detail ink, so lines are never covered by a fill.
+    /// `context` inks strokes that sit outside the body (shoulder buttons, the faded partner Joy-Con) against the background.
+    static func draw(_ kind: String, fill: NSColor?, camo: ControllerCamo? = nil, line: NSColor, context: NSColor,
+                             rim: NSColor?, highlight: NSColor? = nil, boost: CGFloat) -> NSImage {
         let image = NSImage(size: NSSize(width: 80, height: 52), flipped: true) { _ in
-            NSColor.black.setStroke()
-            func stroke(_ points: [(CGFloat, CGFloat)]) {
-                let path = NSBezierPath()
-                path.lineWidth = 2
-                path.lineCapStyle = .round
-                path.lineJoinStyle = .round
-                if let first = points.first {
-                    path.move(to: NSPoint(x: first.0, y: first.1))
-                    for point in points.dropFirst() { path.line(to: NSPoint(x: point.0, y: point.1)) }
+            // Device pixels per artwork unit at the size this representation is rendered.
+            let scale = max(abs(NSGraphicsContext.current?.cgContext.ctm.a ?? 1), 0.01)
+            var ink = line, ctx = context, drawFill = true, drawLines = false
+            func render() {
+                ink.setStroke()
+                func shape(_ path: NSBezierPath, alpha: CGFloat = 1) {
+                    let width = path.lineWidth
+                    if drawFill {
+                        guard alpha == 1 else { return }
+                        if let rim = rim {
+                            rim.setStroke()
+                            path.lineWidth = width + 2.2
+                            path.stroke()
+                            path.lineWidth = width
+                        }
+                        if let camo = camo, ControllerCamo.patterned(atScale: scale) {
+                            NSGraphicsContext.saveGraphicsState()
+                            path.addClip()
+                            camo.draw()
+                            NSGraphicsContext.restoreGraphicsState()
+                        } else if let fill = fill {
+                            fill.setFill()
+                            path.fill()
+                        }
+                        return
+                    }
+                    guard drawLines else { return }
+                    (alpha == 1 ? ink : ctx.withAlphaComponent(alpha)).setStroke()
+                    path.lineWidth = width + boost
+                    path.stroke()
+                    path.lineWidth = width
                 }
-                path.stroke()
-            }
-            func circle(_ x: CGFloat, _ y: CGFloat, _ radius: CGFloat) {
-                let path = NSBezierPath(ovalIn: NSRect(x: x - radius, y: y - radius, width: radius * 2, height: radius * 2))
-                path.lineWidth = 1.8
-                path.stroke()
-            }
-            if ["8BitDo", "8BitDo SN30 Pro", "8BitDo Micro"].contains(kind) {
-                let micro = kind == "8BitDo Micro"
-                let body = NSBezierPath(roundedRect: NSRect(x: micro ? 10 : 5, y: micro ? 12 : 8,
-                                                           width: micro ? 60 : 70, height: micro ? 28 : 36),
-                                        xRadius: micro ? 8 : 17, yRadius: micro ? 8 : 17)
-                body.lineWidth = 2.3
-                body.stroke()
-                stroke([(15, 23), (27, 23)])
-                stroke([(21, 17), (21, 29)])
-                if !micro {
-                    circle(31, 35, 4)
-                    circle(49, 35, 4)
+
+                func stroke(_ points: [(CGFloat, CGFloat)]) {
+                    let path = NSBezierPath()
+                    path.lineWidth = 2 + boost
+                    path.lineCapStyle = .round
+                    path.lineJoinStyle = .round
+                    if let first = points.first {
+                        path.move(to: NSPoint(x: first.0, y: first.1))
+                        for point in points.dropFirst() { path.line(to: NSPoint(x: point.0, y: point.1)) }
+                    }
+                    if drawLines { path.stroke() }
                 }
-                if kind == "8BitDo SN30 Pro" {
-                    stroke([(12, 6), (26, 6)])
-                    stroke([(54, 6), (68, 6)])
+                func circle(_ x: CGFloat, _ y: CGFloat, _ radius: CGFloat) {
+                    let path = NSBezierPath(ovalIn: NSRect(x: x - radius, y: y - radius, width: radius * 2, height: radius * 2))
+                    path.lineWidth = 1.8 + boost
+                    if drawLines { path.stroke() }
                 }
-                stroke([(36, 22), (38, 22)])
-                stroke([(42, 22), (44, 22)])
-                for p in [(59.0, 17.0), (54, 22), (64, 22), (59, 27)] { circle(p.0, p.1, 1.8) }
-            } else if kind == "Nintendo" || kind == "Joy-Con" {
-                let body = NSBezierPath(roundedRect: NSRect(x: 7, y: 5, width: 66, height: 42), xRadius: 10, yRadius: 10)
-                body.lineWidth = 2
-                body.stroke()
-                stroke([(27, 6), (27, 46)])
-                stroke([(53, 6), (53, 46)])
-                if kind == "Joy-Con" {
-                    stroke([(30, 8), (30, 44)])
-                    stroke([(50, 8), (50, 44)])
+                func outside(_ points: [(CGFloat, CGFloat)]) {
+                    guard drawLines else { return }
+                    ctx.setStroke()
+                    stroke(points)
+                    ink.setStroke()
                 }
-                circle(17, 17, 5)
-                circle(63, 34, 5)
-                stroke([(12, 34), (22, 34)])
-                stroke([(17, 29), (17, 39)])
-                for p in [(63.0, 12.0), (58, 17), (68, 17), (63, 22)] { circle(p.0, p.1, 1.5) }
-            } else {
-                let body = NSBezierPath()
-                body.lineWidth = 2.3
-                body.lineJoinStyle = .round
-                let dualSense = kind == "PS5 · DualSense"
-                body.move(to: NSPoint(x: dualSense ? 19 : 23, y: dualSense ? 5 : 8))
-                body.curve(to: NSPoint(x: 8, y: 42), controlPoint1: NSPoint(x: 8, y: 5), controlPoint2: NSPoint(x: 3, y: 30))
-                body.curve(to: NSPoint(x: 27, y: 37), controlPoint1: NSPoint(x: 12, y: 53), controlPoint2: NSPoint(x: 20, y: 43))
-                body.line(to: NSPoint(x: 53, y: 37))
-                body.curve(to: NSPoint(x: 72, y: 42), controlPoint1: NSPoint(x: 60, y: 43), controlPoint2: NSPoint(x: 68, y: 53))
-                body.curve(to: NSPoint(x: dualSense ? 61 : 57, y: dualSense ? 5 : 8), controlPoint1: NSPoint(x: 77, y: 30), controlPoint2: NSPoint(x: 72, y: 5))
-                body.close()
-                body.stroke()
-                let playStation = ["PlayStation", "PS4 · DualShock 4", "PS5 · DualSense"].contains(kind)
-                let symmetric = playStation || kind == "8BitDo Pro 2"
-                let padX: CGFloat = symmetric ? 22 : 31
-                let padY: CGFloat = symmetric ? 22 : 32
-                if kind == "Steam Controller" {
-                    circle(21, 21, 10)
-                    circle(59, 21, 10)
-                    circle(30, 35, 4)
-                    stroke([(18, 21), (24, 21)])
-                    stroke([(21, 18), (21, 24)])
+                if ["8BitDo", "8BitDo SN30 Pro", "8BitDo Micro"].contains(kind) {
+                    let micro = kind == "8BitDo Micro"
+                    let body = NSBezierPath(roundedRect: NSRect(x: micro ? 10 : 5, y: micro ? 12 : 8,
+                                                               width: micro ? 60 : 70, height: micro ? 28 : 36),
+                                            xRadius: micro ? 8 : 17, yRadius: micro ? 8 : 17)
+                    body.lineWidth = 2.3
+                    shape(body)
+                    stroke([(15, 23), (27, 23)])
+                    stroke([(21, 17), (21, 29)])
+                    if !micro {
+                        circle(31, 35, 4)
+                        circle(49, 35, 4)
+                    }
+                    if kind == "8BitDo SN30 Pro" {
+                        outside([(12, 6), (26, 6)])
+                        outside([(54, 6), (68, 6)])
+                    }
+                    stroke([(36, 22), (38, 22)])
+                    stroke([(42, 22), (44, 22)])
+                    for p in [(59.0, 17.0), (54, 22), (64, 22), (59, 27)] { circle(p.0, p.1, 1.8) }
+                } else if kind == "Nintendo" {
+                    // SNES-style "dog bone" pad as the default Nintendo outline.
+                    let body = NSBezierPath(roundedRect: NSRect(x: 4, y: 12, width: 72, height: 28), xRadius: 14, yRadius: 14)
+                    body.lineWidth = 2.2
+                    shape(body)
+                    stroke([(12, 26), (24, 26)])
+                    stroke([(18, 20), (18, 32)])
+                    for p in [(62.0, 20.0), (56, 26), (68, 26), (62, 32)] { circle(p.0, p.1, 2.2) }
+                    stroke([(32, 29), (36, 25)])
+                    stroke([(42, 29), (46, 25)])
+                    outside([(12, 8), (24, 8)])
+                    outside([(56, 8), (68, 8)])
+                } else if kind.hasPrefix("Joy-Con") {
+                    /// One Joy-Con in an 18×46 box; the flat rail faces the partner, never joined to a grip.
+                    func joyCon(left: Bool, x: CGFloat, scale: CGFloat, alpha: CGFloat) {
+                        NSGraphicsContext.saveGraphicsState()
+                        let transform = NSAffineTransform()
+                        transform.translateX(by: x, yBy: 26 - 23 * scale)
+                        transform.scale(by: scale)
+                        transform.concat()
+                        (alpha == 1 ? ink : ctx.withAlphaComponent(alpha)).setStroke()
+                        func mx(_ value: CGFloat) -> CGFloat { left ? value : 18 - value }
+                        let shell = NSBezierPath()
+                        shell.move(to: NSPoint(x: mx(18), y: 0))
+                        shell.line(to: NSPoint(x: mx(9), y: 0))
+                        shell.curve(to: NSPoint(x: mx(0), y: 9), controlPoint1: NSPoint(x: mx(4), y: 0), controlPoint2: NSPoint(x: mx(0), y: 4))
+                        shell.line(to: NSPoint(x: mx(0), y: 37))
+                        shell.curve(to: NSPoint(x: mx(9), y: 46), controlPoint1: NSPoint(x: mx(0), y: 42), controlPoint2: NSPoint(x: mx(4), y: 46))
+                        shell.line(to: NSPoint(x: mx(18), y: 46))
+                        shell.close()
+                        shell.lineWidth = 2
+                        // The faded partner is ctx only, never colored: its shell color isn't known.
+                        shape(shell, alpha: alpha)
+                        (alpha == 1 ? ink : ctx.withAlphaComponent(alpha)).setStroke()
+                        circle(mx(9), left ? 13 : 29, 4)
+                        for (dx, dy) in [(0.0, -4.0), (-4, 0), (4, 0), (0, 4)] { circle(mx(9) + CGFloat(dx), (left ? 29 : 13) + CGFloat(dy), 1.4) }
+                        stroke([(mx(12), 4), (mx(15), 4)])
+                        if !left { stroke([(mx(13.5), 2.5), (mx(13.5), 5.5)]) }
+                        circle(mx(9), 40, 1.4)
+                        NSGraphicsContext.restoreGraphicsState()
+                    }
+                    switch kind {
+                    case "Joy-Con (L)":
+                        joyCon(left: true, x: 23, scale: 1, alpha: 1)
+                        joyCon(left: false, x: 47, scale: 0.55, alpha: 0.5)
+                    case "Joy-Con (R)":
+                        joyCon(left: true, x: 23, scale: 0.55, alpha: 0.5)
+                        joyCon(left: false, x: 39, scale: 1, alpha: 1)
+                    default:
+                        joyCon(left: true, x: 20, scale: 1, alpha: 1)
+                        joyCon(left: false, x: 42, scale: 1, alpha: 1)
+                    }
+                } else if kind == "Steam Controller" {
+                    // Current (2026) Steam Controller: D-pad/ABXY on top, two sticks, two square trackpads below.
+                    let body = NSBezierPath(roundedRect: NSRect(x: 4, y: 6, width: 72, height: 40), xRadius: 14, yRadius: 14)
+                    body.lineWidth = 2.3
+                    shape(body)
+                    stroke([(11, 15), (19, 15)])
+                    stroke([(15, 11), (15, 19)])
+                    for p in [(65.0, 11.0), (61, 15), (69, 15), (65, 19)] { circle(p.0, p.1, 1.5) }
+                    circle(28, 18, 4.5)
+                    circle(52, 18, 4.5)
+                    for x in [11.0, 52.0] {
+                        let pad = NSBezierPath(roundedRect: NSRect(x: x, y: 26, width: 17, height: 15), xRadius: 3, yRadius: 3)
+                        pad.lineWidth = 1.6 + boost
+                        if drawLines { pad.stroke() }
+                    }
+                    circle(40, 14, 1.6)
                 } else {
+                    let body = NSBezierPath()
+                    body.lineWidth = 2.3
+                    body.lineJoinStyle = .round
+                    let dualSense = kind == "PS5 · DualSense"
+                    body.move(to: NSPoint(x: dualSense ? 19 : 23, y: dualSense ? 5 : 8))
+                    body.curve(to: NSPoint(x: 8, y: 42), controlPoint1: NSPoint(x: 8, y: 5), controlPoint2: NSPoint(x: 3, y: 30))
+                    body.curve(to: NSPoint(x: 27, y: 37), controlPoint1: NSPoint(x: 12, y: 53), controlPoint2: NSPoint(x: 20, y: 43))
+                    body.line(to: NSPoint(x: 53, y: 37))
+                    body.curve(to: NSPoint(x: 72, y: 42), controlPoint1: NSPoint(x: 60, y: 43), controlPoint2: NSPoint(x: 68, y: 53))
+                    body.curve(to: NSPoint(x: dualSense ? 61 : 57, y: dualSense ? 5 : 8), controlPoint1: NSPoint(x: 77, y: 30), controlPoint2: NSPoint(x: 72, y: 5))
+                    body.close()
+                    shape(body)
+                    ink.setStroke()
+                    let playStation = ["PlayStation", "PS4 · DualShock 4", "PS5 · DualSense"].contains(kind)
+                    let symmetric = playStation || kind == "8BitDo Pro 2"
+                    let padX: CGFloat = symmetric ? 22 : 31
+                    let padY: CGFloat = symmetric ? 22 : 32
                     stroke([(padX - 5, padY), (padX + 5, padY)])
                     stroke([(padX, padY - 5), (padX, padY + 5)])
                     circle(symmetric ? 31 : 21, symmetric ? 33 : 20, 5)
                     circle(49, 33, 5)
-                }
-                if kind != "Steam Controller" {
                     for p in [(59.0, 16.0), (54, 21), (64, 21), (59, 26)] { circle(p.0, p.1, 1.8) }
-                }
-                if playStation {
-                    if kind != "PlayStation" {
-                        let touchpad = NSBezierPath(roundedRect: NSRect(x: dualSense ? 28 : 30, y: dualSense ? 8 : 12,
-                                                                       width: dualSense ? 24 : 20, height: dualSense ? 13 : 10), xRadius: 3, yRadius: 3)
-                        touchpad.lineWidth = 1.5
-                        touchpad.stroke()
+                    if playStation {
+                        if kind != "PlayStation" {
+                            let touchpad = NSBezierPath(roundedRect: NSRect(x: dualSense ? 28 : 30, y: dualSense ? 8 : 12,
+                                                                           width: dualSense ? 24 : 20, height: dualSense ? 13 : 10), xRadius: 3, yRadius: 3)
+                            touchpad.lineWidth = 1.5 + boost
+                            if drawLines { touchpad.stroke() }
+                        }
+                        if dualSense {
+                            stroke([(16, 31), (22, 40)])
+                            stroke([(64, 31), (58, 40)])
+                        }
+                    } else if kind == "Xbox" { circle(40, 16, 3) }
+                    else if kind == "Switch Pro Controller" {
+                        stroke([(33, 17), (37, 17)])
+                        stroke([(43, 17), (47, 17)])
+                        stroke([(45, 15), (45, 19)])
+                    } else if kind == "8BitDo Ultimate" {
+                        stroke([(34, 17), (36, 17)])
+                        stroke([(44, 17), (46, 17)])
+                        circle(40, 25, 2)
+                        outside([(14, 7), (25, 7)])
+                        outside([(55, 7), (66, 7)])
+                    } else if kind == "8BitDo Pro 2" {
+                        stroke([(36, 20), (38, 20)])
+                        stroke([(42, 20), (44, 20)])
+                        outside([(14, 6), (25, 6)])
+                        outside([(55, 6), (66, 6)])
                     }
-                    if dualSense {
-                        stroke([(16, 31), (22, 40)])
-                        stroke([(64, 31), (58, 40)])
-                    }
-                } else if kind == "Xbox" { circle(40, 16, 3) }
-                else if kind == "Switch Pro Controller" {
-                    stroke([(34, 14), (38, 14)])
-                    stroke([(42, 12), (42, 16)])
-                    stroke([(40, 10), (44, 10)])
-                } else if kind == "8BitDo Ultimate" {
-                    stroke([(34, 17), (36, 17)])
-                    stroke([(44, 17), (46, 17)])
-                    circle(40, 25, 2)
-                    stroke([(14, 7), (25, 7)])
-                    stroke([(55, 7), (66, 7)])
-                } else if kind == "Steam Controller" { circle(40, 13, 3) }
-                else if kind == "8BitDo Pro 2" {
-                    stroke([(36, 20), (38, 20)])
-                    stroke([(42, 20), (44, 20)])
-                    stroke([(14, 6), (25, 6)])
-                    stroke([(55, 6), (66, 6)])
                 }
             }
+            render()
+            drawFill = false
+            drawLines = true
+            if let highlight = highlight {
+                // Offset by whole device pixels (1 px small, 2 px large) so the second wall stays crisp.
+                let pixels = min(2, max(1, (scale * 0.5).rounded()))
+                let offset = pixels / scale
+                NSGraphicsContext.saveGraphicsState()
+                let shift = NSAffineTransform()
+                shift.translateX(by: offset, yBy: offset)
+                shift.concat()
+                ink = highlight
+                ctx = .clear
+                render()
+                NSGraphicsContext.restoreGraphicsState()
+                ink = line
+                ctx = context
+            }
+            render()
             return true
         }
-        image.isTemplate = true
+        image.isTemplate = fill == nil
         return image
+    }
+
+    private static var filledCache: [String: NSImage] = [:]
+
+    /// Outline style for filled art. `.outline`: black lines on every body, light lines only on black bodies.
+    /// `.doubleWall`: the same black lines on every body plus a subtle white copy offset by a device pixel or two.
+    static var outlineStyle: ControllerOutlineStyle = .outline
+
+    /// Filled art for `color` as seen in `appearance`, in `style`. Camo palette colors get a seeded camo fill.
+    /// A faint rim is added when neither fill nor ink would separate the silhouette from the window background.
+    static func filledImage(_ kind: String, color: NSColor, appearance: NSAppearance, highContrast: Bool,
+                            style: ControllerOutlineStyle = outlineStyle) -> NSImage {
+        let dark = appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+        var resolved = NSColor.black
+        var background = NSColor.white
+        appearance.performAsCurrentDrawingAppearance {
+            resolved = color.usingColorSpace(.sRGB) ?? .gray
+            background = NSColor.windowBackgroundColor.usingColorSpace(.sRGB) ?? (dark ? NSColor(white: 0.12, alpha: 1) : .white)
+        }
+        let ink = ControllerInk.choose(fill: resolved, background: background, dark: dark, highContrast: highContrast, style: style)
+        let camo = ControllerCamo.matching(resolved)
+        let key = [kind, ControllerInk.hex(resolved), ControllerInk.hex(background), "\(highContrast)", "\(style)",
+                   camo?.name ?? "flat", "80x52"].joined(separator: "|")
+        if let cached = filledCache[key] { return cached }
+        let highlight: NSColor? = style == .doubleWall ? NSColor.white.withAlphaComponent(highContrast ? 1 : 0.7) : nil
+        let image = draw(kind, fill: ink.fill, camo: camo, line: ink.line, context: ink.context, rim: ink.rim,
+                         highlight: highlight, boost: highContrast ? 0.4 : 0)
+        image.accessibilityDescription = kind
+        filledCache[key] = image
+        return image
+    }
+
+    /// Artwork choices grouped by company, matching the color menu's section headers.
+    static let sections: [(String, [String])] = [
+        ("Microsoft", ["Xbox"]),
+        ("Sony", ["PS5 · DualSense", "PS4 · DualShock 4", "PlayStation"]),
+        ("Nintendo", ["Switch Pro Controller", "Joy-Con (L)", "Joy-Con (R)", "Joy-Con", "Nintendo"]),
+        ("Valve", ["Steam Controller"]),
+        ("8BitDo", ["8BitDo SN30 Pro", "8BitDo Micro", "8BitDo Pro 2", "8BitDo Ultimate", "8BitDo"]),
+        ("Other", ["Generic"])
+    ]
+
+    static func menu(selecting selected: String?) -> NSPopUpButton {
+        let popup = NSPopUpButton()
+        popup.autoenablesItems = false
+        let automatic = NSMenuItem(title: "Automatic", action: nil, keyEquivalent: "")
+        automatic.representedObject = "Automatic"
+        popup.menu?.addItem(automatic)
+        for (section, kinds) in sections {
+            popup.menu?.addItem(.separator())
+            let header = NSMenuItem(title: section, action: nil, keyEquivalent: "")
+            header.isEnabled = false
+            header.attributedTitle = NSAttributedString(string: section, attributes: [
+                .font: NSFont.systemFont(ofSize: 11, weight: .semibold),
+                .foregroundColor: NSColor.secondaryLabelColor])
+            popup.menu?.addItem(header)
+            for kind in kinds {
+                let item = NSMenuItem(title: kind, action: nil, keyEquivalent: "")
+                item.representedObject = kind
+                item.indentationLevel = 1
+                let icon = image(kind)
+                icon.size = NSSize(width: 25, height: 16)
+                item.image = icon
+                popup.menu?.addItem(item)
+            }
+        }
+        let wanted = selected.flatMap { kinds.contains($0) ? $0 : nil } ?? "Automatic"
+        if let item = popup.itemArray.first(where: { $0.representedObject as? String == wanted }) { popup.select(item) }
+        return popup
+    }
+
+    static func selectedKind(in popup: NSPopUpButton) -> String {
+        popup.selectedItem?.representedObject as? String ?? "Automatic"
+    }
+}
+
+/// Picks outline/detail ink for a filled controller body (WCAG relative luminance and contrast ratio).
+enum ControllerOutlineStyle: String, CaseIterable {
+    case outline, doubleWall
+}
+
+/// Discreet procedural camo for camo palette colors: original seeded blobs in a few close tones of the
+/// edition's color, so it is identical on every render and at every size. Below `patterned(atScale:)`
+/// the art falls back to the flat palette color, which is the camo's average tone.
+struct ControllerCamo {
+    let name: String
+    let base: NSColor
+    let tones: [NSColor]
+    let seed: UInt64
+
+    static func rgb(_ value: Int) -> NSColor {
+        NSColor(srgbRed: CGFloat((value >> 16) & 0xFF) / 255, green: CGFloat((value >> 8) & 0xFF) / 255,
+                blue: CGFloat(value & 0xFF) / 255, alpha: 1)
+    }
+
+    static let all: [ControllerCamo] = [
+        ControllerCamo(name: "Gray Camouflage", base: rgb(0x7D8070), tones: [rgb(0x8D9081), rgb(0x6C6F61), rgb(0x5C5F53)], seed: 0x6A7C),
+        ControllerCamo(name: "Mineral Camo", base: rgb(0x5E6B4A), tones: [rgb(0x707C5C), rgb(0x4F5B3E), rgb(0x6B6F62)], seed: 0x3F51)
+    ]
+
+    /// Exact palette match only; dimmed or composited variants stay flat.
+    static func matching(_ color: NSColor) -> ControllerCamo? {
+        guard let c = color.usingColorSpace(.sRGB), c.alphaComponent > 0.99 else { return nil }
+        return all.first { camo in
+            let b = camo.base.usingColorSpace(.sRGB)!
+            return abs(b.redComponent - c.redComponent) < 0.004 && abs(b.greenComponent - c.greenComponent) < 0.004
+                && abs(b.blueComponent - c.blueComponent) < 0.004
+        }
+    }
+
+    /// Blobs are ~6–12 artwork units; under 0.75 device px per unit they would read as noise.
+    static func patterned(atScale scale: CGFloat) -> Bool { scale >= 0.75 }
+
+    /// Fills the current clip: base color, then smooth irregular blobs in each tone over the 80×52 art box.
+    func draw() {
+        base.setFill()
+        NSRect(x: -10, y: -10, width: 100, height: 72).fill()
+        var state = seed
+        func next() -> CGFloat {
+            state = state &* 6364136223846793005 &+ 1442695040888963407
+            return CGFloat((state >> 33) % 10_000) / 10_000
+        }
+        for tone in tones {
+            tone.setFill()
+            for _ in 0..<7 {
+                let cx = -4 + next() * 88, cy = -4 + next() * 60
+                let radius = 4 + next() * 4.5, stretch = 0.7 + next() * 0.8
+                let count = 7
+                var points: [NSPoint] = []
+                for i in 0..<count {
+                    let angle = CGFloat(i) / CGFloat(count) * 2 * .pi
+                    let r = radius * (0.65 + next() * 0.55)
+                    points.append(NSPoint(x: cx + cos(angle) * r * stretch, y: cy + sin(angle) * r))
+                }
+                let path = NSBezierPath()
+                func mid(_ a: NSPoint, _ b: NSPoint) -> NSPoint { NSPoint(x: (a.x + b.x) / 2, y: (a.y + b.y) / 2) }
+                path.move(to: mid(points[count - 1], points[0]))
+                for i in 0..<count {
+                    let p = points[i], q = points[(i + 1) % count]
+                    path.curve(to: mid(p, q), controlPoint1: p, controlPoint2: p)
+                }
+                path.close()
+                path.fill()
+            }
+        }
+    }
+}
+
+enum ControllerInk {
+    static let darkInk = NSColor(srgbRed: 0.07, green: 0.07, blue: 0.08, alpha: 1)
+    static let lightInk = NSColor(srgbRed: 0.96, green: 0.96, blue: 0.97, alpha: 1)
+
+    static func luminance(_ color: NSColor) -> CGFloat {
+        let c = color.usingColorSpace(.sRGB) ?? .gray
+        func channel(_ v: CGFloat) -> CGFloat { v <= 0.04045 ? v / 12.92 : pow((v + 0.055) / 1.055, 2.4) }
+        return 0.2126 * channel(c.redComponent) + 0.7152 * channel(c.greenComponent) + 0.0722 * channel(c.blueComponent)
+    }
+
+    static func contrast(_ a: NSColor, _ b: NSColor) -> CGFloat {
+        let (x, y) = (luminance(a), luminance(b))
+        return (max(x, y) + 0.05) / (min(x, y) + 0.05)
+    }
+
+    /// Translucent colors (dimmed/disconnected states) become the opaque color they show over the window,
+    /// so the fill is never see-through (also honoring Reduce Transparency).
+    static func composite(_ color: NSColor, over background: NSColor) -> NSColor {
+        let c = color.usingColorSpace(.sRGB) ?? .gray, b = background.usingColorSpace(.sRGB) ?? .white
+        let a = c.alphaComponent
+        return NSColor(srgbRed: c.redComponent * a + b.redComponent * (1 - a), green: c.greenComponent * a + b.greenComponent * (1 - a),
+                       blue: c.blueComponent * a + b.blueComponent * (1 - a), alpha: 1)
+    }
+
+    /// Black and near-black neutral bodies only: very dark and essentially unsaturated.
+    /// Dark but colored bodies (purple, cobalt, red…) are not black and keep black outlines.
+    static func isNearBlack(_ color: NSColor) -> Bool {
+        let c = color.usingColorSpace(.sRGB) ?? .gray
+        let high = max(c.redComponent, c.greenComponent, c.blueComponent)
+        let low = min(c.redComponent, c.greenComponent, c.blueComponent)
+        let saturation = high > 0 ? (high - low) / high : 0
+        return luminance(c) < 0.03 && saturation < 0.35
+    }
+
+    /// Black outlines on every body color; only black/near-black bodies get light outlines.
+    /// A rim is added only when neither the body nor its outline separates from the background by 3:1.
+    /// In `.doubleWall` every body, black included, keeps black lines; the offset white wall carries the contrast.
+    static func choose(fill: NSColor, background: NSColor, dark: Bool, highContrast: Bool, style: ControllerOutlineStyle = .outline)
+        -> (fill: NSColor, line: NSColor, context: NSColor, rim: NSColor?) {
+        let solid = composite(fill, over: background)
+        let darkLine = highContrast ? NSColor.black : darkInk, lightLine = highContrast ? NSColor.white : lightInk
+        let line = style == .outline && isNearBlack(solid) ? lightLine : darkLine
+        let edge = max(contrast(solid, background), contrast(line, background))
+        let rim: NSColor? = edge >= 3 ? nil : (dark ? NSColor.white.withAlphaComponent(highContrast ? 0.8 : 0.45)
+                                                    : NSColor.black.withAlphaComponent(highContrast ? 0.7 : 0.35))
+        let context = contrast(darkLine, background) >= contrast(lightLine, background) ? darkLine : lightLine
+        return (solid, line, context, rim)
+    }
+
+    static func hex(_ color: NSColor) -> String {
+        let c = color.usingColorSpace(.sRGB) ?? .gray
+        return String(format: "%02X%02X%02X%02X", Int(c.redComponent * 255), Int(c.greenComponent * 255),
+                      Int(c.blueComponent * 255), Int(c.alphaComponent * 255))
+    }
+}
+
+/// Controller art that fills itself with `contentTintColor` and re-renders on appearance or accessibility changes.
+/// Without a tint it shows the plain template line art.
+final class ControllerArtView: NSImageView {
+    var kind: String { didSet { if kind != oldValue { render() } } }
+    /// Nil follows `ControllerArtwork.outlineStyle`; the comparison sheet pins a style per view.
+    var style: ControllerOutlineStyle? { didSet { render() } }
+    private var observer: NSObjectProtocol?
+
+    init(kind: String) {
+        self.kind = kind
+        super.init(frame: .zero)
+        imageScaling = .scaleProportionallyUpOrDown
+        observer = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.accessibilityDisplayOptionsDidChangeNotification, object: nil, queue: .main) { [weak self] _ in
+            self?.render()
+        }
+        render()
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    deinit { observer.map(NSWorkspace.shared.notificationCenter.removeObserver) }
+
+    override var contentTintColor: NSColor? { didSet { render() } }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        render()
+    }
+
+    private func render() {
+        image = contentTintColor.map {
+            ControllerArtwork.filledImage(kind, color: $0, appearance: effectiveAppearance,
+                                          highContrast: NSWorkspace.shared.accessibilityDisplayShouldIncreaseContrast,
+                                          style: style ?? ControllerArtwork.outlineStyle)
+        } ?? ControllerArtwork.image(kind)
     }
 }
 
@@ -690,10 +1246,18 @@ enum ControllerPalette {
         "Glacier White": "White", "Robot White": "White", "Ultimate White": "White"
     ]
 
+    /// Returns a palette name, or "" (Automatic) for empty/unknown values.
     static func canonicalName(_ name: String, for entry: ControllerEntry) -> String {
-        if colors.contains(where: { $0.0 == name }) { return name }
-        if defaultName(for: entry) == "Micro Green" && name == "Green" { return "Micro Green" }
-        return legacyNames[name] ?? defaultName(for: entry)
+        if name.isEmpty || colors.contains(where: { $0.0 == name }) { return name }
+        if legacyInferredName(for: entry) == "Micro Green" && name == "Green" { return "Micro Green" }
+        return legacyNames[name] ?? ""
+    }
+
+    /// Before Automatic existed, Customize always stored the inferred default, so a saved value equal to it
+    /// is treated as Automatic once. Anything else the user picked stays explicit.
+    static func migratedName(_ name: String, for entry: ControllerEntry) -> String {
+        let canonical = canonicalName(name, for: entry)
+        return canonical == legacyInferredName(for: entry) ? "" : canonical
     }
 
     private static func tag(_ brand: String) -> NSImage {
@@ -709,9 +1273,16 @@ enum ControllerPalette {
         }
     }
 
-    static func menu(selecting selected: String) -> NSPopUpButton {
+    /// `selected` "" selects Automatic, whose title shows the color it currently resolves to.
+    static func menu(selecting selected: String, automatic: String? = nil) -> NSPopUpButton {
         let popup = NSPopUpButton()
         popup.autoenablesItems = false
+        if let automatic = automatic {
+            let item = NSMenuItem(title: "", action: nil, keyEquivalent: "")
+            item.representedObject = ""
+            popup.menu?.addItem(item)
+            setAutomatic(automatic, in: popup)
+        }
         for (section, shades) in sections {
             if popup.numberOfItems > 0 { popup.menu?.addItem(.separator()) }
             let header = NSMenuItem(title: section, action: nil, keyEquivalent: "")
@@ -745,30 +1316,51 @@ enum ControllerPalette {
         return popup
     }
 
+    static func setAutomatic(_ name: String, in popup: NSPopUpButton) {
+        guard let item = popup.itemArray.first(where: { $0.representedObject as? String == "" }) else { return }
+        item.title = "Automatic (\(name))"
+        item.image = swatch(color(named: name))
+        item.toolTip = "Standard color for this controller model. Couch Cube can't read a controller's shell color."
+        if popup.selectedItem === item { popup.synchronizeTitleAndSelectedItem() }
+    }
+
     static func selectedName(in popup: NSPopUpButton) -> String? {
         popup.selectedItem?.representedObject as? String
     }
 
-    static func applyContrast(to view: NSImageView) {
-        guard let rgb = view.contentTintColor?.usingColorSpace(.sRGB) else { view.shadow = nil; return }
-        let luminance = 0.2126 * rgb.redComponent + 0.7152 * rgb.greenComponent + 0.0722 * rgb.blueComponent
-        let dark = view.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
-        guard dark ? luminance < 0.22 : luminance > 0.72 else { view.shadow = nil; return }
-        let halo = NSShadow()
-        halo.shadowColor = (dark ? NSColor.white : NSColor.black).withAlphaComponent(dark ? 0.75 : 0.6)
-        halo.shadowBlurRadius = 1.2
-        halo.shadowOffset = .zero
-        view.shadow = halo
+    /// The model's standard launch/marketing controller color. Couch Cube can't read a controller's shell color
+    /// (no public macOS API, and the open DualSense/DualShock drivers expose no such field), so this is a default, not a detection.
+    static func defaultName(forKind kind: String) -> String {
+        switch kind {
+        case "PS5 · DualSense": return "White"
+        case "PS4 · DualShock 4", "PlayStation", "Xbox", "Switch Pro Controller", "Steam Controller", "8BitDo Ultimate", "Generic":
+            return "Black"
+        case "Joy-Con (L)": return "Neon Blue"
+        case "Joy-Con (R)": return "Neon Red"
+        case "8BitDo Micro": return "Micro Green"
+        default: return "Classic Gray" // Joy-Con pair (gray launch set), SNES-style Nintendo, other 8BitDo
+        }
     }
 
-    static func defaultName(for entry: ControllerEntry) -> String {
-        switch ControllerArtwork.kind(name: entry.name, preference: nil) {
+    static func defaultName(for entry: ControllerEntry, artwork: String? = nil) -> String {
+        defaultName(forKind: ControllerArtwork.kind(for: entry, artwork: artwork))
+    }
+
+    /// Defaults Couch Cube used to fill in before Automatic existed; such saved values were never the user's own pick.
+    static func legacyInferredName(for entry: ControllerEntry) -> String {
+        switch ControllerArtwork.kind(name: entry.name, preference: entry.model) {
         case "8BitDo Micro": return "Micro Green"
         case "PS5 · DualSense": return "Chroma Indigo"
         case "Xbox", "PlayStation", "PS4 · DualShock 4": return "Black"
         case let kind where kind.hasPrefix("8BitDo"): return "Classic Gray"
         default: return "Shock Blue"
         }
+    }
+
+    /// An empty saved color means Automatic.
+    static func resolvedName(_ saved: String?, for entry: ControllerEntry, artwork: String? = nil) -> String {
+        if let saved = saved, !saved.isEmpty, colors.contains(where: { $0.0 == saved }) { return saved }
+        return defaultName(for: entry, artwork: artwork)
     }
 
     static func color(named name: String) -> NSColor {
@@ -787,6 +1379,78 @@ enum ControllerPalette {
             return true
         }
     }
+}
+
+/// Live preview in the customize sheet: the controller's art filled with the chosen color.
+/// Purely visual; nothing is saved until the sheet's Save button is pressed.
+final class ControllerCustomizationPreview: NSObject {
+    let imageView = ControllerArtView(kind: "Generic")
+    private(set) var iconFrame: ControllerIconFrame!
+    let colorPopup: NSPopUpButton
+    let artworkPopup: NSPopUpButton
+    private let controllerName: String
+    private let automaticModel: String?
+
+    init(controllerName: String, automaticModel: String? = nil, colorPopup: NSPopUpButton, artworkPopup: NSPopUpButton) {
+        self.controllerName = controllerName
+        self.automaticModel = automaticModel
+        self.colorPopup = colorPopup
+        self.artworkPopup = artworkPopup
+        super.init()
+        imageView.imageScaling = .scaleProportionallyUpOrDown
+        iconFrame = ControllerIconFrame(imageView: imageView, size: NSSize(width: 88, height: 60), inset: 4)
+        imageView.setAccessibilityLabel("Icon preview")
+        for popup in [colorPopup, artworkPopup] {
+            popup.target = self
+            popup.action = #selector(update)
+        }
+        update()
+    }
+
+    var kind: String {
+        let choice = ControllerArtwork.selectedKind(in: artworkPopup)
+        return ControllerArtwork.kind(name: controllerName, preference: choice == "Automatic" ? automaticModel : choice)
+    }
+
+    /// The saved value: "" for Automatic.
+    var savedColor: String { ControllerPalette.selectedName(in: colorPopup) ?? "" }
+
+    var colorName: String {
+        let saved = savedColor
+        return saved.isEmpty ? ControllerPalette.defaultName(forKind: kind) : saved
+    }
+
+    @objc func update() {
+        ControllerPalette.setAutomatic(ControllerPalette.defaultName(forKind: kind), in: colorPopup)
+        let color = ControllerPalette.color(named: colorName)
+        imageView.kind = kind
+        imageView.contentTintColor = color
+        imageView.setAccessibilityValue("\(kind), \(colorName)\(savedColor.isEmpty ? " (Automatic)" : "")")
+    }
+}
+
+/// A fixed-size, transparent frame for controller line art: no background, just the icon.
+/// It keeps row geometry fixed; the input pulse animates the inner image only.
+final class ControllerIconFrame: NSView {
+    let imageView: NSImageView
+
+    init(imageView: NSImageView, size: NSSize, inset: CGFloat = 3) {
+        self.imageView = imageView
+        super.init(frame: NSRect(origin: .zero, size: size))
+        identifier = NSUserInterfaceItemIdentifier("controller-icon-frame")
+        imageView.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(imageView)
+        NSLayoutConstraint.activate([
+            widthAnchor.constraint(equalToConstant: size.width),
+            heightAnchor.constraint(equalToConstant: size.height),
+            imageView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: inset),
+            imageView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -inset),
+            imageView.topAnchor.constraint(equalTo: topAnchor, constant: inset),
+            imageView.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -inset)
+        ])
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 }
 
 func controllerAddress(_ value: String) -> String? {
@@ -808,10 +1472,62 @@ func hidControllerEntry(_ device: IOHIDDevice) -> ControllerEntry {
         "location:\(location)" : "session:\(registryID)"
     let id = address.map { "bt:\($0)" } ??
         "hid:\(property(kIOHIDVendorIDKey)):\(property(kIOHIDProductIDKey)):\(transport):\(identity)"
-    let name = property(kIOHIDProductKey)
+    let vendor = (IOHIDDeviceGetProperty(device, kIOHIDVendorIDKey as CFString) as? NSNumber)?.intValue
+    let product = (IOHIDDeviceGetProperty(device, kIOHIDProductIDKey as CFString) as? NSNumber)?.intValue
+    var name = property(kIOHIDProductKey)
+    if vendor == 0x057E, let side = joyConSide(product: product), !name.lowercased().contains("joy-con") { name = side }
+    let hardwareAddress = transport == "USB" ? cachedSonyUSBBluetoothAddress(device, registryID: registryID,
+                                                                             vendor: vendor, product: product) : nil
     return ControllerEntry(id: id, name: name.isEmpty ? "Game controller" : name,
         connected: true, transport: transport == "USB" ? "Wired" :
-            transport.hasPrefix("Bluetooth") ? "Bluetooth" : "Wireless / Other")
+            transport.hasPrefix("Bluetooth") ? "Bluetooth" : "Wireless / Other",
+        model: controllerModel(vendor: vendor, product: product, name: name), hardwareAddress: hardwareAddress)
+}
+
+/// Feature report that carries the pad's own Bluetooth address over USB (the same reports SDL/Steam read).
+func sonyAddressReportID(vendor: Int?, product: Int?) -> UInt8? {
+    guard vendor == 0x054C else { return nil }
+    switch product {
+    case 0x05C4, 0x09CC: return 0x12 // DualShock 4
+    case 0x0CE6, 0x0DF2: return 0x09 // DualSense, DualSense Edge
+    default: return nil
+    }
+}
+
+/// macOS returns numbered feature reports with the report ID first, then the address in little-endian order.
+func controllerAddressFromSonyReport(_ report: [UInt8], reportID: UInt8) -> String? {
+    guard report.count >= 7, report[0] == reportID else { return nil }
+    let bytes = report[1...6].reversed()
+    guard bytes.contains(where: { $0 != 0 }), bytes.contains(where: { $0 != 0xFF }) else { return nil }
+    return bytes.map { String(format: "%02x", $0) }.joined()
+}
+
+private let sonyAddressLock = NSLock()
+private var sonyAddressCache: [UInt64: String] = [:]
+private var sonyAddressAttempts: Set<UInt64> = []
+
+/// Read once per plugged-in device; failures (no permission, unsupported firmware) simply leave no address.
+func cachedSonyUSBBluetoothAddress(_ device: IOHIDDevice, registryID: UInt64, vendor: Int?, product: Int?) -> String? {
+    guard let reportID = sonyAddressReportID(vendor: vendor, product: product) else { return nil }
+    sonyAddressLock.lock()
+    if sonyAddressAttempts.contains(registryID) {
+        defer { sonyAddressLock.unlock() }
+        return sonyAddressCache[registryID]
+    }
+    sonyAddressAttempts.insert(registryID)
+    sonyAddressLock.unlock()
+    guard IOHIDDeviceOpen(device, IOOptionBits(kIOHIDOptionsTypeNone)) == kIOReturnSuccess else { return nil }
+    defer { IOHIDDeviceClose(device, IOOptionBits(kIOHIDOptionsTypeNone)) }
+    var buffer = [UInt8](repeating: 0, count: 64)
+    buffer[0] = reportID
+    var length = CFIndex(buffer.count)
+    guard IOHIDDeviceGetReport(device, kIOHIDReportTypeFeature, CFIndex(reportID), &buffer, &length) == kIOReturnSuccess,
+          let address = controllerAddressFromSonyReport(Array(buffer.prefix(max(0, length))), reportID: reportID)
+    else { return nil }
+    sonyAddressLock.lock()
+    sonyAddressCache[registryID] = address
+    sonyAddressLock.unlock()
+    return address
 }
 
 func controllerInputDescription(page: UInt32, usage: UInt32, value: Int,
@@ -845,12 +1561,43 @@ func connectedHIDControllers() -> [ControllerEntry] {
     return result.values.sorted { $0.id < $1.id }
 }
 
+/// Nintendo identifies its pads by vendor 0x057E. Third-party "Pro Controller" clones with another vendor ID
+/// keep generic art instead of being presented as a genuine Switch Pro Controller.
+func controllerModel(vendor: Int?, product: Int?, name: String) -> String? {
+    if vendor == 0x057E {
+        switch product {
+        case 0x2009: return "Switch Pro Controller"
+        case 0x2006: return "Joy-Con (L)"
+        case 0x2007: return "Joy-Con (R)"
+        case 0x200E: return "Joy-Con"
+        default: return "Nintendo"
+        }
+    }
+    if vendor != nil, name.trimmingCharacters(in: .whitespaces).lowercased() == "pro controller" { return "Generic" }
+    return nil
+}
+
+func joyConSide(product: Int?) -> String? {
+    switch product {
+    case 0x2006: return "Joy-Con (L)"
+    case 0x2007: return "Joy-Con (R)"
+    case 0x200E: return "Joy-Con Charging Grip"
+    default: return nil
+    }
+}
+
+/// Bluetooth link state and game-input detection are separate: a link alone never claims working input.
+func controllerConnectionStatus(connected: Bool, inputDetected: Bool?, connecting: Bool) -> String {
+    guard connected else { return connecting ? "Connecting…" : "Not connected" }
+    return inputDetected == false ? "Bluetooth only" : "Connected"
+}
+
 func isBluetoothController(deviceClass: UInt32, name: String) -> Bool {
     let peripheral = (deviceClass >> 8) & 0x1f == 5
     let subtype = (deviceClass >> 2) & 0x0f
     if peripheral && (subtype == 1 || subtype == 2) { return true }
     let name = name.lowercased()
-    return ["dualsense", "dualshock", "xbox wireless", "xbox elite", "pro controller", "joy-con",
+    return ["dualsense", "dualshock", "xbox wireless", "xbox elite", "pro controller", "joy-con", "nintendo switch",
             "8bitdo", "gamesir", "wireless controller", "stadia controller", "nimbus", "stratus"].contains { name.contains($0) }
 }
 
@@ -900,6 +1647,12 @@ func controllerSerialAddress(_ serial: String) -> String? {
     return controllerAddress(serial)
 }
 
+/// Joy-Cons are always separate controllers: never auto-linked or offered as "Same Controller As".
+func isJoyCon(_ entry: ControllerEntry) -> Bool {
+    entry.model?.hasPrefix("Joy-Con") == true ||
+        ControllerArtwork.kind(name: entry.name, preference: nil).hasPrefix("Joy-Con")
+}
+
 func verifiedBluetoothAlias(for id: String, knownBluetoothIDs: Set<String>) -> String? {
     let parts = id.split(separator: ":", maxSplits: 4, omittingEmptySubsequences: false)
     guard parts.count == 5, parts[0] == "hid", !parts[3].hasPrefix("Bluetooth"),
@@ -907,6 +1660,13 @@ func verifiedBluetoothAlias(for id: String, knownBluetoothIDs: Set<String>) -> S
           let address = controllerSerialAddress(String(parts[4].dropFirst("serial:".count))) else { return nil }
     let candidate = "bt:" + address
     return knownBluetoothIDs.contains(candidate) ? candidate : nil
+}
+
+/// The one profile a USB connection belongs to, only when the device itself proves it. Joy-Cons are never linked.
+func controllerProfileAlias(for entry: ControllerEntry, knownBluetoothIDs: Set<String>) -> String? {
+    guard entry.id.hasPrefix("hid:"), !isJoyCon(entry) else { return nil }
+    if let address = entry.hardwareAddress.flatMap(controllerAddress) { return "bt:" + address }
+    return verifiedBluetoothAlias(for: entry.id, knownBluetoothIDs: knownBluetoothIDs)
 }
 
 func dashedControllerAddress(_ address: String) -> String {
@@ -1010,7 +1770,7 @@ func sidebarSeverityRank(_ color: NSColor) -> Int {
     color == .systemRed ? 0 : color == .systemYellow ? 1 : 2
 }
 
-let guidedSetupOrder = [2, 1, 10, 7, 8, 6, 11]
+let guidedSetupOrder = [6, 1, 10, 7, 8, 11]
 /// With guidance on, only the first page (in setup order) that has any task is marked, setup or maintenance alike.
 /// Guided markers wait for checks to settle and never jump: while checks run, the shown step is kept as it was
 /// (nothing is shown before the first step is known); once settled, the pinned step stays until it has no tasks.
@@ -1081,6 +1841,716 @@ final class SidebarCountDot: NSView {
             (subviews.first as? NSTextField)?.textColor = number ?? fill
         }
     }
+}
+
+struct StoreDeal: Decodable, Equatable {
+    let id: String
+    let title: String
+    let salePrice: Double
+    let normalPrice: Double?
+    let savings: Int
+    let store: String?
+    let dealRating: Double?
+    let steamRating: String?
+    let steamRatingPercent: Int?
+    let metacritic: Int?
+    let steamAppId: String?
+    let installed: Bool
+    let thumb: String?
+    let url: String
+    var gameId: String? = nil
+}
+
+struct DealStore: Decodable, Equatable {
+    let id: String
+    let name: String
+}
+
+struct StoreDealsReply: Decodable {
+    let page: Int
+    let more: Bool
+    let stores: [DealStore]
+    let deals: [StoreDeal]
+    let fetched: Double
+    let stale: Bool
+    let error: String?
+    var myStores: [ShopStoreRef]? = nil
+}
+
+/// Deal end dates. Only GamerPower giveaways carry one ("end_date"); CheapShark's deal list and deal lookup
+/// have no end date, so store deals never show a countdown. GamerPower doesn't say which time zone its
+/// "YYYY-MM-DD HH:MM:SS" uses, so it is read as UTC.
+enum DealExpiry {
+    static func parseGamerPowerEnd(_ value: String?) -> Date? {
+        guard let value else { return nil }
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(identifier: "UTC")
+        formatter.isLenient = false
+        for format in ["yyyy-MM-dd HH:mm:ss", "yyyy-MM-dd"] {
+            formatter.dateFormat = format
+            if let date = formatter.date(from: value) {
+                return format == "yyyy-MM-dd" ? date.addingTimeInterval(86_399) : date
+            }
+        }
+        return nil
+    }
+
+    /// Whole local calendar days from today to the end day; nil once it has ended.
+    static func daysLeft(until end: Date, now: Date, calendar: Calendar = .current) -> Int? {
+        guard end > now else { return nil }
+        return calendar.dateComponents([.day], from: calendar.startOfDay(for: now), to: calendar.startOfDay(for: end)).day
+    }
+
+    static func label(until end: Date, now: Date, calendar: Calendar = .current) -> (text: String, urgent: Bool)? {
+        guard let days = daysLeft(until: end, now: now, calendar: calendar) else { return nil }
+        let text = days == 0 ? "Ends today" : days == 1 ? "Ends tomorrow" : "\(days) days left"
+        return (text, days <= 2)
+    }
+
+    /// 09:00 local on the day before the end day. If that has passed: 09:00 today when still ahead,
+    /// otherwise a few minutes from now. nil when even that would be after the end.
+    static func reminderDate(for end: Date, now: Date, calendar: Calendar = .current) -> (date: Date, adjusted: Bool)? {
+        guard end > now else { return nil }
+        let endDay = calendar.startOfDay(for: end)
+        if let dayBefore = calendar.date(byAdding: .day, value: -1, to: endDay),
+           let target = calendar.date(bySettingHour: 9, minute: 0, second: 0, of: dayBefore), target > now {
+            return (target, false)
+        }
+        if let today = calendar.date(bySettingHour: 9, minute: 0, second: 0, of: now), today > now, today < end {
+            return (today, true)
+        }
+        let minute = calendar.dateInterval(of: .minute, for: now.addingTimeInterval(5 * 60))?.start ?? now.addingTimeInterval(5 * 60)
+        return minute < end ? (minute, true) : nil
+    }
+}
+
+enum ReminderAccess { case notDetermined, granted, denied }
+
+/// Reminders access goes through this so tests never write to the user's real Reminders.
+protocol DealReminderStore: AnyObject {
+    var access: ReminderAccess { get }
+    func requestAccess(_ done: @escaping (Bool) -> Void)
+    func add(title: String, notes: String, url: URL?, due: Date) throws -> String
+    func exists(_ identifier: String) -> Bool
+    func remove(_ identifier: String) throws
+}
+
+struct ReminderStoreError: LocalizedError {
+    let errorDescription: String?
+}
+
+final class EventKitReminderStore: DealReminderStore {
+    private let store = EKEventStore()
+
+    var access: ReminderAccess {
+        let status = EKEventStore.authorizationStatus(for: .reminder)
+        if status == .notDetermined { return .notDetermined }
+        if #available(macOS 14.0, *) { return status == .fullAccess ? .granted : .denied }
+        return status == .authorized ? .granted : .denied
+    }
+
+    func requestAccess(_ done: @escaping (Bool) -> Void) {
+        let finish: (Bool, Error?) -> Void = { granted, _ in DispatchQueue.main.async { done(granted) } }
+        if #available(macOS 14.0, *) {
+            store.requestFullAccessToReminders(completion: finish)
+        } else {
+            store.requestAccess(to: .reminder, completion: finish)
+        }
+    }
+
+    func add(title: String, notes: String, url: URL?, due: Date) throws -> String {
+        guard let list = store.defaultCalendarForNewReminders() else {
+            throw ReminderStoreError(errorDescription: "Reminders has no default list. Choose one in Reminders settings.")
+        }
+        let reminder = EKReminder(eventStore: store)
+        reminder.calendar = list
+        reminder.title = title
+        reminder.notes = notes
+        reminder.url = url
+        var components = Calendar.current.dateComponents([.year, .month, .day, .hour, .minute], from: due)
+        components.timeZone = TimeZone.current
+        reminder.dueDateComponents = components
+        reminder.addAlarm(EKAlarm(absoluteDate: due))
+        try store.save(reminder, commit: true)
+        return reminder.calendarItemIdentifier
+    }
+
+    func exists(_ identifier: String) -> Bool {
+        store.calendarItem(withIdentifier: identifier) is EKReminder
+    }
+
+    func remove(_ identifier: String) throws {
+        guard let reminder = store.calendarItem(withIdentifier: identifier) as? EKReminder else { return }
+        try store.remove(reminder, commit: true)
+    }
+}
+
+struct Giveaway: Decodable, Equatable {
+    let id: String
+    let title: String
+    let worth: String?
+    let type: String?
+    let platforms: [String]
+    let endDate: String?
+    let users: Int?
+    let thumb: String?
+    let url: String
+}
+
+struct GiveawaysReply: Decodable {
+    let giveaways: [Giveaway]
+    let fetched: Double
+    let stale: Bool
+    let error: String?
+    var myStores: [ShopStoreRef]? = nil
+}
+
+let cheapSharkHosts: Set<String> = ["www.cheapshark.com"]
+let gamerPowerHosts: Set<String> = ["www.gamerpower.com"]
+
+/// Deals only ever open as https links on the services' own hosts (CheapShark forwards to the store itself).
+func safeDealURL(_ value: String?, hosts: Set<String>? = nil) -> URL? {
+    guard let value, value.count <= 2048, !value.contains(where: { $0.isWhitespace }),
+          let components = URLComponents(string: value), components.scheme == "https",
+          let host = components.host?.lowercased(), !host.isEmpty,
+          components.user == nil, components.password == nil, components.port == nil || components.port == 443,
+          hosts.map({ $0.contains(host) }) ?? true else { return nil }
+    return components.url
+}
+
+func dealPrice(_ value: Double) -> String {
+    value == 0 ? "Free" : String(format: "$%.2f", value)
+}
+
+func decodeDeals<T: Decodable>(_ type: T.Type, _ data: Data) -> T? {
+    let decoder = JSONDecoder()
+    decoder.keyDecodingStrategy = .convertFromSnakeCase
+    return try? decoder.decode(type, from: data)
+}
+
+let appStoreHosts: Set<String> = ["apps.apple.com"]
+
+// MARK: Cube Shop models (replies from scripts/shop.py, wishlist.py and rates.py)
+
+struct ShopStoreRef: Decodable, Equatable {
+    let key: String
+    let name: String
+}
+
+/// One store's current price for a game (CheapShark prices are USD; App Store offers use their storefront currency).
+struct ShopOffer: Decodable, Equatable {
+    let storeId: String?
+    let store: String
+    let price: Double
+    let normalPrice: Double?
+    let savings: Int?
+    let currency: String
+    let url: String
+}
+
+struct AppStoreGame: Decodable, Equatable {
+    let id: String
+    let title: String
+    let price: Double
+    let currency: String
+    let formatted: String?
+    let seller: String?
+    let thumb: String?
+    let url: String
+
+    var offer: ShopOffer {
+        ShopOffer(storeId: nil, store: "Mac App Store", price: price, normalPrice: nil, savings: nil, currency: currency, url: url)
+    }
+}
+
+struct ShopGame: Decodable, Equatable {
+    let id: String
+    let title: String
+    let steamAppId: String?
+    let thumb: String?
+    let offers: [ShopOffer]
+    let appStoreOffer: AppStoreGame?
+}
+
+struct AppStoreGroup: Decodable, Equatable {
+    let country: String
+    let currency: String?
+    let apps: [AppStoreGame]
+}
+
+struct ShopSearchReply: Decodable {
+    let query: String
+    let games: [ShopGame]
+    let appStore: AppStoreGroup
+    let errors: [String]
+}
+
+struct WishlistBest: Decodable, Equatable {
+    let price: Double
+    let normalPrice: Double?
+    let savings: Int
+    let store: String?
+    let currency: String
+    let checked: Double?
+}
+
+/// A wishlist entry as stored on the Couch Cube drive: original prices and their currency only.
+struct WishlistItem: Decodable, Equatable {
+    let key: String
+    let title: String
+    let gameId: String?
+    let steamAppId: String?
+    let appStoreId: String?
+    let added: Double?
+    let targetPrice: Double?
+    let best: WishlistBest?
+    let onSale: Bool
+    let targetHit: Bool
+    let saleText: String?
+}
+
+struct WishlistReply: Decodable, Equatable {
+    let items: [WishlistItem]
+    let library: String?
+    let readOnly: Bool
+    let offline: Bool
+    let note: String?
+}
+
+struct ShopHomeReply: Decodable {
+    let scope: String
+    let myStores: [ShopStoreRef]
+    let featured: [StoreDeal]
+    let drops: [StoreDeal]
+    let free: [Giveaway]
+    let errors: [String]
+    let wishlist: WishlistReply?
+}
+
+/// ECB euro reference rates (Frankfurter) as decimal strings, so no binary rounding creeps in.
+struct ExchangeRates: Decodable, Equatable {
+    let base: String
+    let date: String
+    let rates: [String: String]
+    let fetched: Double?
+    let stale: Bool?
+}
+
+/// Display-only currency conversion. Prices are converted through EUR with Decimal math, an optional card/FX fee is
+/// added, and the result is rounded to the target currency's minor units (HUF, JPY... have none).
+enum ShopMoney {
+    static let currencies = ["USD", "EUR", "HUF", "GBP", "AUD", "BRL", "CAD", "CHF", "CNY", "CZK", "DKK", "HKD", "IDR", "ILS",
+                             "INR", "ISK", "JPY", "KRW", "MXN", "MYR", "NOK", "NZD", "PHP", "PLN", "RON", "SEK", "SGD", "THB", "TRY", "ZAR"]
+    static let zeroDecimal: Set<String> = ["HUF", "JPY", "KRW", "ISK", "IDR", "CLP", "VND"]
+    private static let posix = Locale(identifier: "en_US_POSIX")
+
+    static func minorUnits(_ code: String) -> Int { zeroDecimal.contains(code) ? 0 : 2 }
+
+    static func decimal(_ value: Double) -> Decimal { Decimal(string: String(value), locale: posix) ?? Decimal(value) }
+
+    static func rounded(_ value: Decimal, places: Int) -> Decimal {
+        var input = value, output = Decimal()
+        NSDecimalRound(&output, &input, places, .plain)
+        return output
+    }
+
+    static func convert(_ amount: Decimal, from source: String, to target: String, rates: ExchangeRates?, feePercent: Decimal = 0) -> Decimal? {
+        guard let table = rates?.rates,
+              let from = table[source].flatMap({ Decimal(string: $0, locale: posix) }), from > 0,
+              let to = table[target].flatMap({ Decimal(string: $0, locale: posix) }), to > 0,
+              amount >= 0, feePercent >= 0, feePercent <= 20 else { return nil }
+        if amount == 0 { return 0 }
+        var result = amount / from * to
+        if source != target { result *= 1 + feePercent / 100 }
+        return rounded(result, places: minorUnits(target))
+    }
+
+    static func format(_ amount: Decimal, _ code: String, locale: Locale = .current) -> String {
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .currency
+        formatter.locale = locale
+        formatter.currencyCode = code
+        formatter.minimumFractionDigits = minorUnits(code)
+        formatter.maximumFractionDigits = minorUnits(code)
+        return formatter.string(from: amount as NSDecimalNumber) ?? "\(amount) \(code)"
+    }
+
+    /// "11.99 USD": the unconverted original, shown in tooltips and accessibility labels.
+    static func plain(_ amount: Decimal, _ code: String) -> String {
+        let formatter = NumberFormatter()
+        formatter.locale = posix
+        formatter.numberStyle = .decimal
+        formatter.usesGroupingSeparator = false
+        formatter.minimumFractionDigits = minorUnits(code)
+        formatter.maximumFractionDigits = minorUnits(code)
+        return (formatter.string(from: amount as NSDecimalNumber) ?? "\(amount)") + " " + code
+    }
+}
+
+/// A price ready for display: converted ("≈ 4 120 Ft") when a Shop currency is set, with the original kept for tooltips.
+struct ShopPrice {
+    let text: String
+    let original: String
+    let converted: Bool
+    /// Comparable value in the display currency (nil when it couldn't be converted).
+    let value: Decimal?
+    var spoken: String { converted ? "\(text) (\(original))" : text }
+}
+
+/// Remote deal artwork: https only, no cookies, bounded size, cached in memory and in Couch Cube's cache folder.
+let dealImageSession: URLSession = {
+    let configuration = URLSessionConfiguration.ephemeral
+    configuration.httpCookieAcceptPolicy = .never
+    configuration.httpShouldSetCookies = false
+    configuration.httpMaximumConnectionsPerHost = 4
+    configuration.timeoutIntervalForRequest = 15
+    configuration.httpAdditionalHeaders = ["User-Agent": "CouchCube/0.3 (+https://github.com/marosige/couch-cube)"]
+    let folder = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+        .appendingPathComponent("Couch Cube/deal-images")
+    configuration.urlCache = URLCache(memoryCapacity: 8 << 20, diskCapacity: 64 << 20, directory: folder)
+    configuration.requestCachePolicy = .returnCacheDataElseLoad
+    return URLSession(configuration: configuration)
+}()
+let dealImageCache = NSCache<NSURL, NSImage>()
+
+/// A whole list row that acts as one link: hover highlight, pointing-hand cursor, pressed state,
+/// Return/Space when focused and a VoiceOver link. Dragging away cancels; nested buttons keep their own action.
+final class ClickableRowView: NSView {
+    var onActivate: (() -> Void)?
+    private(set) var hovering = false
+    private(set) var pressed = false
+    private var downPoint: NSPoint?
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        wantsLayer = true
+        layer?.cornerRadius = 6
+        focusRingType = .default
+        setAccessibilityElement(true)
+        setAccessibilityRole(.link)
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    func activate() { onActivate?() }
+
+    override var acceptsFirstResponder: Bool { true }
+    override var canBecomeKeyView: Bool { true }
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+    override func accessibilityPerformPress() -> Bool { activate(); return true }
+
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        guard let hit = super.hitTest(point) else { return nil }
+        var view: NSView? = hit
+        while let current = view, current !== self {
+            if current is NSButton { return current }
+            view = current.superview
+        }
+        return self
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        trackingAreas.forEach(removeTrackingArea)
+        addTrackingArea(NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect],
+                                       owner: self, userInfo: nil))
+    }
+
+    override func resetCursorRects() { addCursorRect(bounds, cursor: .pointingHand) }
+    override func mouseEntered(with event: NSEvent) { hovering = true; updateLook() }
+    override func mouseExited(with event: NSEvent) { hovering = false; pressed = false; updateLook() }
+
+    override func mouseDown(with event: NSEvent) {
+        downPoint = convert(event.locationInWindow, from: nil)
+        pressed = true
+        updateLook()
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        guard let start = downPoint else { return }
+        let point = convert(event.locationInWindow, from: nil)
+        if hypot(point.x - start.x, point.y - start.y) > 4 {
+            downPoint = nil
+            pressed = false
+            updateLook()
+        }
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        let inside = bounds.contains(convert(event.locationInWindow, from: nil))
+        let click = downPoint != nil && inside
+        downPoint = nil
+        pressed = false
+        updateLook()
+        if click { activate() }
+    }
+
+    override func keyDown(with event: NSEvent) {
+        if [36, 49, 76].contains(event.keyCode) { activate() } else { super.keyDown(with: event) }
+    }
+
+    override var focusRingMaskBounds: NSRect { bounds }
+    override func drawFocusRingMask() { NSBezierPath(roundedRect: bounds, xRadius: 6, yRadius: 6).fill() }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        updateLook()
+    }
+
+    private func updateLook() {
+        effectiveAppearance.performAsCurrentDrawingAppearance {
+            let color: NSColor = pressed ? NSColor.labelColor.withAlphaComponent(0.12)
+                : hovering ? NSColor.labelColor.withAlphaComponent(0.06) : .clear
+            layer?.backgroundColor = color.cgColor
+        }
+    }
+}
+
+/// A multi-line label that wraps to its current width (flow layout for inline badges).
+final class WrappingLabel: NSTextField {
+    override func layout() {
+        super.layout()
+        if abs(preferredMaxLayoutWidth - bounds.width) > 0.5 {
+            preferredMaxLayoutWidth = bounds.width
+            invalidateIntrinsicContentSize()
+        }
+    }
+}
+
+final class RemoteImageView: NSImageView {
+    private(set) var source: URL?
+    private var task: URLSessionDataTask?
+
+    func load(_ url: URL?, enabled: Bool = true) {
+        task?.cancel()
+        source = url
+        guard let url, enabled else { return }
+        if let cached = dealImageCache.object(forKey: url as NSURL) { image = cached; return }
+        task = dealImageSession.dataTask(with: url) { [weak self] data, response, _ in
+            guard let data, data.count <= 2 << 20, (response as? HTTPURLResponse)?.statusCode == 200,
+                  response?.url.flatMap({ safeDealURL($0.absoluteString) }) != nil,
+                  let picture = NSImage(data: data), picture.isValid else { return }
+            dealImageCache.setObject(picture, forKey: url as NSURL)
+            DispatchQueue.main.async {
+                // A reused or re-rendered row may now show a different deal.
+                guard let self, self.source == url else { return }
+                self.image = picture
+            }
+        }
+        task?.resume()
+    }
+}
+
+let smokeStoreDealsJSON = """
+{"source":"cheapshark","page":0,"pages":2,"more":true,"stores":[{"id":"1","name":"Steam"},{"id":"7","name":"GOG"}],
+ "deals":[{"id":"abc","title":"Portal 2","sale_price":1.99,"normal_price":9.99,"savings":80,"store_id":"1","store":"Steam",
+  "deal_rating":9.4,"steam_rating":"Overwhelmingly Positive","steam_rating_percent":98,"metacritic":95,"steam_app_id":"620",
+  "installed":true,"thumb":"https://shared.akamai.steamstatic.com/portal2.jpg","url":"https://www.cheapshark.com/redirect?dealID=abc"},
+  {"id":"def","title":"Unsafe Link","sale_price":0,"normal_price":4.99,"savings":100,"store_id":"7","store":"GOG",
+  "deal_rating":null,"steam_rating":null,"steam_rating_percent":null,"metacritic":null,"steam_app_id":null,
+  "installed":false,"thumb":null,"url":"https://evil.example/redirect?dealID=def"}],
+ "fetched":1700000000,"cached":true,"stale":false,"error":null}
+"""
+let smokeGiveawaysJSON = """
+{"source":"gamerpower","giveaways":[{"id":"1","title":"Free Adventure","worth":"$19.99","type":"Game","platforms":["PC","Epic Games Store"],
+ "end_date":"2030-01-01","users":10,"description":"","thumb":null,"url":"https://www.gamerpower.com/open/free-adventure","info_url":null}],
+ "fetched":1700000000,"cached":true,"stale":false,"error":null}
+"""
+let smokeShopHomeJSON = """
+{"scope":"mine","my_stores":[{"key":"steam","name":"Steam"}],
+ "featured":[{"id":"abc","title":"Portal 2","sale_price":1.99,"normal_price":9.99,"savings":80,"store_id":"1","store":"Steam",
+  "deal_rating":9.4,"steam_rating":"Overwhelmingly Positive","steam_rating_percent":98,"metacritic":95,"steam_app_id":"620","game_id":"612",
+  "installed":true,"thumb":null,"url":"https://www.cheapshark.com/redirect?dealID=abc"}],
+ "drops":[{"id":"ghi","title":"Drop Game","sale_price":4.99,"normal_price":19.99,"savings":75,"store_id":"1","store":"Steam",
+  "deal_rating":8.1,"steam_rating":null,"steam_rating_percent":null,"metacritic":null,"steam_app_id":"700","game_id":"700",
+  "installed":false,"thumb":null,"url":"https://www.cheapshark.com/redirect?dealID=ghi"}],
+ "free":[{"id":"1","title":"Free Adventure","worth":"$19.99","type":"Game","platforms":["PC","Epic Games Store"],
+  "end_date":"2030-01-01","users":10,"thumb":null,"url":"https://www.gamerpower.com/open/free-adventure"}],
+ "errors":[]}
+"""
+let smokeShopSearchJSON = """
+{"query":"hollow knight","currency":"USD","errors":[],
+ "games":[{"id":"100","title":"Hollow Knight","steam_app_id":"367520","thumb":null,
+   "offers":[{"store_id":"7","store":"GOG","price":9.99,"normal_price":14.99,"savings":33,"currency":"USD","url":"https://www.cheapshark.com/redirect?dealID=g1","cheapest":true},
+             {"store_id":"1","store":"Steam","price":14.99,"normal_price":14.99,"savings":0,"currency":"USD","url":"https://www.cheapshark.com/redirect?dealID=s1","cheapest":false}],
+   "app_store_offer":{"id":"555","title":"Hollow Knight","price":3990,"currency":"HUF","formatted":"3 990 Ft","seller":"Team Cherry","thumb":null,
+     "url":"https://apps.apple.com/hu/app/hollow-knight/id555","store":"App Store"}}],
+ "app_store":{"country":"HU","currency":"HUF","apps":[{"id":"777","title":"Hollow Pocket","price":1990,"currency":"HUF","formatted":"1 990 Ft",
+   "seller":"Smoke Studio","thumb":null,"url":"https://apps.apple.com/hu/app/hollow-pocket/id777","store":"App Store"}]}}
+"""
+let smokeRatesJSON = """
+{"base":"EUR","date":"2026-10-16","rates":{"EUR":"1","USD":"1.1253","HUF":"363.08","GBP":"0.84385"},"fetched":1700000000,"stale":false,
+ "note":"ECB reference rate via Frankfurter, updated 2026-10-16; Revolut/bank rates may differ slightly."}
+"""
+
+/// An official Windows launcher installer that Couch Cube can download (never run) into the library's Downloads folder.
+struct StoreAccountName: Decodable, Equatable {
+    let account: String
+    let persona: String?
+    let most_recent: Bool
+}
+
+/// One game client's sign-in status, read by the backend from local client files only (no web, no secrets).
+struct StoreAccountRow: Decodable, Equatable {
+    let id: String
+    let name: String
+    let state: String
+    let detail: String
+    let platform: String
+    let kind: String
+    let host: String?
+    let bottle: String?
+    let accounts: [StoreAccountName]
+}
+
+struct StoreAccountsReport: Decodable, Equatable {
+    let clients: [StoreAccountRow]
+    let installed: Int
+    let signed_in: Int
+}
+
+/// Checks run only when asked (page open, Check Again, a launched client quitting); a stale reply never wins.
+struct StoreAccountsModel {
+    enum Phase: Equatable { case idle, checking, loaded, failed }
+    private(set) var phase = Phase.idle
+    private(set) var report: StoreAccountsReport?
+    private(set) var lastChecked: Date?
+    private(set) var generation = 0
+
+    mutating func begin() -> Int {
+        generation += 1
+        phase = .checking
+        return generation
+    }
+
+    /// Returns false when the reply belongs to an older check. A failed check keeps the last good report.
+    @discardableResult
+    mutating func finish(_ check: Int, report newReport: StoreAccountsReport?, at date: Date) -> Bool {
+        guard check == generation, phase == .checking else { return false }
+        if let newReport {
+            report = newReport
+            lastChecked = date
+            phase = .loaded
+        } else {
+            phase = .failed
+        }
+        return true
+    }
+
+    var summary: String {
+        guard let report else { return phase == .failed ? "Couldn't check game clients" : "Checking game clients\u{2026}" }
+        if report.installed == 0 { return "No game clients installed" }
+        return "\(report.signed_in) of \(report.installed) signed in"
+    }
+}
+
+/// The guided walkthrough visits installed clients one at a time; any step can be skipped.
+struct StoreAccountsWalkthrough: Equatable {
+    let ids: [String]
+    private(set) var index = 0
+    private(set) var skipped: [String] = []
+
+    init(report: StoreAccountsReport) {
+        ids = report.clients.filter { $0.state != "not_installed" }.map(\.id)
+    }
+
+    var current: String? { ids.indices.contains(index) ? ids[index] : nil }
+    var finished: Bool { current == nil }
+
+    mutating func next() { if !finished { index += 1 } }
+    mutating func skip() {
+        if let current { skipped.append(current) }
+        next()
+    }
+}
+
+struct WindowsDownloadItem: Decodable, Equatable {
+    let id: String
+    let name: String
+    let vendor: String
+    let kind: String
+    let downloaded: Bool
+    let file: String?
+    let size: Int64?
+    let sha256: String?
+}
+
+struct WindowsDownloadsReply: Decodable {
+    let library: String?
+    let folder: String?
+    let items: [WindowsDownloadItem]
+}
+
+struct WindowsDownloadJob {
+    var done: Int64 = 0
+    var total: Int64 = 0
+    var failure: String?
+    var running = true
+    var canceled = false
+    var cancel: (() -> Void)?
+}
+
+/// Real byte progress reported by the backend as "PROGRESS <done> <total>" (total 0 when the server didn't say).
+func windowsDownloadProgress(_ line: String) -> (done: Int64, total: Int64)? {
+    let parts = line.split(separator: " ")
+    guard parts.count == 3, parts[0] == "PROGRESS", let done = Int64(parts[1]), let total = Int64(parts[2]),
+          done >= 0, total >= 0 else { return nil }
+    return (done, total)
+}
+
+func windowsDownloadStatus(_ item: WindowsDownloadItem, job: WindowsDownloadJob?) -> (title: String, color: NSColor, pulsing: Bool) {
+    if let job, job.running {
+        if job.total > 0 { return ("Downloading \u{00B7} \(min(99, job.done * 100 / job.total))%", .systemBlue, true) }
+        if job.done > 0 { return ("Downloading \u{00B7} " + ByteCountFormatter.string(fromByteCount: job.done, countStyle: .file), .systemBlue, true) }
+        return ("Downloading\u{2026}", .systemBlue, true)
+    }
+    if job?.failure != nil { return ("Couldn't download", .systemRed, false) }
+    return item.downloaded ? ("Downloaded", .systemGreen, false) : ("Not downloaded", .systemGray, false)
+}
+
+/// Last backend "ERROR: ..." line, for an inline message.
+func backendErrorMessage(_ errors: String, fallback: String) -> String {
+    let line = errors.split(separator: "\n").last { $0.hasPrefix("ERROR:") }
+    let message = line.map { $0.dropFirst(6).trimmingCharacters(in: .whitespaces) } ?? ""
+    return message.isEmpty ? fallback : String(message.prefix(300))
+}
+
+struct AppOperation: Equatable {
+    let action: String
+    var phase: String?
+    var failure: String?
+    var running: Bool
+}
+
+/// The latest real Homebrew phase in a chunk of output. Homebrew hides download percentages when its output isn't a terminal,
+/// so App Store rows show phases with an indeterminate spinner rather than invented percentages.
+func appOperationPhase(_ output: String, action: String) -> String? {
+    var phase: String?
+    for line in output.split(whereSeparator: \.isNewline) {
+        let text = line.trimmingCharacters(in: .whitespaces)
+        if text.hasPrefix("==> Downloading") || text.hasPrefix("==> Fetching") { phase = "Downloading" }
+        else if text.hasPrefix("==> Uninstalling") || text.hasPrefix("==> Removing") || text.hasPrefix("==> Backing App") || text.hasPrefix("==> Purging") {
+            phase = action == "remove" ? "Removing" : "Installing"
+        } else if text.hasPrefix("==> Installing") || text.hasPrefix("==> Upgrading") || text.hasPrefix("==> Moving") {
+            phase = action == "update" ? "Updating" : "Installing"
+        }
+    }
+    return phase
+}
+
+/// Row status for an App Store app. Green means a verified installed, up-to-date app.
+func appRowStatus(_ app: ManagedApp, operation: AppOperation?, unknown: Bool, checking: Bool) -> (title: String, color: NSColor, pulsing: Bool) {
+    if let operation, operation.running {
+        let verb = operation.action == "remove" ? "Removing" : operation.action == "update" ? "Updating" : "Installing"
+        let phase = operation.phase.map { $0 == verb ? "" : " · \($0)" } ?? ""
+        return (verb + phase + "\u{2026}", .systemBlue, true)
+    }
+    if let failure = operation?.failure { return (failure, .systemRed, false) }
+    if unknown { return (checking ? "Checking..." : "Not checked", checking ? .systemBlue : .systemGray, checking) }
+    let hasUpdate = app.installed && app.managed && app.update?.isEmpty == false
+    return app.installed ? (hasUpdate ? ("Installed · Update available", .systemYellow, false) : ("Installed", .systemGreen, false))
+        : ("Not installed", .systemRed, false)
 }
 
 final class TopAlignedView: NSView {
@@ -1161,6 +2631,34 @@ final class StorageChoiceButton: TileActionButton {
     }
 }
 
+/// A whole-row link to a drive's detail page; buttons inside (like the Finder path) keep their own clicks.
+final class StorageOverviewRow: NSView {
+    var driveID: String?
+    var onOpen: ((String) -> Void)?
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        guard let hit = super.hitTest(point) else { return nil }
+        var view: NSView? = hit
+        while let current = view, current !== self {
+            if current is NSButton { return hit }
+            view = current.superview
+        }
+        return self
+    }
+    override func mouseDown(with event: NSEvent) {}
+    override func mouseUp(with event: NSEvent) {
+        guard let id = driveID, bounds.contains(convert(event.locationInWindow, from: nil)) else { return }
+        onOpen?(id)
+    }
+    override func accessibilityPerformPress() -> Bool {
+        guard let id = driveID else { return false }
+        onOpen?(id)
+        return true
+    }
+    override func resetCursorRects() {
+        if driveID != nil { addCursorRect(bounds, cursor: .pointingHand) }
+    }
+}
+
 final class HomeHeaderImageView: NSImageView {
     override var intrinsicContentSize: NSSize {
         NSSize(width: NSView.noIntrinsicMetric, height: NSView.noIntrinsicMetric)
@@ -1175,10 +2673,124 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
     private let mainDetail = NSView()
     private let sidebar = NSTableView()
     private var selectingPage = false
-    private let sidebarPages = [-1, 0, 6, 1, 7, -1, 8, 10, 2, 11]
-    private let sidebarTitles = ["Your console", "Couch Cube", "Game library", "App Store", "Retro consoles", "Settings", "Controllers", "Console Mode", "Library storage", "App Settings"]
-    private let sidebarSymbols = ["", "house.fill", "books.vertical.fill", "storefront", "tv", "", "gamecontroller.fill", "power", "externaldrive.fill", "app"]
-    private let screenTitle = NSTextField(labelWithString: "Couch Cube")
+    private let sidebarPages = [-1, 0, 8, 13, -1, 6, 1, 7, 10, 11]
+    private let sidebarTitles = ["Couch Cube", "Play", "Controllers", "Cube Shop", "Settings", "Game library", "App Store", "Retro consoles", "Console Mode", "App Settings"]
+    private let sidebarSymbols = ["", "play.rectangle.fill", "gamecontroller.fill", "bag.fill", "", "books.vertical.fill", "storefront", "tv", "power", "app"]
+    private let screenTitle = NSTextField(labelWithString: "Play")
+    // Deals: lazy, cached, read-only views of CheapShark store deals and GamerPower giveaways.
+    lazy var dealsRead: ([String], @escaping (Int32, Data, String) -> Void) -> Void = { [weak self] arguments, completed in
+        if ProcessInfo.processInfo.arguments.contains("--smoke-test") {
+            // Smoke tests never touch the network: serve fixed, already-normalized replies.
+            let data = Data((arguments.contains("gamerpower") ? smokeGiveawaysJSON : smokeStoreDealsJSON).utf8)
+            // RunLoop (not the main queue) so replies also arrive while a smoke check spins a nested run loop.
+            RunLoop.main.perform { completed(0, data, "") }
+            return
+        }
+        self?.runBackendInBackground(["deals"] + arguments, completed: completed)
+    }
+    private let dealsModeKey = "dealsMode", dealsSortKey = "dealsSort", giveawaySortKey = "giveawaySort"
+    private let dealsMode = NSSegmentedControl(labels: ["Store Deals", "Free Games"], trackingMode: .selectOne, target: nil, action: nil)
+    private let dealsSearch = NSSearchField()
+    private let dealsStorePopup = NSPopUpButton()
+    private let dealsSortPopup = NSPopUpButton()
+    private let giveawayPlatformPopup = NSPopUpButton()
+    private let giveawayTypePopup = NSPopUpButton()
+    private let giveawaySortPopup = NSPopUpButton()
+    private let dealsFilters = NSStackView()
+    private let dealsStatus = NSTextField(wrappingLabelWithString: "")
+    private let dealsList = NSStackView()
+    /// Reminders access is created only on first use; smoke tests swap in a mock so nothing is written.
+    lazy var reminderStore: DealReminderStore = EventKitReminderStore()
+    var dealsNow: () -> Date = { Date() }
+    /// Asks before removing a reminder; smoke tests answer it directly.
+    lazy var confirmReminderRemoval: (String) -> Bool = { title in
+        let alert = NSAlert()
+        alert.messageText = "Remove the reminder for \u{201C}\(title)\u{201D}?"
+        alert.informativeText = "It will be deleted from Reminders."
+        alert.addButton(withTitle: "Remove Reminder")
+        alert.addButton(withTitle: "Cancel")
+        return alert.runModal() == .alertFirstButtonReturn
+    }
+    /// Reminder identifiers by giveaway, so a deal never gets a duplicate reminder.
+    private(set) var dealReminders: [String: String] = UserDefaults.standard.dictionary(forKey: "dealReminders") as? [String: String] ?? [:] {
+        didSet { UserDefaults.standard.set(dealReminders, forKey: "dealReminders") }
+    }
+    private let dealsReminderNote = NSTextField(wrappingLabelWithString: "")
+    private let dealsReminderSettings = NSButton(title: "Open Privacy Settings", target: nil, action: nil)
+    private let dealsReminderBar = NSStackView()
+    private let dealsMore = NSButton(title: "Load More Deals", target: nil, action: nil)
+    private let dealsRetry = NSButton(title: "Try Again", target: nil, action: nil)
+    private let dealsRefreshButton = NSButton(title: "", target: nil, action: nil)
+    private let dealsProgress = NSProgressIndicator()
+    private var dealsStores: [DealStore] = []
+    private(set) var storeDeals: [StoreDeal] = []
+    private(set) var giveaways: [Giveaway] = []
+    private var storeDealsPage = 0, storeDealsHasMore = false
+    private var dealsGeneration = 0
+    private var dealsLoadingKey: String?
+    private var dealsLoadedKey: [Int: String] = [:]
+    private var dealsOpened = false
+    private var dealsOpener: (URL) -> Void = { NSWorkspace.shared.open($0) }
+    private var dealsFetched: [Int: Double] = [:]
+    // Cube Shop: Home, Deals, Free Games, Search and the drive-saved Wishlist, with optional display-currency conversion.
+    private let shopTabKey = "shopTab", shopScopeKey = "shopScope", shopCurrencyKey = "shopCurrency", shopFeeKey = "shopFeePercent"
+    let shopTab = NSSegmentedControl(labels: ["Home", "Deals", "Free Games", "Search", "Wishlist"], trackingMode: .selectOne, target: nil, action: nil)
+    let shopScope = NSSegmentedControl(labels: ["My Stores", "All Stores"], trackingMode: .selectOne, target: nil, action: nil)
+    private let shopScopeHint = NSTextField(wrappingLabelWithString: "")
+    private let shopScopeBar = NSStackView()
+    private let shopCurrencyNote = NSTextField(wrappingLabelWithString: "")
+    private let dealsPane = NSStackView(), homePane = NSStackView(), searchPane = NSStackView(), wishlistPane = NSStackView()
+    private let homeStatus = NSTextField(wrappingLabelWithString: ""), homeList = NSStackView()
+    private let shopSearchField = NSSearchField()
+    private let searchStatus = NSTextField(wrappingLabelWithString: ""), searchList = NSStackView()
+    private let wishlistStatus = NSTextField(wrappingLabelWithString: ""), wishlistList = NSStackView()
+    private var shopPageView: NSView?
+    private(set) var shopHome: ShopHomeReply?
+    private var homeLoadingKey: String?, homeLoadedScope: String?, homeError: String?
+    private(set) var searchReply: ShopSearchReply?
+    private var searchLoadingQuery: String?, searchLoadedQuery: String?, searchError: String?
+    private var searchTimer: Timer?
+    private(set) var wishlist: WishlistReply?
+    private var wishlistLoading = false, wishlistCheckedAt: Date?
+    private var wishlistPayloads: [String: (title: String, payload: [String: String])] = [:]
+    private(set) var exchangeRates: ExchangeRates?
+    private var ratesLoading = false, ratesFailed = false, ratesLoadedAt: Date?
+    private var myStores: [ShopStoreRef]?
+    private var shopLoading: Set<String> = []
+    private let shopCurrencyPopup = NSPopUpButton()
+    private let shopFeeField = NSTextField()
+    private let shopRatesNote = NSTextField(wrappingLabelWithString: "")
+    /// Shop, wishlist and exchange-rate commands; smoke tests serve fixtures and an in-memory wishlist instead.
+    lazy var shopRead: ([String], @escaping (Int32, Data, String) -> Void) -> Void = { [weak self] arguments, completed in
+        guard let self else { return }
+        if ProcessInfo.processInfo.arguments.contains("--smoke-test") {
+            self.smokeShopCalls.append(arguments)
+            let reply = self.smokeShopReply(arguments)
+            RunLoop.main.perform { completed(reply.0, Data(reply.1.utf8), "") }
+            return
+        }
+        self.runBackendInBackground(arguments, completed: completed)
+    }
+    var smokeShopCalls: [[String]] = []
+    var smokeWishlist: [[String: Any]] = []
+    var smokeWishlistOffline = false
+    /// Asks for a wishlist target price in USD: .none = cancelled, .some(nil) = clear the target.
+    lazy var askTargetPrice: (String, Double?) -> Double?? = { title, current in
+        let alert = NSAlert()
+        alert.messageText = "Target price for \u{201C}\(title)\u{201D}"
+        alert.informativeText = "Cube Shop marks the game when a store sells it at or below this price. Enter US dollars (the currency CheapShark uses), or leave it empty to clear the target."
+        let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 120, height: 24))
+        field.placeholderString = "e.g. 9.99"
+        if let current { field.stringValue = String(format: "%.2f", current) }
+        alert.accessoryView = field
+        alert.addButton(withTitle: "Save")
+        alert.addButton(withTitle: "Cancel")
+        guard alert.runModal() == .alertFirstButtonReturn else { return .none }
+        let text = field.stringValue.replacingOccurrences(of: ",", with: ".").trimmingCharacters(in: .whitespaces)
+        if text.isEmpty { return .some(nil) }
+        guard let value = Double(text.replacingOccurrences(of: "$", with: "")), value >= 0, value < 10_000 else { return .none }
+        return .some(value)
+    }
     private let backToolbarItem = NSToolbarItem(itemIdentifier: NSToolbarItem.Identifier("Back"))
     private let forwardToolbarItem = NSToolbarItem(itemIdentifier: NSToolbarItem.Identifier("Forward"))
     private var pageHistory: [(page: Int, systemID: String?)] = []
@@ -1194,6 +2806,8 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
     private let homeControllerStatus = NSStackView()
     private var homeControllerRowViews: [String: NSView] = [:]
     private var homeControllerRowIDs: [String] = []
+    private var homeControllerRenderedSignature: String?
+    private var homeControllerRenderCount = 0
     private var homeControllerInputLabels: [String: NSTextField] = [:]
     private var homeControllerImages: [String: [NSImageView]] = [:]
     private var homeSessionControllers: [String] = []
@@ -1236,9 +2850,15 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
     private var controllerBusy = Set<String>()
     private var discoveredControllers: [PairedController] = []
     private let discoveredControllerRows = NSStackView()
+    private let homeDiscoveredControllerRows = NSStackView()
+    private var discoveredControllersSignature: String?
+    private var discoveredRenderCount = 0
     private var bluetoothInquiry: IOBluetoothDeviceInquiry?
     private var bluetoothInquiryRestart: DispatchWorkItem?
     private var bluetoothPairing: IOBluetoothDevicePair?
+    private var controllerErrors: [String] = []
+    private var bluetoothSettingsOpens = 0
+    private var smokePairRequests: [String] = []
     private var controllerBanner: NSBox!
     private var controllerSmokeBanner = false
     private let controllerDefaultsKey = "controllerPreferences"
@@ -1248,6 +2868,8 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
         var connectedFirst: Bool
         var recentControllerIDs: [String]? = nil
         var aliases: [String: String]? = nil
+        /// 2 = empty color means Automatic; older saves stored the inferred default instead.
+        var colorVersion: Int? = nil
     }
     private let volumeMenu = NSPopUpButton()
     private let driveRows = NSStackView()
@@ -1284,6 +2906,44 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
         self.execute(arguments, capture: true, completed: done)
     }
     private var appsHaveResults = true
+    private(set) var windowsDownloads: [WindowsDownloadItem] = []
+    private(set) var windowsDownloadJobs: [String: WindowsDownloadJob] = [:]
+    private var windowsLibrary: String?
+    private var windowsDownloadsGeneration = 0
+    lazy var windowsDownloadsRead: (@escaping (Int32, Data) -> Void) -> Void = { [weak self] done in
+        self?.runBackendInBackground(["windows-downloads"]) { code, data, _ in done(code, data) }
+    }
+    /// Starts one download and returns its cancel action. Lines arrive in order on the main thread.
+    lazy var windowsDownloadRun: (String, @escaping (String) -> Void, @escaping (Int32, String) -> Void) -> (() -> Void) = { [weak self] id, line, done in
+        guard let self else { return {} }
+        let process = self.runBackendStreaming(["windows-download", "--package", id, "--confirm"], line: line, completed: done)
+        return { if process.isRunning { process.terminate() } }
+    }
+    private(set) var appOperations: [String: AppOperation] = [:]
+    private(set) var storeAccounts = StoreAccountsModel()
+    private(set) var storeWalkthrough: StoreAccountsWalkthrough?
+    private var storeClientsOpen: Set<String> = []
+    private(set) var storeAccountsError: String?
+    private let storeAccountsSummary = NSTextField(labelWithString: "")
+    private let storeAccountsChecked = NSTextField(labelWithString: "")
+    private let storeAccountsRows = NSStackView()
+    private let storeWalkthroughPanel = NSStackView()
+    /// Read-only local status; smoke tests replace it so no real client files are read.
+    lazy var storeAccountsRead: (@escaping (Int32, Data) -> Void) -> Void = { [weak self] done in
+        self?.runBackendInBackground(["store-accounts"]) { code, data, _ in done(code, data) }
+    }
+    /// Opens one client and calls back once it quits; smoke tests replace it so nothing launches.
+    lazy var storeClientOpen: (String, @escaping (Int32) -> Void) -> Void = { [weak self] id, done in
+        self?.runBackendInBackground(["store-account-open", "--id", id]) { code, _, _ in done(code) }
+    }
+    private var appVerifyTokens: [String: Int] = [:]
+    private var appOperationOutput: ((String) -> Void)?
+    lazy var appOperationRun: ([String], @escaping (Int32) -> Void) -> Void = { arguments, done in
+        self.execute(arguments) { code, _ in done(code) }
+    }
+    lazy var appVerifyRead: ([String], @escaping (Int32, Data) -> Void) -> Void = { arguments, done in
+        self.backendRead(arguments, done)
+    }
     private var appRefreshPending = false
     private let appMenuRows = NSStackView()
     private let appPCRows = NSStackView()
@@ -1303,6 +2963,8 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
     private var consoleSaveDirty = false
     private var consoleEditGeneration = 0
     private var consoleSaveDelay: TimeInterval = 0.4
+    /// Show/hide-all switches for the page, each company card and each Nintendo subsection.
+    private var consoleBulkToggles: [(toggle: NSSwitch, count: NSTextField, ids: Set<String>, scope: String)] = []
     lazy var consoleRoot: () -> String? = { self.selected?.root }
     /// Injected in smoke tests; the default runs the backend off the main thread without the global busy state.
     lazy var consoleSaver: (_ root: String, _ enabled: [String], _ done: @escaping (Int32, String) -> Void) -> Void = { root, enabled, done in
@@ -1312,9 +2974,30 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
         self.runBackendInBackground(["systems", "--root", root]) { code, data, _ in done(code, data) }
     }
     private let appsStatus = NSTextField(wrappingLabelWithString: "")
-    private let consoleStatus = NSTextField(wrappingLabelWithString: "Create your game folders in Settings → Library storage first.")
+    private let consoleStatus = NSTextField(wrappingLabelWithString: "Create your game folders in Settings → Game library first.")
     private let setupFolderStatus = NSTextField(wrappingLabelWithString: "Choose where to keep your games.")
-    private let storageLocationRows = NSStackView()
+    private let gameLibraryOverviewRows = NSStackView()
+    private var storageOverviewRendered: [ObjectIdentifier: [StorageOverviewEntry]] = [:]
+    private let driveDetailRows = NSStackView()
+    private var driveDetailID: String?
+    private var driveDetailParent = 6
+    private var driveDetailCache: [String: DriveDetail] = [:]
+    private var driveDetailErrors: [String: String] = [:]
+    private var driveDetailGeneration = 0
+    private var driveDetailLoading = false
+    private var driveDetailPending = false
+    private var driveGamesCache: [String: (games: DriveGames, scanned: Date)] = [:]
+    private var driveGamesErrors: [String: String] = [:]
+    private var driveGamesScanning: String?
+    private var driveGamesGeneration = 0
+    private var driveGamesShowAll = false
+    private var driveGamesProcess: Process?
+    private let romsBySystemKey = "DriveStorageGroupRomsBySystem"
+    private let pcByLauncherKey = "DriveStorageGroupPCByLauncher"
+    /// Independent of the shared backend task, so a long size scan never blocks other actions; smoke tests replace it.
+    lazy var driveGamesRead: (_ id: String, _ done: @escaping (Int32, Data) -> Void) -> Void = { id, done in
+        self.runDriveGamesScan(id, done)
+    }
     private var storageStatus: StorageStatus?
     private var transferLibraryButton: NSButton!
     private var retireLibraryButton: NSButton!
@@ -1361,7 +3044,6 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
     private var guidedPinnedPage: Int?
     private var overviewCheckFailures = Set<OverviewCheck>()
     private var steamReport: SteamLibraryReport?
-    private let steamLibraryRows = NSStackView()
     private let steamGuideRows = NSStackView()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -1552,12 +3234,23 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
             playTitle.leadingAnchor.constraint(equalTo: playCard.contentView!.leadingAnchor, constant: 16),
             playCard.heightAnchor.constraint(greaterThanOrEqualToConstant: 240)
         ])
-        let addControllerButton = headerIconButton("plus", label: "Add a controller", action: #selector(addController))
         let openControllersButton = headerIconButton("list.bullet", label: "Open Controllers", action: #selector(showControllers))
-        let controllerHeader = cardHeader("Controllers", buttons: [addControllerButton, openControllersButton])
+        let controllerHeader = cardHeader("Controllers", buttons: [openControllersButton])
         controllerHeader.identifier = NSUserInterfaceItemIdentifier("home-controller-header")
         homeControllerStatus.spacing = 10
-        let controllerCard = card("", subtitle: nil, views: [controllerHeader, homeControllerStatus])
+        homeDiscoveredControllerRows.orientation = .vertical
+        homeDiscoveredControllerRows.alignment = .leading
+        homeDiscoveredControllerRows.spacing = 10
+        homeDiscoveredControllerRows.isHidden = true
+        // The card is as tall as the Play tile; this filler takes the spare height so a newly shown
+        // discovery row sits right under the list instead of being stretched to the card's bottom first.
+        homeControllerStatus.setContentHuggingPriority(.required, for: .vertical)
+        homeDiscoveredControllerRows.setContentHuggingPriority(.required, for: .vertical)
+        let controllerCardFiller = NSView()
+        controllerCardFiller.identifier = NSUserInterfaceItemIdentifier("home-controller-filler")
+        controllerCardFiller.setContentHuggingPriority(.init(1), for: .vertical)
+        controllerCardFiller.setContentCompressionResistancePriority(.init(1), for: .vertical)
+        let controllerCard = card("", subtitle: nil, views: [controllerHeader, homeControllerStatus, homeDiscoveredControllerRows, controllerCardFiller])
         controllerCard.heightAnchor.constraint(greaterThanOrEqualToConstant: 320).isActive = true
         for section in [playCard, controllerCard] {
             section.fillColor = .quaternaryLabelColor
@@ -1590,7 +3283,7 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
         NSLayoutConstraint.activate([
             brandHeader.heightAnchor.constraint(equalTo: brandHeader.widthAnchor, multiplier: 500.0 / 1680.0)
         ])
-        addPage("Couch Cube", content: column([
+        addPage("Play", content: column([
             brandHeader,
             homeCards
         ]))
@@ -1631,21 +3324,11 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
         defaultMenuPicker.action = #selector(defaultMenuChanged(_:))
         defaultMenuPicker.setAccessibilityLabel("Default TV menu")
         actions.append(defaultMenuPicker)
-        storageLocationRows.orientation = .vertical
-        storageLocationRows.alignment = .leading
-        storageLocationRows.spacing = 0
         transferLibraryButton = button("Move library...", #selector(moveLibrary))
         retireLibraryButton = button("Move old library to Trash...", #selector(retireOldLibrary))
         retireLibraryButton.isHidden = true
-        addPage("Library storage", content: column([
-            card("Library storage", subtitle: "Choose where ROMs, BIOS, saves and portable games live. The app can stay on this Mac.", views: [
-                setupFolderStatus, storageLocationRows,
-                button("Refresh connected drives", #selector(refresh))
-            ]),
-            card("Move your library", subtitle: "Copy to another drive, verify the contents and activate it. The old copy stays until you choose to remove it. Steam libraries are moved in Steam.", views: [
-                transferLibraryButton, retireLibraryButton
-            ])
-        ]))
+        // Library storage is part of Game library; the index stays so page numbers remain stable.
+        addPage("Library storage", content: column([]))
         updateButton.title = "View release..."
         updateButton.target = self
         updateButton.action = #selector(openUpdate)
@@ -1708,25 +3391,21 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
         let yourGames = cardHeader("Your games", buttons: [addGame, openGames])
         yourGames.identifier = NSUserInterfaceItemIdentifier("library-header")
         (yourGames.arrangedSubviews.first as? NSTextField)?.font = .systemFont(ofSize: 17, weight: .semibold)
-        let steamHeader = cardHeader("Steam", buttons: [
-            headerIconButton("arrow.clockwise", label: "Refresh Steam games", action: #selector(refreshSteamStatus)),
-            headerIconButton("externaldrive", label: "Steam storage", action: #selector(openSteamStorage)),
-            headerIconButton("questionmark.circle", label: "Steam setup guide", action: #selector(showFinishing))
-        ])
-        let retroHeader = cardHeader("Retro games", buttons: [
-            headerIconButton("folder", label: "Open game folders", action: #selector(openFolder)),
-            headerIconButton("arcade.stick.console", label: "Retro consoles", action: #selector(showConsoles))
-        ])
         let storageHeader = cardHeader("Where your games live", buttons: [libraryStorageMenu()])
+        (storageHeader.arrangedSubviews.first as? NSTextField)?.font = .systemFont(ofSize: 17, weight: .semibold)
+        gameLibraryOverviewRows.orientation = .vertical
+        gameLibraryOverviewRows.alignment = .leading
+        gameLibraryOverviewRows.spacing = 0
         addPage("Game library", content: column([
-            card("", subtitle: nil, views: [yourGames, librarySummary]),
-            card("", subtitle: nil, views: [steamHeader, steamLibraryRows]),
             card("", subtitle: nil, views: [
-                retroHeader,
-                text("Copy your game files into each console's folder. ES-DE lists them by console on the TV.", size: 12, secondary: true)
+                storageHeader,
+                text("ROMs, BIOS, saves and portable games can live on this Mac and on external SSDs. Choose a drive to see its storage, Steam games and retro games.", size: 12, secondary: true),
+                setupFolderStatus, gameLibraryOverviewRows, libraryHealth, libraryTitle, libraryDescription, libraryAction,
+                row([button("Refresh connected drives", #selector(refresh)), button("Add or prepare an SSD...", #selector(choosePortable))])
             ]),
-            card("", subtitle: nil, views: [
-                storageHeader, libraryHealth, selectedStorageView(), libraryTitle, libraryDescription, libraryAction
+            card("", subtitle: nil, views: [yourGames, librarySummary]),
+            card("Move your library", subtitle: "Copy to another drive, verify the contents and activate it. The old copy stays until you choose to remove it. Steam libraries are moved in Steam.", views: [
+                transferLibraryButton, retireLibraryButton
             ])
         ]))
         consoleRows.orientation = .vertical
@@ -1846,8 +3525,15 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
                 separator(),
                 settingsRow("Clean up gaming setup", subtitle: "Review apps, games, saves and related files to remove.", symbol: "trash",
                             color: .systemRed, trailing: button("Review...", #selector(reviewGamingCleanup)))
-            ])
+            ]),
+            shopSettingsCard(),
+            storeAccountsCard()
         ]))
+        driveDetailRows.orientation = .vertical
+        driveDetailRows.alignment = .leading
+        driveDetailRows.spacing = 16
+        addPage("Drive", content: column([driveDetailRows]))
+        addPage("Cube Shop", content: column([cubeShopPage()]))
         navigationBar.orientation = .vertical
         navigationBar.alignment = .leading
         let sidebarScroll = NSScrollView()
@@ -2076,8 +3762,12 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
     @objc private func choosePortable() { chooseMode("portable") }
 
     private func renderStorageLocations() {
-        clearRows(storageLocationRows)
         updateSelectedStorageMarker()
+        renderStorageOverview()
+        if driveDetailID != nil {
+            renderDriveDetail()
+            if currentPage == 12 && detailDrive != nil { loadDriveDetail() }
+        }
         guard let storage = storageStatus else {
             setupFolderStatus.stringValue = "Reading available storage..."
             transferLibraryButton.isEnabled = false
@@ -2098,30 +3788,615 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
         } else {
             setupFolderStatus.stringValue = "Where should your game files live? Choose this Mac or an external SSD to set up your first library."
         }
-        for (mode, title, symbol) in Self.storageModes {
-            let action = mode == "local" ? #selector(chooseLocal) : #selector(choosePortable)
-            let locations = storage.locations.filter { $0.drive.mode == mode }
-            let isActive = active?.drive.mode == mode
-            let ready = locations.filter(\.configured).count
-            let description: String
-            if isActive {
-                description = "Active library · Choose to manage this storage."
-            } else if ready > 0 {
-                description = "Library available · Choose to activate it or manage this storage."
-            } else if mode == "portable" && locations.isEmpty {
-                description = "Connect an SSD to set up a library, or prepare a new drive."
-            } else {
-                description = "Not set up · Create a library here. Existing files are kept."
-            }
-            let tile = choice(title + (isActive ? " · Active" : ""), description, symbol: symbol, action: action)
-            storageLocationRows.addArrangedSubview(tile)
-            tile.widthAnchor.constraint(equalTo: storageLocationRows.widthAnchor).isActive = true
-        }
+        setupFolderStatus.isHidden = active != nil
         transferLibraryButton.isEnabled = task == nil && active != nil &&
             storage.locations.contains { $0.drive.id != active?.drive.id }
         transferLibraryButton.toolTip = active == nil ? "Set up or activate a library first." : "Transfer the active Couch Cube library to another drive."
         retireLibraryButton.isHidden = lastLibraryTransfer == nil
         retireLibraryButton.isEnabled = task == nil && lastLibraryTransfer != nil
+    }
+
+    private var currentPage: Int {
+        tabs.selectedTabViewItem.map { tabs.indexOfTabViewItem($0) } ?? -1
+    }
+
+    private func driveTitle(_ drive: Drive) -> String {
+        drive.mode == "local" ? "This Mac" : drive.name.replacingOccurrences(of: " (portable console)", with: "")
+    }
+
+    /// One shared model for Game library and Library storage: This Mac, every connected drive, and honest placeholders.
+    func storageOverviewEntries() -> [StorageOverviewEntry] {
+        guard let storage = storageStatus else {
+            return [StorageOverviewEntry(id: nil, mode: "local", title: "This Mac", state: "checking", active: false, path: nil),
+                    StorageOverviewEntry(id: nil, mode: "portable", title: "External SSD", state: "checking", active: false, path: nil)]
+        }
+        var entries: [StorageOverviewEntry] = []
+        var activeFound = false
+        for mode in ["local", "portable"] {
+            for location in storage.locations where location.drive.mode == mode {
+                let drive = location.drive
+                let state = location.environment ?? (location.configured ? "ready" : "absent")
+                let active = storage.active.map { $0.id == drive.id && $0.uuid == drive.uuid } ?? false
+                activeFound = activeFound || active
+                entries.append(StorageOverviewEntry(id: drive.id, mode: mode, title: driveTitle(drive), state: state,
+                                                    active: active && state == "ready", path: drive.root))
+            }
+        }
+        if storage.active != nil && !activeFound {
+            entries.append(StorageOverviewEntry(id: nil, mode: "portable", title: "Active library", state: "disconnected", active: true, path: nil))
+        }
+        if !entries.contains(where: { $0.mode == "portable" && $0.id != nil }) {
+            entries.append(StorageOverviewEntry(id: nil, mode: "portable", title: "External SSD", state: "connect", active: false, path: nil))
+        }
+        return entries
+    }
+
+    private func storageStateLabel(_ entry: StorageOverviewEntry) -> (text: String, symbol: String?, color: NSColor) {
+        switch entry.state {
+        case "ready": return ("Ready" + (entry.active ? " · Active" : ""), "checkmark.circle.fill", .systemGreen)
+        case "absent": return ("Not set up", "plus.circle.fill", .systemGray)
+        case "occupied": return ("Not set up · A Couch Cube folder is already there", "exclamationmark.circle.fill", .systemOrange)
+        case "invalid": return ("Needs attention", "exclamationmark.triangle.fill", .systemOrange)
+        case "disconnected": return ("Disconnected · Reconnect its drive", "bolt.horizontal.circle.fill", .systemGray)
+        case "connect": return ("Connect one", nil, .systemGray)
+        default: return ("Checking...", nil, .systemGray)
+        }
+    }
+
+    /// Drive icon with its readiness drawn on it, as in Library Settings.
+    private func storageIconView(_ entry: StorageOverviewEntry) -> NSView {
+        let icon = NSImageView()
+        storageModeIcon(icon, mode: entry.mode)
+        icon.identifier = NSUserInterfaceItemIdentifier("storage-overview-icon")
+        let container = NSView()
+        container.translatesAutoresizingMaskIntoConstraints = false
+        icon.translatesAutoresizingMaskIntoConstraints = false
+        container.addSubview(icon)
+        NSLayoutConstraint.activate([
+            container.widthAnchor.constraint(equalToConstant: 44), container.heightAnchor.constraint(equalToConstant: 38),
+            icon.leadingAnchor.constraint(equalTo: container.leadingAnchor), icon.topAnchor.constraint(equalTo: container.topAnchor),
+            icon.widthAnchor.constraint(equalToConstant: 40), icon.heightAnchor.constraint(equalToConstant: 36)
+        ])
+        let state = storageStateLabel(entry)
+        if let symbol = state.symbol, let image = NSImage(systemSymbolName: symbol, accessibilityDescription: state.text) {
+            let badge = NSImageView(image: image)
+            badge.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 13, weight: .bold)
+                .applying(NSImage.SymbolConfiguration(paletteColors: [.white, state.color]))
+            badge.identifier = NSUserInterfaceItemIdentifier("storage-overview-badge")
+            badge.translatesAutoresizingMaskIntoConstraints = false
+            container.addSubview(badge)
+            NSLayoutConstraint.activate([
+                badge.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+                badge.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+                badge.widthAnchor.constraint(equalToConstant: 17), badge.heightAnchor.constraint(equalToConstant: 17)
+            ])
+        }
+        container.setAccessibilityElement(true)
+        container.setAccessibilityRole(.image)
+        container.setAccessibilityLabel(entry.title + ", " + state.text)
+        return container
+    }
+
+    func storageOverviewRow(_ entry: StorageOverviewEntry, navigable: Bool = true) -> StorageOverviewRow {
+        let view = StorageOverviewRow()
+        view.identifier = NSUserInterfaceItemIdentifier("storage-overview-row")
+        let state = storageStateLabel(entry)
+        let title = text(entry.title)
+        title.font = .systemFont(ofSize: 13, weight: .medium)
+        title.lineBreakMode = .byTruncatingTail
+        title.maximumNumberOfLines = 1
+        title.setContentCompressionResistancePriority(.init(500), for: .horizontal)
+        let status = text(state.text, size: 11, secondary: true)
+        status.identifier = NSUserInterfaceItemIdentifier("storage-overview-status")
+        status.lineBreakMode = .byTruncatingTail
+        status.maximumNumberOfLines = 1
+        status.setContentCompressionResistancePriority(.init(500), for: .horizontal)
+        var lines: [NSView] = [title, status]
+        if let path = entry.path, !["absent", "checking", "connect", "disconnected"].contains(entry.state) {
+            let link = pill((path as NSString).abbreviatingWithTildeInPath, symbol: "folder", action: #selector(openBIOSFolder(_:)),
+                            value: path, help: "Open " + path + " in Finder")
+            link.identifier = NSUserInterfaceItemIdentifier(path)
+            link.lineBreakMode = .byTruncatingMiddle
+            link.setContentCompressionResistancePriority(.init(490), for: .horizontal)
+            lines.append(link)
+        }
+        let labels = column(lines)
+        labels.spacing = 2
+        labels.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        labels.setContentCompressionResistancePriority(.init(490), for: .horizontal)
+        let spacer = NSView()
+        spacer.setContentHuggingPriority(.init(1), for: .horizontal)
+        spacer.setContentCompressionResistancePriority(.init(1), for: .horizontal)
+        var parts: [NSView] = [storageIconView(entry), labels, spacer]
+        if navigable, let id = entry.id {
+            view.driveID = id
+            view.onOpen = { [weak self] id in self?.showDriveDetail(id) }
+            let chevron = NSButton(image: NSImage(systemSymbolName: "chevron.right", accessibilityDescription: "Manage \(entry.title)")!,
+                                   target: self, action: #selector(openDriveDetail(_:)))
+            chevron.isBordered = false
+            chevron.contentTintColor = .tertiaryLabelColor
+            chevron.identifier = NSUserInterfaceItemIdentifier(id)
+            chevron.toolTip = "Manage \(entry.title)"
+            chevron.setContentHuggingPriority(.required, for: .horizontal)
+            chevron.widthAnchor.constraint(equalToConstant: 18).isActive = true
+            parts.append(chevron)
+            view.setAccessibilityElement(true)
+            view.setAccessibilityRole(.button)
+            view.setAccessibilityLabel("\(entry.title), \(state.text). Manage drive")
+            view.toolTip = "Manage \(entry.title)"
+        }
+        if entry.state == "connect" {
+            view.alphaValue = 0.45
+            view.toolTip = "Connect an external SSD to keep games on it"
+        }
+        let content = row(parts)
+        content.distribution = .fill
+        content.spacing = 12
+        content.alignment = .centerY
+        content.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(content)
+        NSLayoutConstraint.activate([
+            content.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 4),
+            content.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -4),
+            content.topAnchor.constraint(equalTo: view.topAnchor, constant: 8),
+            content.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -8)
+        ])
+        return view
+    }
+
+    /// Re-renders rows only when something visible changed, so silent refreshes don't flicker.
+    private func renderStorageOverview() {
+        let entries = storageOverviewEntries()
+        for rows in [gameLibraryOverviewRows] {
+            guard storageOverviewRendered[ObjectIdentifier(rows)] != entries else { continue }
+            storageOverviewRendered[ObjectIdentifier(rows)] = entries
+            clearRows(rows)
+            for (index, entry) in entries.enumerated() {
+                if index > 0 {
+                    let line = separator()
+                    rows.addArrangedSubview(line)
+                    line.widthAnchor.constraint(equalTo: rows.widthAnchor).isActive = true
+                }
+                let view = storageOverviewRow(entry)
+                rows.addArrangedSubview(view)
+                view.widthAnchor.constraint(equalTo: rows.widthAnchor).isActive = true
+            }
+        }
+    }
+
+    @objc private func openDriveDetail(_ sender: NSButton) {
+        guard let id = sender.identifier?.rawValue else { return }
+        showDriveDetail(id)
+    }
+
+    func showDriveDetail(_ id: String) {
+        let page = currentPage
+        if page != 12 { driveDetailParent = 6 }
+        if driveDetailID != id { driveDetailLoading = false }
+        driveDetailID = id
+        renderDriveDetail()
+        selectPage(12)
+        loadDriveDetail()
+        if storageStatus?.locations.contains(where: { $0.drive.id == id }) ?? true {
+            loadDriveGames(id)
+            renderDriveDetail()
+        }
+    }
+
+    /// Reads one drive in the background; older or other-drive results never overwrite the current page.
+    func loadDriveDetail() {
+        guard let id = driveDetailID else { return }
+        guard task == nil else { driveDetailPending = true; return }
+        driveDetailPending = false
+        driveDetailGeneration += 1
+        let generation = driveDetailGeneration
+        driveDetailLoading = true
+        if driveDetailCache[id] == nil { renderDriveDetail() }
+        backendRead(["drive-detail", "--drive", id]) { code, data in
+            guard generation == self.driveDetailGeneration else { return }
+            self.driveDetailLoading = false
+            if code == 0, let detail = try? JSONDecoder().decode(DriveDetail.self, from: data) {
+                self.driveDetailCache[id] = detail
+                self.driveDetailErrors[id] = nil
+            } else {
+                self.driveDetailErrors[id] = self.lastError.isEmpty ? "Couldn't read this drive." : self.lastError
+            }
+            if self.driveDetailID == id { self.renderDriveDetail() }
+        }
+    }
+
+    /// Starts (or reuses) the per-game size scan for one drive. Results for another drive or an older scan are dropped.
+    func loadDriveGames(_ id: String, force: Bool = false) {
+        if !force, driveGamesScanning == id { return }
+        if !force, let cached = driveGamesCache[id], Date().timeIntervalSince(cached.scanned) < 300 { return }
+        driveGamesGeneration += 1
+        let generation = driveGamesGeneration
+        driveGamesScanning = id
+        driveGamesErrors[id] = nil
+        driveGamesRead(id) { code, data in
+            guard generation == self.driveGamesGeneration else { return }
+            self.driveGamesScanning = nil
+            if code == 0, let games = DriveGames.decode(data), games.drive.id == id {
+                self.driveGamesCache[id] = (games, Date())
+            } else {
+                self.driveGamesErrors[id] = "Couldn't measure games on this drive."
+            }
+            if self.driveDetailID == id { self.renderDriveDetail() }
+        }
+    }
+
+    /// Cancels a running scan, e.g. when its drive is unplugged; nothing is written either way.
+    private func cancelDriveGames(_ id: String) {
+        driveGamesCache[id] = nil
+        guard driveGamesScanning == id else { return }
+        driveGamesGeneration += 1
+        driveGamesScanning = nil
+        driveGamesProcess?.terminate()
+        driveGamesProcess = nil
+    }
+
+    private func runDriveGamesScan(_ id: String, _ done: @escaping (Int32, Data) -> Void) {
+        driveGamesProcess?.terminate()
+        let process = Process()
+        process.executableURL = Bundle.main.resourceURL!.appendingPathComponent("python/bin/python3")
+        process.arguments = ["-I", "-B", backend.path, "drive-games", "--drive", id]
+        var environment = ProcessInfo.processInfo.environment
+        environment["PYTHONDONTWRITEBYTECODE"] = "1"
+        environment["PATH"] = "/usr/bin:/bin:/usr/sbin:/sbin"
+        process.environment = environment
+        let output = Pipe()
+        process.standardOutput = output
+        process.standardError = FileHandle.nullDevice
+        process.standardInput = FileHandle.nullDevice
+        process.qualityOfService = .utility
+        driveGamesProcess = process
+        do { try process.run() } catch { driveGamesProcess = nil; done(1, Data()); return }
+        DispatchQueue.global(qos: .utility).async {
+            let data = output.fileHandleForReading.readDataToEndOfFile()
+            process.waitUntilExit()
+            DispatchQueue.main.async {
+                if self.driveGamesProcess === process { self.driveGamesProcess = nil }
+                done(process.terminationStatus, data)
+            }
+        }
+    }
+
+    @objc private func toggleDriveStorageGrouping(_ sender: NSButton) {
+        let key = sender.identifier?.rawValue == "drive-group-roms" ? romsBySystemKey : pcByLauncherKey
+        UserDefaults.standard.set(sender.state == .on, forKey: key)
+        renderDriveDetail()
+    }
+
+    @objc private func toggleDriveStorageShowAll() {
+        driveGamesShowAll.toggle()
+        renderDriveDetail()
+    }
+
+    @objc private func rescanDriveGames() {
+        guard let id = driveDetailID, detailDrive != nil else { return }
+        loadDriveGames(id, force: true)
+        renderDriveDetail()
+    }
+
+    /// Bottom-of-page breakdown: each game's share of the games found on this drive, not of the drive's capacity.
+    private func driveGamesSection(_ id: String) -> NSView {
+        let rescan = button("Rescan", #selector(rescanDriveGames))
+        rescan.identifier = NSUserInterfaceItemIdentifier("drive-games-rescan")
+        rescan.isEnabled = driveGamesScanning != id
+        let scanning = driveGamesScanning == id
+        guard let games = driveGamesCache[id]?.games else {
+            let message = driveGamesErrors[id].map { $0 + " Nothing was changed." } ?? "Measuring games on this drive..."
+            let status: NSView = driveGamesErrors[id] == nil
+                ? statusIndicator(message, color: .systemBlue, pulsing: true) : text(message, size: 12, secondary: true)
+            return detailSection("Game storage", trailing: [rescan], views: [status])
+        }
+        let romsBySystem = UserDefaults.standard.bool(forKey: romsBySystemKey)
+        let pcByLauncher = UserDefaults.standard.bool(forKey: pcByLauncherKey)
+        let slices = GameStorageSlice.slices(games, romsBySystem: romsBySystem, pcByLauncher: pcByLauncher)
+        var views: [NSView] = []
+        let checked = games.coverage.filter { $0.status != "unsupported" }.map { $0.games > 0 ? "\($0.name) (\($0.games))" : $0.name }
+        let unsupported = games.coverage.filter { $0.status == "unsupported" }.compactMap(\.note)
+        if games.items.isEmpty {
+            views.append(text("No games found on this drive.", size: 13))
+        } else {
+            let total = ByteCountFormatter.string(fromByteCount: games.total, countStyle: .file)
+            let denominator = text("Share of \(total) of games found on this drive (not of the drive's size).", size: 12, secondary: true)
+            denominator.identifier = NSUserInterfaceItemIdentifier("drive-games-total")
+            let bar = GameStorageBar()
+            bar.identifier = NSUserInterfaceItemIdentifier("drive-games-bar")
+            bar.segments = GameStorageBar.segments(for: slices)
+            let roms = NSButton(checkboxWithTitle: "Group ROMs by system", target: self, action: #selector(toggleDriveStorageGrouping(_:)))
+            roms.identifier = NSUserInterfaceItemIdentifier("drive-group-roms")
+            roms.state = romsBySystem ? .on : .off
+            let pc = NSButton(checkboxWithTitle: "Group PC games by launcher", target: self, action: #selector(toggleDriveStorageGrouping(_:)))
+            pc.identifier = NSUserInterfaceItemIdentifier("drive-group-pc")
+            pc.state = pcByLauncher ? .on : .off
+            let toggles = row([roms, pc, NSView()])
+            toggles.distribution = .fill
+            views += [bar, denominator, toggles]
+            let colors = Dictionary(uniqueKeysWithValues: slices.filter { ($0.bytes ?? 0) > 0 }.prefix(GameStorageBar.colored)
+                .enumerated().map { ($1.id, GameStorageBar.colors[$0]) })
+            let limit = 12
+            for slice in driveGamesShowAll ? slices : Array(slices.prefix(limit)) {
+                let dot = NSView()
+                dot.wantsLayer = true
+                dot.layer?.cornerRadius = 4
+                dot.layer?.backgroundColor = (colors[slice.id] ?? .tertiaryLabelColor).cgColor
+                dot.widthAnchor.constraint(equalToConstant: 8).isActive = true
+                dot.heightAnchor.constraint(equalToConstant: 8).isActive = true
+                func single(_ value: String, _ size: CGFloat, secondary: Bool = false) -> NSTextField {
+                    let field = NSTextField(labelWithString: value)
+                    field.font = .systemFont(ofSize: size)
+                    field.textColor = secondary ? .secondaryLabelColor : .labelColor
+                    field.lineBreakMode = .byTruncatingTail
+                    return field
+                }
+                let name = single(slice.title, 13)
+                name.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+                var notes = [slice.detail]
+                if slice.unknown > 0 { notes.append(slice.unknown == 1 ? "1 size unknown" : "\(slice.unknown) sizes unknown") }
+                if slice.partial { notes.append("some files unreadable") }
+                let detail = single(notes.joined(separator: " · "), 11, secondary: true)
+                detail.setContentCompressionResistancePriority(.defaultLow - 1, for: .horizontal)
+                let size = single(slice.bytes.map { ByteCountFormatter.string(fromByteCount: $0, countStyle: .file) } ?? "Unknown", 13)
+                size.alignment = .right
+                let percent = single(slice.percent, 12, secondary: true)
+                percent.alignment = .right
+                percent.widthAnchor.constraint(equalToConstant: 48).isActive = true
+                let line = row([dot, name, detail, NSView(), size, percent])
+                line.distribution = .fill
+                line.identifier = NSUserInterfaceItemIdentifier("drive-games-row")
+                line.setAccessibilityElement(true)
+                line.setAccessibilityLabel("\(slice.title), \(size.stringValue), \(slice.percent)")
+                views.append(line)
+            }
+            if slices.count > limit {
+                let more = button(driveGamesShowAll ? "Show fewer" : "Show all \(slices.count)", #selector(toggleDriveStorageShowAll))
+                more.identifier = NSUserInterfaceItemIdentifier("drive-games-more")
+                views.append(row([more, NSView()]))
+            }
+        }
+        var status: [String] = []
+        if scanning { status.append("Rescanning...") }
+        if !scanning, driveGamesErrors[id] != nil { status.append("The last rescan failed; showing earlier results.") }
+        if games.unknown > 0 { status.append("\(games.unknown) with unknown size, left out of the bar.") }
+        if games.partial > 0 { status.append("\(games.partial) only partly readable, so they may be larger.") }
+        if games.items.contains(where: { !$0.measured && $0.bytes != nil }) { status.append("Missing Steam folders use Steam's reported size.") }
+        if games.shared > 0 { status.append("Shared files are counted once.") }
+        status.append("Checked: " + checked.joined(separator: ", ") + ".")
+        status += unsupported
+        let note = text(status.joined(separator: " "), size: 11, secondary: true)
+        note.identifier = NSUserInterfaceItemIdentifier("drive-games-status")
+        views.append(note)
+        return detailSection("Game storage", subtitle: "Which games take the most space here. Nothing is deleted from this view.", trailing: [rescan], views: views)
+    }
+
+    private func detailSection(_ title: String, subtitle: String? = nil, trailing: [NSView] = [], views: [NSView]) -> NSView {
+        let heading = text(title)
+        heading.font = .systemFont(ofSize: 15, weight: .semibold)
+        let header = row([heading, NSView()] + trailing)
+        header.distribution = .fill
+        var content: [NSView] = [header]
+        if let subtitle = subtitle { content.append(text(subtitle, size: 12, secondary: true)) }
+        return card("", subtitle: nil, views: content + views)
+    }
+
+    func renderDriveDetail() {
+        clearRows(driveDetailRows)
+        guard let id = driveDetailID else { return }
+        func add(_ view: NSView) {
+            driveDetailRows.addArrangedSubview(view)
+            view.widthAnchor.constraint(equalTo: driveDetailRows.widthAnchor).isActive = true
+        }
+        let location = storageStatus?.locations.first { $0.drive.id == id }
+        let detail = driveDetailCache[id]
+        let drive = location?.drive ?? detail?.drive
+        let title = drive.map(driveTitle) ?? "Drive"
+        if currentPage == 12 { screenTitle.stringValue = title }
+        if storageStatus != nil && location == nil {
+            cancelDriveGames(id)
+            add(detailSection(title, subtitle: "Disconnected. Reconnect this drive to see its library, storage and games. Nothing on it was changed.", views: []))
+            return
+        }
+        guard let entry = storageOverviewEntries().first(where: { $0.id == id }) ?? drive.map({
+            StorageOverviewEntry(id: $0.id, mode: $0.mode, title: driveTitle($0), state: "checking", active: false, path: $0.root)
+        }) else {
+            add(detailSection("Drive", subtitle: "Checking connected drives...", views: []))
+            return
+        }
+        var library: [NSView] = [storageOverviewRow(entry, navigable: false)]
+        var actions: [NSView] = []
+        switch entry.state {
+        case "ready":
+            if !entry.active {
+                actions.append(button("Use this library...", #selector(activateDetailDrive)))
+            } else {
+                actions.append(button("Move library...", #selector(moveLibrary)))
+            }
+            let remove = button("Remove...", #selector(removeDetailLibrary))
+            remove.identifier = NSUserInterfaceItemIdentifier("drive-remove")
+            actions.append(remove)
+        case "absent":
+            library.append(text("No Couch Cube library here yet. Initialize adds a Couch Cube folder with empty game, BIOS and save folders. Nothing existing is changed and your active library stays the same.", size: 12, secondary: true))
+            let initialize = button("Initialize...", #selector(initializeDetailDrive))
+            initialize.identifier = NSUserInterfaceItemIdentifier("drive-initialize")
+            initialize.isEnabled = drive.map { ["apfs", "hfs"].contains($0.filesystem) } ?? false
+            if !initialize.isEnabled { initialize.toolTip = "This drive must use APFS or Mac OS Extended. Couch Cube never formats it here." }
+            actions.append(initialize)
+        case "occupied", "invalid":
+            let issue = location?.issue ?? detail?.issue
+            library.append(text((issue ?? "This folder isn't a Couch Cube library Couch Cube can verify.") +
+                                " Nothing will be overwritten. Rename or move it in Finder, then refresh.", size: 12, secondary: true))
+        default:
+            break
+        }
+        if !actions.isEmpty {
+            let line = row(actions + [NSView()])
+            line.distribution = .fill
+            library.append(line)
+        }
+        add(detailSection("Couch Cube library", views: library))
+        let loadingDetail = driveDetailLoading && detail == nil
+        if let capacity = detail?.capacity {
+            func amount(_ label: String, _ bytes: Int64, _ identifier: String) -> NSView {
+                let value = text(ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file), size: 13)
+                value.identifier = NSUserInterfaceItemIdentifier(identifier)
+                value.alignment = .right
+                let line = row([text(label, size: 13), NSView(), value])
+                line.distribution = .fill
+                return line
+            }
+            let bar = NSLevelIndicator()
+            bar.levelIndicatorStyle = .continuousCapacity
+            bar.minValue = 0
+            bar.maxValue = Double(max(capacity.total, 1))
+            bar.doubleValue = Double(capacity.used)
+            bar.warningValue = bar.maxValue * 0.85
+            bar.criticalValue = bar.maxValue * 0.95
+            bar.setAccessibilityLabel("Used space")
+            add(detailSection("Storage", views: [
+                bar,
+                amount("Drive size", capacity.total, "drive-total"),
+                amount("Used (all files)", capacity.used, "drive-used"),
+                amount("Couch Cube files", capacity.couch, "drive-couch"),
+                amount("Free space", capacity.free, "drive-free")
+            ]))
+        } else if loadingDetail {
+            add(detailSection("Storage", views: [statusIndicator("Reading this drive...", color: .systemBlue, pulsing: true)]))
+        }
+        if let detail = detail, !detail.steam.isEmpty {
+            var views: [NSView] = []
+            for folder in detail.steam {
+                let count = folder.games.filter(\.installed).count
+                let heading = text(count == 1 ? "1 game" : "\(count) games", size: 11, secondary: true)
+                heading.font = .systemFont(ofSize: 11, weight: .semibold)
+                let link = pill((folder.path as NSString).abbreviatingWithTildeInPath, symbol: "folder", action: #selector(openBIOSFolder(_:)),
+                                value: folder.path, help: "Open " + folder.path + " in Finder")
+                link.lineBreakMode = .byTruncatingMiddle
+                link.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+                let line = row([heading, link, NSView()])
+                line.distribution = .fill
+                views.append(line)
+                views.append(contentsOf: folder.games.map(steamGameRow))
+            }
+            add(detailSection("Steam", trailing: [button("Open Steam Storage", #selector(openSteamStorage))], views: views))
+        }
+        if let detail = detail, !detail.retro.isEmpty {
+            let views: [NSView] = detail.retro.map { system in
+                let name = text(system.name, size: 13)
+                name.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+                let line = row([name, text(system.games == 1 ? "1 game" : "\(system.games) games", size: 11, secondary: true), NSView(),
+                                pill("Open folder", symbol: "folder", action: #selector(openBIOSFolder(_:)),
+                                     value: system.path, help: "Open " + system.path + " in Finder")])
+                line.distribution = .fill
+                line.identifier = NSUserInterfaceItemIdentifier("drive-retro-" + system.id)
+                return line
+            }
+            add(detailSection("Retro games", views: views))
+        }
+        if location != nil || storageStatus == nil {
+            add(driveGamesSection(id))
+        }
+        let errors = (detail?.errors ?? []) + (driveDetailErrors[id].map { [$0] } ?? [])
+        if !errors.isEmpty {
+            add(text(errors.prefix(3).joined(separator: "\n"), size: 11, secondary: true))
+        }
+    }
+
+    private var detailDrive: Drive? {
+        driveDetailID.flatMap { id in storageStatus?.locations.first { $0.drive.id == id }?.drive }
+    }
+
+    @objc private func activateDetailDrive() {
+        guard task == nil, let drive = detailDrive else { return }
+        chooseMode(drive.mode)
+        populateVolumes(previous: drive.id)
+        selectionChanged()
+    }
+
+    @objc private func initializeDetailDrive() {
+        guard task == nil, let drive = detailDrive else { return }
+        let confirm = NSAlert()
+        confirm.messageText = "Initialize a library on \(driveTitle(drive))?"
+        confirm.informativeText = "Creates \(drive.root) with empty game, BIOS and save folders.\n\nNothing is formatted, overwritten or moved. If that folder already exists, nothing is changed. Your active library stays the same."
+        confirm.addButton(withTitle: "Initialize")
+        confirm.addButton(withTitle: "Cancel")
+        guard confirm.runModal() == .alertFirstButtonReturn else { return }
+        execute(["initialize-drive", "--drive", drive.id, "--confirm"]) { code, _ in
+            if code != 0 {
+                self.storageOperationFailed(self.lastError.isEmpty ? "Couldn't initialize this drive. Nothing was changed." : self.lastError)
+            }
+            self.refresh()
+        }
+    }
+
+    /// Moves only this drive's verified Couch Cube folder to the Trash after a scoped plan and two confirmations.
+    @objc private func removeDetailLibrary() {
+        guard task == nil, let drive = detailDrive else { return }
+        if Bundle.main.bundleURL.standardizedFileURL.path.hasPrefix(URL(fileURLWithPath: drive.root).standardizedFileURL.path + "/") {
+            storageOperationFailed("Couch Cube is running from this library. Quit it and open a copy from another location first. Nothing was removed.")
+            return
+        }
+        backendRead(["removal-plan", "--drive", drive.id]) { code, data in
+            guard code == 0, let plan = try? JSONDecoder().decode(DriveRemovalPlan.self, from: data) else {
+                self.storageOperationFailed(self.lastError.isEmpty ? "Couldn't verify this library. Nothing was removed." : self.lastError)
+                return
+            }
+            let size = ByteCountFormatter.string(fromByteCount: plan.bytes, countStyle: .file)
+            let review = NSAlert()
+            review.alertStyle = .warning
+            review.messageText = "Remove the Couch Cube library on \(self.driveTitle(drive))?"
+            review.informativeText = "\(plan.path)\n\(size) · \(plan.files) files\n\nEverything in this folder is removed: ROMs, BIOS files, saves, launchers and settings stored there. The rest of the drive is not erased or formatted, and Steam games are not touched.\n\nBack up first: copy the library to another drive, or open it in Finder and copy what you want to keep."
+            review.addButton(withTitle: "Continue...")
+            review.addButton(withTitle: "Cancel")
+            review.addButton(withTitle: "Show in Finder")
+            review.addButton(withTitle: "Copy to another drive...")
+            switch review.runModal() {
+            case .alertFirstButtonReturn: break
+            case .alertThirdButtonReturn:
+                NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: plan.path)])
+                return
+            case NSApplication.ModalResponse(rawValue: NSApplication.ModalResponse.alertThirdButtonReturn.rawValue + 1):
+                self.transferLibrary(from: drive)
+                return
+            default: return
+            }
+            let confirm = NSAlert()
+            confirm.alertStyle = .critical
+            confirm.messageText = "Move this library to the Trash?"
+            confirm.informativeText = "\(plan.path)\n\nIt stays in the Trash until you empty it. Anything you didn't back up is lost when the Trash is emptied."
+            confirm.showsSuppressionButton = true
+            confirm.suppressionButton?.title = "I backed up what I want to keep"
+            confirm.addButton(withTitle: "Move to Trash")
+            confirm.addButton(withTitle: "Cancel")
+            guard confirm.runModal() == .alertFirstButtonReturn else { return }
+            guard confirm.suppressionButton?.state == .on else {
+                self.storageOperationFailed("Confirm that you backed up what you want to keep. Nothing was removed.")
+                return
+            }
+            self.execute(["removal-verify", "--drive", drive.id, "--token", plan.token, "--confirm"], capture: true) { code, data in
+                guard code == 0, let target = try? JSONDecoder().decode(RetiredLibrary.self, from: data), target.path == plan.path else {
+                    self.storageOperationFailed(self.lastError.isEmpty ? "The library changed or couldn't be verified. Nothing was removed." : self.lastError)
+                    self.refresh()
+                    return
+                }
+                self.cleanupInProgress = true
+                self.busy(true)
+                NSWorkspace.shared.recycle([URL(fileURLWithPath: target.path)]) { _, error in
+                    DispatchQueue.main.async {
+                        self.cleanupInProgress = false
+                        self.busy(false)
+                        if let error = error {
+                            self.storageOperationFailed("Couldn't move the library to Trash: \(error.localizedDescription). Nothing else was changed.")
+                        } else {
+                            self.append("Moved \(target.path) to the Trash.\n")
+                        }
+                        self.driveDetailCache[drive.id] = nil
+                        self.refresh()
+                    }
+                }
+            }
+        }
     }
 
     private func storageOperationFailed(_ message: String) {
@@ -2139,6 +4414,11 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
             storageOperationFailed("Set up or activate a connected library before moving it.")
             return
         }
+        transferLibrary(from: source)
+    }
+
+    private func transferLibrary(from source: Drive) {
+        guard task == nil, let storage = storageStatus else { return }
         let destinations = storage.locations.map(\.drive).filter { $0.id != source.id }
         guard !destinations.isEmpty else {
             storageOperationFailed("Connect another writable APFS or Mac OS Extended drive first.")
@@ -2301,11 +4581,7 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
     }
 
     @objc private func backToChoices() {
-        selectPage(2)
-    }
-
-    @objc private func changeStorage() {
-        selectPage(2)
+        selectPage(6)
     }
 
     @objc private func continueStorage() {
@@ -2392,8 +4668,7 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
         let popup = NSPopUpButton(frame: .zero, pullsDown: true)
         popup.addItem(withTitle: "")
         popup.item(at: 0)?.image = NSImage(systemSymbolName: "ellipsis", accessibilityDescription: "More options")
-        for (title, symbol, action) in [("Check Library", "checkmark.circle", #selector(checkStorage)),
-                                        ("Change Storage…", "externaldrive", #selector(changeStorage))] {
+        for (title, symbol, action) in [("Check Library", "checkmark.circle", #selector(checkStorage))] {
             let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
             item.target = self
             item.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)
@@ -2438,6 +4713,16 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
         labels.setContentHuggingPriority(.defaultLow, for: .horizontal)
         labels.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         var views: [NSView] = [icon, labels]
+        if game.appid.allSatisfy(\.isNumber) {
+            let manage = NSButton(title: "Manage", target: self, action: #selector(manageSteamGame(_:)))
+            manage.bezelStyle = .rounded
+            manage.controlSize = .small
+            manage.identifier = NSUserInterfaceItemIdentifier(game.appid)
+            manage.toolTip = "Open \(game.name) in Steam to manage, move or uninstall it"
+            manage.setAccessibilityLabel("Manage \(game.name) in Steam")
+            manage.setContentHuggingPriority(.required, for: .horizontal)
+            views.append(manage)
+        }
         if game.installed {
             let play = NSButton(title: "Play", target: self, action: #selector(playSteamGame(_:)))
             play.bezelStyle = .rounded
@@ -2454,6 +4739,19 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
         return line
     }
 
+    /// Steam's documented game details link; moving or uninstalling happens in Steam.
+    @objc private func manageSteamGame(_ sender: NSButton) {
+        guard let appid = sender.identifier?.rawValue, appid.allSatisfy(\.isNumber),
+              let url = URL(string: "steam://nav/games/details/" + appid) else { return }
+        if ProcessInfo.processInfo.arguments.contains("--smoke-test") { return }
+        if !NSWorkspace.shared.open(url) {
+            let alert = NSAlert()
+            alert.messageText = "Couldn't open Steam"
+            alert.informativeText = "Install or open Steam, then try again."
+            alert.runModal()
+        }
+    }
+
     @objc private func playSteamGame(_ sender: NSButton) {
         guard let appid = sender.identifier?.rawValue, appid.allSatisfy(\.isNumber),
               let url = URL(string: "steam://rungameid/" + appid) else { return }
@@ -2468,7 +4766,7 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
 
     private func renderSteamLibraries() {
         updateLibrarySummary()
-        for rows in [steamLibraryRows, steamGuideRows] {
+        for rows in [steamGuideRows] {
             clearRows(rows)
             rows.orientation = .vertical
             rows.alignment = .leading
@@ -2489,28 +4787,11 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
             for library in report.libraries {
                 let count = library.games.filter { $0.installed }.count
                 let label = selected.map { URL(fileURLWithPath: $0.root).appendingPathComponent("SteamLibrary").standardizedFileURL.path == URL(fileURLWithPath: library.path).standardizedFileURL.path } == true ? "Console Port · " : ""
-                if rows === steamLibraryRows {
-                    let heading = text(label + (library.available ? "\(steamStorageKind(library)) · \(count == 1 ? "1 game" : "\(count) games")" :
-                                                    "Disconnected drive · Connect it to play these games"), size: 11, secondary: true)
-                    heading.font = .systemFont(ofSize: 11, weight: .semibold)
-                    heading.toolTip = library.path
-                    add(heading)
-                    for game in library.games { add(steamGameRow(game)) }
-                } else {
-                    add(text(label + (library.available ? "\(steamStorageKind(library)) · \(count) games installed" : "Disconnected · Connect this drive"), size: 12))
-                    add(text(library.path, size: 11, secondary: true))
-                }
+                add(text(label + (library.available ? "\(steamStorageKind(library)) · \(count) games installed" : "Disconnected · Connect this drive"), size: 12))
+                add(text(library.path, size: 11, secondary: true))
             }
             if !report.libraries.contains(where: { !$0.games.isEmpty }) && report.errors.isEmpty {
-                if rows === steamLibraryRows {
-                    let empty = row([text("No Steam games yet. Install one in Steam and it shows up here.", size: 12, secondary: true), NSView(),
-                                     button("Open Steam", #selector(openSteamDesktop))])
-                    empty.distribution = .fill
-                    empty.identifier = NSUserInterfaceItemIdentifier("steam-empty")
-                    add(empty)
-                } else {
-                    add(text("No Steam games found yet. Open Steam to install your first game.", size: 12, secondary: true))
-                }
+                add(text("No Steam games found yet. Open Steam to install your first game.", size: 12, secondary: true))
             }
             if !report.errors.isEmpty {
                 add(text("Some games couldn't be checked. Open Steam, then refresh. Activity has technical details.", size: 11, secondary: true))
@@ -2550,6 +4831,8 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
     }
 
     @objc private func openBluetooth() {
+        bluetoothSettingsOpens += 1
+        if ProcessInfo.processInfo.arguments.contains("--smoke-test") { return }
         if !NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.BluetoothSettings")!) {
             controllerStatus.stringValue = "Couldn't open Bluetooth settings. Open System Settings → Bluetooth manually."
         }
@@ -2594,15 +4877,6 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
     }
 
     @objc private func showControllers() { selectPage(8) }
-
-    @objc private func addController() {
-        let alert = NSAlert()
-        alert.messageText = "Add a controller"
-        alert.informativeText = "Put your controller in pairing mode, then select it in macOS Bluetooth settings.\n\nPlayStation: hold Create/Share + PS until the light flashes.\nXbox: hold the Pair button until the Xbox light flashes.\nSwitch Pro / Joy-Con: hold Sync until the lights cycle.\n\nUSB controllers can be plugged straight in. Return here to see whether macOS recognizes it for games."
-        alert.addButton(withTitle: "Open Bluetooth Settings")
-        alert.addButton(withTitle: "Cancel")
-        if alert.runModal() == .alertFirstButtonReturn { openBluetooth() }
-    }
 
     @objc private func controllerBluetoothAccess() {
         if CBManager.authorization == .denied || CBManager.authorization == .restricted {
@@ -2649,9 +4923,11 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
             return entry
         }
         controllerCustomizations = preferences.customizations
+        let legacyColors = (preferences.colorVersion ?? 1) < 2
         for entry in controllerEntries {
             if let color = controllerCustomizations[entry.id]?.color {
-                controllerCustomizations[entry.id]?.color = ControllerPalette.canonicalName(color, for: entry)
+                controllerCustomizations[entry.id]?.color = legacyColors ?
+                    ControllerPalette.migratedName(color, for: entry) : ControllerPalette.canonicalName(color, for: entry)
             }
         }
         controllerConnectedFirst = preferences.connectedFirst
@@ -2670,7 +4946,7 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
         ControllerPreferences(entries: controllerEntries.filter { !$0.id.contains("session:") },
             customizations: controllerCustomizations, connectedFirst: controllerConnectedFirst,
             recentControllerIDs: homeSessionControllers.filter { !$0.contains("session:") },
-            aliases: controllerAliases.filter { !$0.key.contains("session:") })
+            aliases: controllerAliases.filter { !$0.key.contains("session:") }, colorVersion: 2)
     }
 
     private func saveControllerPreferences() {
@@ -2743,8 +5019,8 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
     }
 
     private func controllerStatusText(_ entry: ControllerEntry, active: Bool) -> String {
-        guard entry.connected else { return controllerBusy.contains(entry.id) ? "Connecting…" : "Not connected" }
-        return "Connected"
+        controllerConnectionStatus(connected: entry.connected, inputDetected: entry.inputDetected,
+                                   connecting: controllerBusy.contains(entry.id))
     }
 
     private func controllerIcon(_ image: NSImage?, color: NSColor, label: String, size: CGFloat = 11) -> NSImageView? {
@@ -2869,9 +5145,10 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
 
     /// One Bluetooth identity and one USB identity can be joined. Same-model controllers are never merged automatically.
     private func controllerLinkCandidates(for entry: ControllerEntry) -> [ControllerEntry] {
-        guard !entry.id.contains("session:"), entry.id.hasPrefix("bt:") || entry.id.hasPrefix("hid:") else { return [] }
+        guard !entry.id.contains("session:"), entry.id.hasPrefix("bt:") || entry.id.hasPrefix("hid:"),
+              !isJoyCon(entry) else { return [] }
         return controllerEntries.filter {
-            $0.id != entry.id && !$0.id.contains("session:") &&
+            $0.id != entry.id && !$0.id.contains("session:") && !isJoyCon($0) &&
                 (entry.id.hasPrefix("bt:") ? $0.id.hasPrefix("hid:") : $0.id.hasPrefix("bt:")) &&
                 !($0.id.hasPrefix("bt:") && controllerAliases.values.contains($0.id)) &&
                 !(entry.id.hasPrefix("bt:") && controllerAliases.values.contains(entry.id))
@@ -2893,11 +5170,9 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
             guard let self = self, let list = list else { return }
             self.dropController(entry.id, in: list, at: point)
         }
-        let kind = ControllerArtwork.kind(name: entry.name, preference: customization?.artwork)
-        let image = NSImageView(image: ControllerArtwork.image(kind))
-        image.imageScaling = .scaleProportionallyUpOrDown
-        image.widthAnchor.constraint(equalToConstant: 52).isActive = true
-        image.heightAnchor.constraint(equalToConstant: 38).isActive = true
+        let kind = ControllerArtwork.kind(for: entry, artwork: customization?.artwork)
+        let image = ControllerArtView(kind: kind)
+        let plate = ControllerIconFrame(imageView: image, size: NSSize(width: 52, height: 38), inset: 2)
         let label = NSTextField(labelWithString: title)
         label.font = .systemFont(ofSize: compact ? 12 : 13)
         label.lineBreakMode = .byTruncatingTail
@@ -2929,7 +5204,7 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
         let more = controllerMenuButton(entry, list: listID, position: position, count: count)
         let spacer = NSView()
         spacer.setContentHuggingPriority(.init(1), for: .horizontal)
-        let line = row([handle, image, labels, spacer, more])
+        let line = row([handle, plate, labels, spacer, more])
         line.spacing = 10
         line.identifier = NSUserInterfaceItemIdentifier("controller-row:" + entry.id)
         if listID == 0 {
@@ -2946,10 +5221,6 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
     }
 
     private func renderHomeControllers() {
-        clearRows(homeControllerStatus)
-        homeControllerInputLabels = [:]
-        homeControllerImages = [:]
-        homeControllerRowViews = [:]
         let connected = controllerEntries.filter(\.connected)
         for entry in connected where !homeObservedConnections.contains(entry.id) {
             homeSessionControllers.removeAll { $0 == entry.id }
@@ -2968,6 +5239,19 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
         }
         let all = homeControllerList()
         let recent = Array(all.prefix(homeControllerLimit))
+        // Rebuilding recreates every row and makes neighbours re-layout, so unchanged content is updated in place.
+        let signature = homeControllerSignature(recent, total: all.count)
+        if signature == homeControllerRenderedSignature, homeControllerRowIDs == recent.map(\.id) {
+            for entry in recent { updateHomeControllerActivity(entry.id) }
+            saveControllerPreferences()
+            return
+        }
+        homeControllerRenderedSignature = signature
+        homeControllerRenderCount += 1
+        clearRows(homeControllerStatus)
+        homeControllerInputLabels = [:]
+        homeControllerImages = [:]
+        homeControllerRowViews = [:]
         homeControllerRowIDs = recent.map(\.id)
         if recent.isEmpty {
             homeControllerStatus.addArrangedSubview(text("Connect via USB or Bluetooth", size: 13, secondary: true))
@@ -2990,6 +5274,18 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
         saveControllerPreferences()
     }
 
+    private func homeControllerSignature(_ entries: [ControllerEntry], total: Int) -> String {
+        var parts = ["\(total)", "\(controllerInputUnavailable)"]
+        for entry in entries {
+            let customization = controllerCustomizations[entry.id]
+            let battery = controllerBatteries[entry.id].map { "\(Int(($0.level * 100).rounded())):\($0.state.rawValue)" } ?? "-"
+            parts.append([entry.id, entry.name, controllerDisplayName(entry), "\(entry.connected)", entry.transport,
+                          "\(controllerBusy.contains(entry.id))", customization?.color ?? "",
+                          customization?.artwork ?? "", battery].joined(separator: "\u{1f}"))
+        }
+        return parts.joined(separator: "\u{1e}")
+    }
+
     private func updateHomeControllerActivity(_ id: String) {
         let entry = controllerEntries.first { $0.id == id }
         let connected = entry?.connected == true
@@ -3001,12 +5297,11 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
             }
         }
         let customization = controllerCustomizations[id]
-        let colorName = customization?.color ?? entry.map { ControllerPalette.defaultName(for: $0) } ?? "Shock Blue"
+        let colorName = entry.map { ControllerPalette.resolvedName(customization?.color, for: $0, artwork: customization?.artwork) } ?? "Black"
         let color = connected ? ControllerPalette.color(named: colorName) : .systemGray
         for image in (homeControllerImages[id] ?? []) + (controllerImages[id] ?? []) {
             image.contentTintColor = color
             image.alphaValue = connected ? 1 : 0.55
-            ControllerPalette.applyContrast(to: image)
             image.wantsLayer = true
             image.setAccessibilityValue(active ? "Receiving input" : nil)
             if active && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
@@ -3032,20 +5327,29 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
         alert.informativeText = "Choose a name and icon color in Couch Cube. Leave the name empty to use \(entry.name)."
         let name = NSTextField(string: previous?.name ?? "")
         name.placeholderString = entry.name
-        let color = ControllerPalette.menu(selecting: previous?.color ?? ControllerPalette.defaultName(for: entry))
-        let artwork = NSPopUpButton()
-        artwork.addItems(withTitles: ControllerArtwork.kinds)
-        artwork.selectItem(withTitle: previous?.artwork ?? "Automatic")
-        let contents = column([name, color, artwork])
+        let color = ControllerPalette.menu(selecting: previous?.color ?? "",
+                                           automatic: ControllerPalette.defaultName(for: entry, artwork: previous?.artwork))
+        let artwork = ControllerArtwork.menu(selecting: previous?.artwork)
+        let preview = ControllerCustomizationPreview(controllerName: entry.name, automaticModel: entry.model, colorPopup: color, artworkPopup: artwork)
+        let pickers = NSStackView(views: [color, artwork])
+        pickers.orientation = .vertical
+        pickers.alignment = .leading
+        pickers.spacing = 8
+        let previewRow = NSStackView(views: [preview.iconFrame, pickers])
+        previewRow.orientation = .horizontal
+        previewRow.alignment = .centerY
+        previewRow.spacing = 12
+        let contents = column([name, previewRow])
         contents.frame = NSRect(x: 0, y: 0, width: 340, height: 108)
         name.widthAnchor.constraint(equalToConstant: 340).isActive = true
         alert.accessoryView = contents
         alert.addButton(withTitle: "Save")
         alert.addButton(withTitle: "Cancel")
-        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        let response = withExtendedLifetime(preview) { alert.runModal() }
+        guard response == .alertFirstButtonReturn else { return }
         controllerCustomizations[id] = ControllerCustomization(name: name.stringValue.trimmingCharacters(in: .whitespacesAndNewlines),
-                                                               color: ControllerPalette.selectedName(in: color) ?? ControllerPalette.defaultName(for: entry),
-                                                               artwork: artwork.titleOfSelectedItem)
+                                                               color: preview.savedColor,
+                                                               artwork: ControllerArtwork.selectedKind(in: artwork))
         renderControllerList()
         renderHomeControllers()
     }
@@ -3149,66 +5453,92 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
         renderDiscoveredControllers()
     }
 
+    /// Home and Controllers list the same discovered devices with the same real Connect action.
     private func renderDiscoveredControllers() {
+        // Refreshes and name callbacks repeat often; rebuilding identical rows would move the Connect button under the pointer.
+        let signature = discoveredControllers.map { [$0.address, $0.name, "\(controllerBusy.contains("pair:" + $0.address))"]
+            .joined(separator: "\u{1f}") }.joined(separator: "\u{1e}")
+        guard signature != discoveredControllersSignature else { return }
+        discoveredControllersSignature = signature
+        discoveredRenderCount += 1
         clearRows(discoveredControllerRows)
+        clearRows(homeDiscoveredControllerRows)
         for device in discoveredControllers {
-            let image = NSImageView(image: ControllerArtwork.image(ControllerArtwork.kind(name: device.name, preference: nil)))
-            image.imageScaling = .scaleProportionallyUpOrDown
-            image.contentTintColor = .tertiaryLabelColor
-            image.widthAnchor.constraint(equalToConstant: 52).isActive = true
-            image.heightAnchor.constraint(equalToConstant: 38).isActive = true
-            let spacer = NSView()
-            spacer.widthAnchor.constraint(equalToConstant: 16).isActive = true
-            let name = NSTextField(labelWithString: device.name)
-            name.font = .systemFont(ofSize: 13)
-            name.lineBreakMode = .byTruncatingTail
-            let pairing = controllerBusy.contains("pair:" + device.address)
-            let status = NSTextField(labelWithString: pairing ? "Pairing…" : "Ready to pair")
-            status.font = .systemFont(ofSize: 11)
-            status.textColor = .secondaryLabelColor
-            let labels = NSStackView(views: [name, status])
-            labels.orientation = .vertical
-            labels.alignment = .leading
-            labels.spacing = 2
-            let connect = NSButton(title: "Connect", target: self, action: #selector(pairDiscoveredController(_:)))
-            connect.bezelStyle = .rounded
-            connect.identifier = NSUserInterfaceItemIdentifier(device.address)
-            connect.isEnabled = !pairing
-            connect.setAccessibilityLabel("Connect \(device.name)")
-            connect.widthAnchor.constraint(equalToConstant: 76).isActive = true
-            let line = row([spacer, image, labels, NSView(), connect])
-            line.spacing = 10
-            line.identifier = NSUserInterfaceItemIdentifier("discovered-controller")
             discoveredControllerRows.addArrangedSubview(separator())
+            let line = discoveredControllerRow(device, compact: false)
             discoveredControllerRows.addArrangedSubview(line)
             line.heightAnchor.constraint(greaterThanOrEqualToConstant: 56).isActive = true
             for view in discoveredControllerRows.arrangedSubviews {
                 view.widthAnchor.constraint(equalTo: discoveredControllerRows.widthAnchor).isActive = true
             }
+            let home = discoveredControllerRow(device, compact: true)
+            homeDiscoveredControllerRows.addArrangedSubview(home)
+            home.widthAnchor.constraint(equalTo: homeDiscoveredControllerRows.widthAnchor).isActive = true
         }
         discoveredControllerRows.isHidden = discoveredControllers.isEmpty
+        homeDiscoveredControllerRows.isHidden = discoveredControllers.isEmpty
+    }
+
+    private func discoveredControllerRow(_ device: PairedController, compact: Bool) -> NSView {
+        let image = ControllerArtView(kind: ControllerArtwork.kind(name: device.name, preference: nil))
+        image.contentTintColor = .tertiaryLabelColor
+        let plate = ControllerIconFrame(imageView: image, size: NSSize(width: 52, height: 38), inset: 2)
+        let spacer = NSView()
+        spacer.widthAnchor.constraint(equalToConstant: 16).isActive = true
+        let name = NSTextField(labelWithString: device.name)
+        name.font = .systemFont(ofSize: compact ? 12 : 13)
+        name.lineBreakMode = .byTruncatingTail
+        name.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        let pairing = controllerBusy.contains("pair:" + device.address)
+        let status = NSTextField(labelWithString: pairing ? "Pairing…" : "Ready to pair")
+        status.font = .systemFont(ofSize: 11)
+        status.textColor = .secondaryLabelColor
+        let labels = NSStackView(views: [name, status])
+        labels.orientation = .vertical
+        labels.alignment = .leading
+        labels.spacing = 2
+        labels.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        let connect = NSButton(title: "Connect", target: self, action: #selector(pairDiscoveredController(_:)))
+        connect.bezelStyle = .rounded
+        connect.controlSize = compact ? .small : .regular
+        connect.identifier = NSUserInterfaceItemIdentifier(device.address)
+        connect.isEnabled = !pairing
+        connect.setAccessibilityLabel("Connect \(device.name)")
+        connect.widthAnchor.constraint(equalToConstant: compact ? 68 : 76).isActive = true
+        connect.setContentCompressionResistancePriority(.required, for: .horizontal)
+        let filler = NSView()
+        filler.setContentHuggingPriority(.init(1), for: .horizontal)
+        let line = row([spacer, plate, labels, filler, connect])
+        line.spacing = 10
+        line.identifier = NSUserInterfaceItemIdentifier(compact ? "home-discovered-controller" : "discovered-controller")
+        return line
     }
 
     private func mergeControllerList(_ connected: [ControllerEntry], paired: [PairedController]) {
+        let joyConIDs = Set((controllerEntries + connected).filter(isJoyCon).map(\.id) +
+            paired.filter { ControllerArtwork.kind(name: $0.name, preference: nil).hasPrefix("Joy-Con") }
+                .compactMap { controllerAddress($0.address).map { "bt:" + $0 } })
+        controllerAliases = controllerAliases.filter { !joyConIDs.contains($0.key) && !joyConIDs.contains($0.value) }
         var knownBluetooth = Set(controllerEntries.map(\.id).filter { $0.hasPrefix("bt:") })
         for device in paired { if let address = controllerAddress(device.address) { knownBluetooth.insert("bt:" + address) } }
         var current: [String: ControllerEntry] = [:]
         for var entry in connected {
             if controllerAliases[entry.id] == nil,
-               let alias = verifiedBluetoothAlias(for: entry.id, knownBluetoothIDs: knownBluetooth) {
-                controllerAliases[entry.id] = alias
+               let alias = controllerProfileAlias(for: entry, knownBluetoothIDs: knownBluetooth) {
+                adoptControllerProfile(entry.id, into: alias)
             }
             let id = canonicalControllerID(entry.id)
             if let existing = current[id], existing.transport == "Wired" { continue }
-            entry = ControllerEntry(id: id, name: entry.name, connected: true, transport: entry.transport)
+            entry = ControllerEntry(id: id, name: entry.name, connected: true, transport: entry.transport, model: entry.model)
             current[id] = entry
         }
         for device in paired {
             guard let address = controllerAddress(device.address) else { continue }
             let id = "bt:\(address)"
             if current[id] == nil {
-                current[id] = ControllerEntry(id: id, name: device.name, connected: device.connected, transport: "Bluetooth")
-            } else if current[id]?.transport == "Bluetooth" {
+                current[id] = ControllerEntry(id: id, name: device.name, connected: device.connected, transport: "Bluetooth",
+                                              inputDetected: device.connected ? false : nil)
+            } else if current[id]?.transport == "Bluetooth", current[id]?.name.lowercased().contains("joy-con") != true {
                 current[id]?.name = device.name
             }
         }
@@ -3262,7 +5592,25 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
         linkController(alias, to: canonical)
     }
 
+    /// Automatic, device-proven link: the USB profile moves onto the Bluetooth-address profile, keeping its list place.
+    private func adoptControllerProfile(_ alias: String, into canonical: String) {
+        guard alias != canonical else { return }
+        for (key, value) in controllerAliases where value == alias { controllerAliases[key] = canonical }
+        controllerAliases[alias] = canonical
+        if let custom = controllerCustomizations.removeValue(forKey: alias), controllerCustomizations[canonical] == nil {
+            controllerCustomizations[canonical] = custom
+        }
+        if !controllerEntries.contains(where: { $0.id == canonical }),
+           let index = controllerEntries.firstIndex(where: { $0.id == alias }) {
+            let old = controllerEntries[index]
+            controllerEntries[index] = ControllerEntry(id: canonical, name: old.name, connected: old.connected,
+                                                       transport: old.transport, model: old.model)
+        }
+        homeSessionControllers = homeSessionControllers.map { $0 == alias ? canonical : $0 }
+    }
+
     private func linkController(_ alias: String, to canonical: String) {
+        guard !controllerEntries.contains(where: { ($0.id == alias || $0.id == canonical) && isJoyCon($0) }) else { return }
         for (key, value) in controllerAliases where value == alias { controllerAliases[key] = canonical }
         controllerAliases[alias] = canonical
         if controllerCustomizations[canonical] == nil, let custom = controllerCustomizations[alias] {
@@ -3310,15 +5658,17 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
         return IOBluetoothDevice(addressString: dashedControllerAddress(address))
     }
 
-    private func showControllerError(_ title: String, _ message: String, offerSettings: Bool = true) {
+    /// Connect/pair problems stay in the app. Bluetooth Settings only opens from its own explicit header button.
+    private func showControllerError(_ title: String, _ message: String) {
         append("\(title): \(message)\n")
+        controllerErrors.append(title)
+        if ProcessInfo.processInfo.arguments.contains("--smoke-test") { return }
         let alert = NSAlert()
         alert.alertStyle = .warning
         alert.messageText = title
         alert.informativeText = message
-        if offerSettings { alert.addButton(withTitle: "Open Bluetooth Settings") }
-        alert.addButton(withTitle: offerSettings ? "Close" : "OK")
-        if alert.runModal() == .alertFirstButtonReturn && offerSettings { openBluetooth() }
+        alert.addButton(withTitle: "OK")
+        alert.runModal()
     }
 
     private func bluetoothErrorText(_ code: IOReturn) -> String {
@@ -3348,7 +5698,7 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
     @objc(connectionComplete:status:) func bluetoothConnectionComplete(_ device: IOBluetoothDevice?, status: IOReturn) {
         DispatchQueue.main.async {
             if let address = device?.addressString.flatMap(controllerAddress) { self.controllerBusy.remove("bt:" + address) }
-            if status != kIOReturnSuccess {
+            if status != kIOReturnSuccess && device?.isConnected() != true {
                 self.showControllerError("Couldn't connect",
                     "\(self.bluetoothErrorText(status)) Most controllers connect when you press their home button. If it still fails, forget it and pair again.")
             }
@@ -3369,11 +5719,15 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
         guard let id = controllerID(from: sender), let entry = controllerEntries.first(where: { $0.id == id }) else { return }
         let alert = NSAlert()
         alert.messageText = "Forget \(controllerDisplayName(entry))?"
-        alert.informativeText = "This Mac removes the pairing. To use it again, put the controller in pairing mode and connect it again."
+        alert.informativeText = "This Mac removes the pairing. Couch Cube keeps its name, color and icon, so they come back when you pair it again."
         alert.addButton(withTitle: "Forget Device")
         alert.addButton(withTitle: "Cancel")
+        alert.addButton(withTitle: "Forget and Delete Profile")
         alert.buttons.first?.hasDestructiveAction = true
-        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        alert.buttons.last?.hasDestructiveAction = true
+        let response = alert.runModal()
+        guard response == .alertFirstButtonReturn || response == .alertThirdButtonReturn else { return }
+        let deleteProfile = response == .alertThirdButtonReturn
         guard let device = bluetoothDevice(for: id) else {
             showControllerError("Couldn't forget this controller", "macOS has no Bluetooth device with this address.")
             return
@@ -3387,19 +5741,27 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
                     "This version of macOS didn't let Couch Cube remove the pairing. In Bluetooth Settings, choose ⓘ next to \(entry.name), then Forget This Device.")
                 return
             }
-            self.controllerEntries.removeAll { $0.id == id }
-            self.controllerCustomizations[id] = nil
-            self.controllerAliases = self.controllerAliases.filter { $0.value != id }
-            self.homeSessionControllers.removeAll { $0 == id }
-            self.saveControllerPreferences()
+            self.forgetControllerPairing(id, deleteProfile: deleteProfile)
             self.refreshControllers()
         }
+    }
+
+    /// Forgetting removes the Mac's pairing and the list row only. Name, color, icon and links stay keyed by the
+    /// controller's Bluetooth address, so pairing it again restores them, unless the profile is explicitly deleted.
+    private func forgetControllerPairing(_ id: String, deleteProfile: Bool) {
+        controllerEntries.removeAll { $0.id == id }
+        homeSessionControllers.removeAll { $0 == id }
+        if deleteProfile {
+            controllerCustomizations[id] = nil
+            controllerAliases = controllerAliases.filter { $0.value != id }
+        }
+        saveControllerPreferences()
     }
 
     private func startControllerDiscovery() {
         guard bluetoothInquiry == nil, !ProcessInfo.processInfo.arguments.contains("--smoke-test"),
               CBManager.authorization == .allowedAlways, bluetoothManager?.state == .poweredOn,
-              tabs.selectedTabViewItem === tabs.tabViewItems[8] else { return }
+              controllerPageVisible else { return }
         guard let inquiry = IOBluetoothDeviceInquiry(delegate: self) else { return }
         inquiry.inquiryLength = 8
         inquiry.updateNewDeviceNames = true
@@ -3430,8 +5792,12 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
         guard let device = device, !device.isPaired(), let name = device.name,
               isBluetoothController(deviceClass: device.classOfDevice, name: name),
               let raw = device.addressString, controllerAddress(raw) != nil else { return }
-        discoveredControllers.removeAll { controllerAddress($0.address) == controllerAddress(raw) }
-        discoveredControllers.append(PairedController(name: name, address: raw, connected: false))
+        let found = PairedController(name: name, address: raw, connected: false)
+        if let index = discoveredControllers.firstIndex(where: { controllerAddress($0.address) == controllerAddress(raw) }) {
+            discoveredControllers[index] = found
+        } else {
+            discoveredControllers.append(found)
+        }
         renderDiscoveredControllers()
     }
 
@@ -3448,23 +5814,41 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
     }
 
     @objc private func pairDiscoveredController(_ sender: NSButton) {
-        guard let address = sender.identifier?.rawValue,
-              let device = IOBluetoothDevice(addressString: address) else { return }
+        guard let address = sender.identifier?.rawValue, bluetoothPairing == nil,
+              !controllerBusy.contains(where: { $0.hasPrefix("pair:") }) else { return }
+        if ProcessInfo.processInfo.arguments.contains("--smoke-test") {
+            smokePairRequests.append(address)
+            return
+        }
+        guard let device = IOBluetoothDevice(addressString: address) else { return }
+        let scanning = bluetoothInquiry != nil
         stopControllerDiscovery()
+        controllerBusy.insert("pair:" + address)
+        renderDiscoveredControllers()
+        // Paging a controller while the discovery scan is still winding down can fail; give the radio a moment.
+        DispatchQueue.main.asyncAfter(deadline: .now() + (scanning ? 0.8 : 0)) { [weak self] in
+            self?.startPairing(device, address: address)
+        }
+    }
+
+    private func startPairing(_ device: IOBluetoothDevice, address: String) {
         guard let pairing = IOBluetoothDevicePair(device: device) else {
+            controllerBusy.remove("pair:" + address)
+            renderDiscoveredControllers()
             showControllerError("Couldn't pair", "macOS couldn't start pairing with this controller.")
+            startControllerDiscovery()
             return
         }
         pairing.delegate = self
         let result = pairing.start()
         guard result == kIOReturnSuccess else {
+            controllerBusy.remove("pair:" + address)
+            renderDiscoveredControllers()
             showControllerError("Couldn't pair", "\(bluetoothErrorText(result)) Put the controller back in pairing mode and try again.")
             startControllerDiscovery()
             return
         }
         bluetoothPairing = pairing
-        controllerBusy.insert("pair:" + address)
-        renderDiscoveredControllers()
     }
 
     func devicePairingUserConfirmationRequest(_ sender: Any!, numericValue: BluetoothNumericValue) {
@@ -3478,20 +5862,24 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
 
     func devicePairingPINCodeRequest(_ sender: Any!) {
         bluetoothPairing?.stop()
-        showControllerError("Pair in Bluetooth Settings", "This controller asks for a PIN code. Pair it in Bluetooth Settings.")
+        bluetoothPairing = nil
+        controllerBusy = controllerBusy.filter { !$0.hasPrefix("pair:") }
+        renderDiscoveredControllers()
+        showControllerError("PIN code needed", "This controller asks for a PIN code, which Couch Cube can't enter. Use the Bluetooth Settings button on the Controllers page if you want to pair it there.")
+        startControllerDiscovery()
     }
 
     func devicePairingFinished(_ sender: Any!, error: IOReturn) {
         let device = bluetoothPairing?.device()
         bluetoothPairing = nil
         controllerBusy = controllerBusy.filter { !$0.hasPrefix("pair:") }
-        if error != kIOReturnSuccess {
+        if error != kIOReturnSuccess && device?.isPaired() != true {
             showControllerError("Couldn't pair", "\(bluetoothErrorText(error)) Put the controller back in pairing mode and try again.")
             renderDiscoveredControllers()
         } else if let device = device {
             discoveredControllers.removeAll { controllerAddress($0.address) == device.addressString.flatMap(controllerAddress) }
-            _ = device.openConnection(self)
-            if let address = device.addressString.flatMap(controllerAddress) { controllerBusy.insert("bt:" + address) }
+            if !device.isConnected() { _ = device.openConnection(self) }
+            if !device.isConnected(), let address = device.addressString.flatMap(controllerAddress) { controllerBusy.insert("bt:" + address) }
         }
         refreshControllers()
         startControllerDiscovery()
@@ -3556,9 +5944,6 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
             renderHomeControllers()
         }
         controllerLastInput[entry.id] = (message, now)
-        if tabs.selectedTabViewItem === tabs.tabViewItems[0] && homeControllerInputLabels[entry.id] == nil {
-            renderHomeControllers()
-        }
         if tabs.selectedTabViewItem === tabs.tabViewItems[8] {
             let name = controllerCustomizations[entry.id]?.name ?? ""
             controllerTestStatus.stringValue = "\(name.isEmpty ? entry.name : name) · \(message)"
@@ -3645,7 +6030,7 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
                 guard self.controllerPageVisible else { return }
                 self.pairedControllers = CBManager.authorization == .allowedAlways ? devices : []
                 self.mergeControllerList(connected, paired: self.pairedControllers)
-                if self.tabs.selectedTabViewItem === self.tabs.tabViewItems[8] { self.startControllerDiscovery() }
+                self.startControllerDiscovery()
             }
         }
     }
@@ -3729,9 +6114,9 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
         var tasks: [SidebarTask] = []
         if let report = report, !ready {
             if report.issues.isEmpty {
-                tasks.append(SidebarTask(page: 2, color: .systemYellow, title: "Prepare your game library", setup: true))
+                tasks.append(SidebarTask(page: 6, color: .systemYellow, title: "Prepare your game library", setup: true))
             } else {
-                tasks += report.issues.map { SidebarTask(page: 2, color: .systemRed, title: $0, setup: false) }
+                tasks += report.issues.map { SidebarTask(page: 6, color: .systemRed, title: $0, setup: false) }
             }
         }
         if let report = report {
@@ -3745,7 +6130,7 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
                 tasks.append(SidebarTask(page: 1, color: .systemYellow, title: "Get a game app or emulator", setup: true))
             }
         }
-        for (check, page, title) in [(OverviewCheck.storage, 2, "Library storage couldn't be checked"),
+        for (check, page, title) in [(OverviewCheck.storage, 6, "Library storage couldn't be checked"),
                                      (.menu, 1, "Apps couldn't be checked"), (.consoles, 7, "Retro consoles couldn't be checked"),
                                      (.automatic, 10, "Console mode couldn't be checked"), (.steam, 6, "Steam couldn't be checked")]
             where overviewCheckFailures.contains(check) {
@@ -4033,6 +6418,172 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
         return box
     }
 
+    private func storeAccountsCard() -> NSBox {
+        storeAccountsSummary.font = .systemFont(ofSize: 13, weight: .semibold)
+        storeAccountsSummary.setAccessibilityIdentifier("storeAccountsSummary")
+        storeAccountsChecked.font = .systemFont(ofSize: 11)
+        storeAccountsChecked.lineBreakMode = .byWordWrapping
+        storeAccountsChecked.maximumNumberOfLines = 0
+        storeAccountsChecked.preferredMaxLayoutWidth = 360
+        storeAccountsChecked.textColor = .secondaryLabelColor
+        storeAccountsRows.orientation = .vertical
+        storeAccountsRows.alignment = .leading
+        storeAccountsRows.spacing = 0
+        storeWalkthroughPanel.orientation = .vertical
+        storeWalkthroughPanel.alignment = .leading
+        storeWalkthroughPanel.spacing = 8
+        storeWalkthroughPanel.isHidden = true
+        let note = text("Shows who is signed in to the game clients on this Mac, read from their own local files. Passwords and sign-in tokens are never read. Each client has its own sign-in: signing in to Steam on the Mac doesn't sign you in to the Windows launchers in CrossOver or Whisky, and the other way round. Deals open in your web browser, which keeps its own logins.",
+                        size: 11, secondary: true)
+        note.lineBreakMode = .byWordWrapping
+        note.maximumNumberOfLines = 0
+        note.preferredMaxLayoutWidth = 520
+        let header = row([column([storeAccountsSummary, storeAccountsChecked]),
+                          button("Set Up Accounts...", #selector(startStoreWalkthrough)),
+                          button("Check Again", #selector(checkStoreAccounts))])
+        (header.arrangedSubviews[0] as? NSStackView)?.spacing = 2
+        header.arrangedSubviews[0].setContentHuggingPriority(.defaultLow, for: .horizontal)
+        renderStoreAccounts()
+        return card("Store Accounts", subtitle: nil, views: [header, note, storeWalkthroughPanel, storeAccountsRows])
+    }
+
+    @objc private func checkStoreAccounts() { loadStoreAccounts() }
+
+    func loadStoreAccounts() {
+        let check = storeAccounts.begin()
+        renderStoreAccounts()
+        storeAccountsRead { [weak self] code, data in
+            guard let self else { return }
+            let report = code == 0 ? try? JSONDecoder().decode(StoreAccountsReport.self, from: data) : nil
+            guard self.storeAccounts.finish(check, report: report, at: Date()) else { return }
+            if report == nil { self.append("Couldn't check game client sign-ins.\n") }
+            self.renderStoreAccounts()
+        }
+    }
+
+    private func storeAccountRow(_ client: StoreAccountRow) -> NSView {
+        let checking = storeAccounts.phase == .checking
+        let waiting = storeClientsOpen.contains(client.id)
+        let color: NSColor = client.state == "signed_in" ? .systemGreen : client.state == "not_installed" ? .systemGray : .systemOrange
+        var detail = client.detail
+        if client.kind == "wine", let host = client.host, let bottle = client.bottle { detail += " · \(host) bottle \u{201C}\(bottle)\u{201D}" }
+        if client.accounts.count > 1 { detail += " · \(client.accounts.count - 1) more account\(client.accounts.count == 2 ? "" : "s") on this Mac" }
+        if waiting { detail = "Waiting for \(client.name) to quit\u{2026}" } else if checking { detail = "Checking\u{2026}" }
+        let open: NSButton
+        if client.state == "not_installed" {
+            open = button("App Store", #selector(showAppStoreForClient(_:)))
+        } else {
+            open = button("Open", #selector(openStoreClient(_:)))
+            open.isEnabled = !waiting
+            open.setAccessibilityLabel("Open \(client.name) to sign in")
+        }
+        open.identifier = NSUserInterfaceItemIdentifier(client.id)
+        let again = button("Check Again", #selector(checkStoreAccounts))
+        again.isEnabled = !checking
+        again.setAccessibilityLabel("Check \(client.name) sign-in again")
+        let status = text(detail, size: 11, secondary: true)
+        status.setAccessibilityIdentifier("storeAccountStatus")
+        let dot = NSImageView(image: NSImage(systemSymbolName: "circle.fill", accessibilityDescription: nil)!)
+        dot.symbolConfiguration = .init(pointSize: 7, weight: .regular)
+        dot.contentTintColor = color
+        let line = row([dot, status])
+        line.spacing = 5
+        let title = client.platform == "Mac" ? client.name + " (Mac client)" : client.name
+        let result = settingsRow(title, subtitle: detail, symbol: client.kind == "mac" ? "desktopcomputer" : "pc",
+                                 color: client.kind == "mac" ? .systemBlue : .systemIndigo,
+                                 trailing: row([open, again]), detail: line)
+        result.identifier = NSUserInterfaceItemIdentifier("store-row-" + client.id)
+        result.setAccessibilityElement(false)
+        status.setAccessibilityLabel("\(title): \(detail)")
+        return result
+    }
+
+    func renderStoreAccounts() {
+        storeAccountsSummary.stringValue = storeAccounts.summary
+        storeAccountsChecked.textColor = storeAccountsError == nil ? .secondaryLabelColor : .systemRed
+        if let error = storeAccountsError {
+            storeAccountsChecked.stringValue = error
+        } else if let date = storeAccounts.lastChecked {
+            storeAccountsChecked.stringValue = "Last checked " + DateFormatter.localizedString(from: date, dateStyle: .none, timeStyle: .short)
+        } else {
+            storeAccountsChecked.stringValue = storeAccounts.phase == .checking ? "Reading local client files\u{2026}" : ""
+        }
+        storeAccountsRows.arrangedSubviews.forEach { $0.removeFromSuperview() }
+        for (index, client) in (storeAccounts.report?.clients ?? []).enumerated() {
+            if index > 0 { storeAccountsRows.addArrangedSubview(separator()) }
+            let view = storeAccountRow(client)
+            storeAccountsRows.addArrangedSubview(view)
+            view.widthAnchor.constraint(equalTo: storeAccountsRows.widthAnchor).isActive = true
+        }
+        renderStoreWalkthrough()
+    }
+
+    private func renderStoreWalkthrough() {
+        storeWalkthroughPanel.arrangedSubviews.forEach { $0.removeFromSuperview() }
+        guard let walkthrough = storeWalkthrough, let report = storeAccounts.report else {
+            storeWalkthroughPanel.isHidden = true
+            return
+        }
+        storeWalkthroughPanel.isHidden = false
+        let heading: NSTextField
+        var buttons: [NSView] = []
+        if let id = walkthrough.current, let client = report.clients.first(where: { $0.id == id }) {
+            let step = (walkthrough.ids.firstIndex(of: id) ?? 0) + 1
+            heading = text("Step \(step) of \(walkthrough.ids.count): \(client.name) \u{2014} \(client.detail)", size: 12)
+            let open = button("Open \(client.name)", #selector(openStoreClient(_:)))
+            open.identifier = NSUserInterfaceItemIdentifier(id)
+            open.isEnabled = !storeClientsOpen.contains(id)
+            buttons = [open, button("Skip", #selector(skipStoreWalkthrough)), button("Next", #selector(nextStoreWalkthrough))]
+            let hint = text(client.state == "signed_in" ? "Already signed in. Choose Next to continue."
+                            : "Open it, sign in there, then quit it; the status updates when it closes.", size: 11, secondary: true)
+            storeWalkthroughPanel.addArrangedSubview(heading)
+            storeWalkthroughPanel.addArrangedSubview(hint)
+        } else {
+            var summary = walkthrough.ids.isEmpty ? "No game clients are installed yet. Get them in the App Store."
+                : "Done \u{2014} \(storeAccounts.summary)."
+            let names = walkthrough.skipped.compactMap { id in report.clients.first { $0.id == id }?.name }
+            if !names.isEmpty { summary += " Skipped: " + names.joined(separator: ", ") + "." }
+            heading = text(summary, size: 12)
+            storeWalkthroughPanel.addArrangedSubview(heading)
+            buttons = [button("Done", #selector(endStoreWalkthrough))]
+        }
+        heading.setAccessibilityIdentifier("storeWalkthroughStep")
+        heading.lineBreakMode = .byWordWrapping
+        heading.maximumNumberOfLines = 0
+        storeWalkthroughPanel.addArrangedSubview(row(buttons))
+    }
+
+    @objc private func startStoreWalkthrough() {
+        guard let report = storeAccounts.report else { loadStoreAccounts(); return }
+        storeWalkthrough = StoreAccountsWalkthrough(report: report)
+        renderStoreWalkthrough()
+    }
+
+    @objc private func nextStoreWalkthrough() { storeWalkthrough?.next(); renderStoreWalkthrough() }
+    @objc private func skipStoreWalkthrough() { storeWalkthrough?.skip(); renderStoreWalkthrough() }
+    @objc private func endStoreWalkthrough() { storeWalkthrough = nil; renderStoreWalkthrough() }
+
+    @objc private func showAppStoreForClient(_ sender: NSButton) { selectPage(1) }
+
+    @objc private func openStoreClient(_ sender: NSButton) {
+        guard let id = sender.identifier?.rawValue, !storeClientsOpen.contains(id),
+              let client = storeAccounts.report?.clients.first(where: { $0.id == id }), client.state != "not_installed" else { return }
+        storeClientsOpen.insert(id)
+        renderStoreAccounts()
+        storeClientOpen(id) { [weak self] code in
+            guard let self else { return }
+            self.storeClientsOpen.remove(id)
+            if code != 0 {
+                self.storeAccountsError = "Couldn't open \(client.name). " + (client.kind == "wine"
+                    ? "Open \(client.host ?? "CrossOver or Whisky") and start it from its bottle, then choose Check Again."
+                    : "Open it from Applications, then choose Check Again.")
+            } else {
+                self.storeAccountsError = nil
+            }
+            self.loadStoreAccounts()
+        }
+    }
+
     private func settingsRow(_ title: String, subtitle: String, symbol: String, color: NSColor,
                              trailing: NSView, artwork: NSImage? = nil, detail: NSView? = nil,
                              neutralArtworkBackground: Bool = false, bareArtwork: Bool = false) -> NSView {
@@ -4053,7 +6604,6 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
             icon.centerXAnchor.constraint(equalTo: tile.centerXAnchor),
             icon.centerYAnchor.constraint(equalTo: tile.centerYAnchor)
         ])
-        if neutralArtworkBackground { ControllerPalette.applyContrast(to: icon) }
         if artwork != nil {
             icon.widthAnchor.constraint(equalToConstant: 24).isActive = true
             icon.heightAnchor.constraint(equalToConstant: 24).isActive = true
@@ -4105,19 +6655,22 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
             content.widthAnchor.constraint(lessThanOrEqualToConstant: 640).isActive = true
         }
         let width = content.widthAnchor.constraint(equalTo: container.widthAnchor, constant: -16)
-        width.priority = isHome ? .required : .defaultHigh
+        // Below windowSizeStayPut so the capped page width never shrinks the window.
+        width.priority = isHome ? .required : NSLayoutConstraint.Priority(rawValue: NSLayoutConstraint.Priority.windowSizeStayPut.rawValue - 1)
         width.isActive = true
         page.view = scroll
         tabs.addTabViewItem(page)
     }
 
     private func selectPage(_ index: Int) {
-        if index == 3 { selectPage(2); return }
+        // Library storage (2, 3) now lives in Game library.
+        if index == 2 || index == 3 { selectPage(6); return }
         guard (0..<tabs.numberOfTabViewItems).contains(index) else { return }
         if !replayingHistory && (historyIndex < 0 || pageHistory[historyIndex].page != index ||
-            (index == 9 && pageHistory[historyIndex].systemID != inspectorSystemID)) {
+            (index == 9 && pageHistory[historyIndex].systemID != inspectorSystemID) ||
+            (index == 12 && pageHistory[historyIndex].systemID != driveDetailID)) {
             pageHistory = Array(pageHistory.prefix(historyIndex + 1))
-            pageHistory.append((index, index == 9 ? inspectorSystemID : nil))
+            pageHistory.append((index, index == 9 ? inspectorSystemID : index == 12 ? driveDetailID : nil))
             historyIndex = pageHistory.count - 1
         }
         backToolbarItem.isEnabled = historyIndex > 0
@@ -4128,20 +6681,21 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
         tabs.selectTabViewItem(at: index)
         navigationBar.isHidden = false
         mainWindow.title = "Couch Cube"
-        screenTitle.stringValue = index == 0 ? "Couch Cube" : index == 9 ? inspectorTitle.stringValue : (index == 3 || index == 4) ? "Library storage" :
+        screenTitle.stringValue = index == 0 ? "Play" : index == 9 ? inspectorTitle.stringValue :
+            index == 12 ? (detailDrive.map(driveTitle) ?? driveDetailCache[driveDetailID ?? ""].map { driveTitle($0.drive) } ?? "Drive") : index == 4 ? "Library storage" :
             index == 5 ? "Steam setup guide" :
             sidebarPages.firstIndex(of: index).map { sidebarTitles[$0] } ?? "Couch Cube"
         storageNext.isHidden = index != 4
         storageNext.keyEquivalent = index == 4 ? "\r" : ""
         playAction.keyEquivalent = index == 0 ? "\r" : ""
-        let sidebarPage = (index == 3 || index == 4) ? 2 : index == 5 ? 6 : index == 9 ? inspectorParent : index
+        let sidebarPage = (index == 3 || index == 4) ? 6 : index == 5 ? 6 : index == 9 ? inspectorParent : index == 12 ? driveDetailParent : index
         if let selected = sidebarPages.firstIndex(of: sidebarPage), sidebar.selectedRow != selected {
             sidebar.selectRowIndexes(IndexSet(integer: selected), byExtendingSelection: false)
         }
         controllerTimer?.invalidate()
         controllerTimer = nil
         if index != 8 && index != 0 { stopControllerTest() }
-        if index != 8 { stopControllerDiscovery() }
+        if index != 8 && index != 0 { stopControllerDiscovery() }
         if index == 8 || index == 0 {
             refreshControllers()
             if !ProcessInfo.processInfo.arguments.contains("--smoke-test") {
@@ -4150,7 +6704,9 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
             }
         }
         if index == 0 { renderGeneral() }
-        if index == 2 { renderStorageLocations() }
+        if index == 6 { renderStorageLocations() }
+        if index == 13 { openCubeShop() }
+        if index == 11, shopCurrency != nil { loadRates(refresh: false) }
     }
 
     func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
@@ -4198,6 +6754,9 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
             let sender = NSButton()
             sender.tag = index
             showConsoleDetails(sender)
+        } else if destination.page == 12, let id = destination.systemID {
+            showDriveDetail(id)
+            return
         } else {
             selectPage(destination.page)
         }
@@ -4207,6 +6766,7 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
     private func loadPageData(_ page: Int) {
         guard !ProcessInfo.processInfo.arguments.contains("--smoke-test") else { return }
         if page == 10 { loadAutoLaunch() }
+        if page == 11 { loadStoreAccounts() }
         if page == 1 { loadApps() }
         if page == 7 { loadSystems() }
         if page == 5 || page == 6 { loadSteamStatus() }
@@ -4303,8 +6863,8 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
     }
 
     @objc private func openSettings() {
-        selectPage(2)
-        loadPageData(2)
+        selectPage(6)
+        loadPageData(6)
     }
 
     @objc private func loadApps() { fetchApps(updates: true) }
@@ -4323,6 +6883,7 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
         }
         appRefreshPending = false
         appsPreloadPending = false
+        loadWindowsDownloads()
         let silent = appsHaveResults
         appsChecking = !silent
         if appStates.isEmpty {
@@ -4351,7 +6912,7 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
             guard code == 0 else {
                 self.renderApps()
                 self.appsStatus.stringValue = "Couldn't read apps. Open Activity for the error."
-                self.showActivity()
+                self.activityNeeded()
                 completed?(false)
                 return
             }
@@ -4361,6 +6922,9 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
                 let unchanged = silent && data == self.lastAppsData
                 self.lastAppsData = data
                 self.appStates = decoded
+                // A fresh full check supersedes earlier inline failures.
+                let failures = self.appOperations.filter { !$0.value.running }.count
+                self.appOperations = self.appOperations.filter { $0.value.running }
                 self.appsHaveResults = true
                 self.helperButton.isHidden = self.appStates.first?.brew == true
                 self.helperAdvice.isHidden = self.helperButton.isHidden
@@ -4370,13 +6934,13 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
                                              preferred_frontend: self.preferredFrontend ?? report.preferred_frontend)
                     self.updateSetupSummary()
                 }
-                if !unchanged { self.renderApps() }
+                if !unchanged || failures > 0 { self.renderApps() }
                 self.renderTVMenus()
                 self.renderGeneral()
                 if self.collapsedAppCategories.isEmpty {
                     precondition(self.appMenuRows.arrangedSubviews.count == 4)
                     precondition(self.appPCRows.arrangedSubviews.count == 14)
-                    precondition(self.appWindowsRows.arrangedSubviews.count == 4)
+                    precondition(self.appWindowsRows.arrangedSubviews.count == 4 + 2 * self.windowsDownloads.count)
                     precondition(self.appRetroRows.arrangedSubviews.count == 12)
                 }
                 precondition(Set([self.appMenuRows, self.appPCRows, self.appWindowsRows, self.appRetroRows]
@@ -4459,6 +7023,1329 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
         renderApps()
     }
 
+    private func dealsPage() -> NSView {
+        dealsMode.target = self
+        dealsMode.action = #selector(dealsModeChanged)
+        dealsMode.selectedSegment = UserDefaults.standard.integer(forKey: dealsModeKey) == 1 ? 1 : 0
+        dealsMode.setAccessibilityLabel("Deal type")
+        dealsSearch.placeholderString = "Search store deals"
+        dealsSearch.sendsWholeSearchString = true
+        dealsSearch.target = self
+        dealsSearch.action = #selector(dealsFiltersChanged)
+        dealsSearch.setAccessibilityLabel("Search store deals")
+        func popup(_ button: NSPopUpButton, _ items: [(String, String)], label: String, selected: String?) {
+            button.removeAllItems()
+            for (title, value) in items {
+                button.addItem(withTitle: title)
+                button.lastItem?.representedObject = value
+            }
+            if let selected, let index = items.firstIndex(where: { $0.1 == selected }) { button.selectItem(at: index) }
+            button.target = self
+            button.action = #selector(dealsFiltersChanged)
+            button.controlSize = .small
+            button.setAccessibilityLabel(label)
+            button.setContentHuggingPriority(.required, for: .horizontal)
+        }
+        popup(dealsStorePopup, [("All Stores", "")], label: "Store", selected: nil)
+        popup(dealsSortPopup, [("Best Deals", "rating"), ("Biggest Discount", "savings"), ("Lowest Price", "price"),
+                               ("Newest", "recent"), ("Best Reviews", "reviews"), ("Title", "title")],
+              label: "Sort deals", selected: UserDefaults.standard.string(forKey: dealsSortKey))
+        // PC stores and launchers only: console and phone giveaways are never requested or shown.
+        popup(giveawayPlatformPopup, [("All PC Stores", ""), ("PC", "pc"), ("Steam", "steam"), ("Epic Games Store", "epic-games-store"),
+                                      ("GOG", "gog"), ("itch.io", "itchio"), ("Ubisoft", "ubisoft"), ("EA", "origin"),
+                                      ("Battle.net", "battlenet"), ("DRM-Free", "drm-free")],
+              label: "Platform", selected: nil)
+        popup(giveawayTypePopup, [("All Types", ""), ("Full Games", "game"), ("In-Game Loot", "loot"), ("Beta Access", "beta")],
+              label: "Giveaway type", selected: nil)
+        popup(giveawaySortPopup, [("Newest", "date"), ("Highest Value", "value"), ("Most Popular", "popularity")],
+              label: "Sort giveaways", selected: UserDefaults.standard.string(forKey: giveawaySortKey))
+        dealsFilters.orientation = .horizontal
+        dealsFilters.spacing = 8
+        dealsFilters.alignment = .centerY
+        dealsRefreshButton.image = NSImage(systemSymbolName: "arrow.clockwise", accessibilityDescription: "Refresh")
+        dealsRefreshButton.bezelStyle = .inline
+        dealsRefreshButton.isBordered = false
+        dealsRefreshButton.contentTintColor = .secondaryLabelColor
+        dealsRefreshButton.target = self
+        dealsRefreshButton.action = #selector(refreshShop)
+        dealsRefreshButton.toolTip = "Refresh"
+        dealsRefreshButton.setAccessibilityLabel("Refresh")
+        dealsProgress.style = .spinning
+        dealsProgress.controlSize = .small
+        dealsProgress.isDisplayedWhenStopped = false
+        dealsStatus.font = .systemFont(ofSize: 11)
+        dealsStatus.textColor = .secondaryLabelColor
+        dealsRetry.target = self
+        dealsRetry.action = #selector(retryDeals)
+        dealsRetry.controlSize = .small
+        dealsRetry.isHidden = true
+        let status = row([dealsStatus, dealsRetry])
+        status.alignment = .firstBaseline
+        dealsStatus.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        dealsList.orientation = .vertical
+        dealsList.alignment = .leading
+        dealsList.spacing = 0
+        dealsMore.target = self
+        dealsMore.action = #selector(loadMoreDeals)
+        dealsMore.isHidden = true
+        dealsReminderNote.font = .systemFont(ofSize: 11)
+        dealsReminderNote.setAccessibilityIdentifier("dealsReminderNote")
+        dealsReminderNote.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        dealsReminderSettings.controlSize = .small
+        dealsReminderSettings.target = self
+        dealsReminderSettings.action = #selector(openReminderPrivacy)
+        dealsReminderBar.orientation = .horizontal
+        dealsReminderBar.alignment = .firstBaseline
+        dealsReminderBar.spacing = 8
+        dealsReminderBar.setViews([dealsReminderNote, dealsReminderSettings], in: .leading)
+        dealsReminderBar.isHidden = true
+        configureShopPane(dealsPane, [dealsFilters, status, dealsList, dealsMore], full: [dealsList, status])
+        dealsList.setAccessibilityIdentifier("dealsList")
+        layoutDealsFilters()
+        renderDeals()
+        return dealsPane
+    }
+
+    private func dealsAttribution() -> NSAttributedString {
+        let font = NSFont.systemFont(ofSize: 11)
+        let result = NSMutableAttributedString()
+        func plain(_ value: String) { result.append(NSAttributedString(string: value, attributes: [.font: font, .foregroundColor: NSColor.secondaryLabelColor])) }
+        func link(_ value: String, _ url: String) { result.append(NSAttributedString(string: value, attributes: [.font: font, .link: URL(string: url)!])) }
+        plain("Store deals and prices by ")
+        link("CheapShark", "https://www.cheapshark.com")
+        plain(" (prices in USD, opened through CheapShark's store redirect). Free games and giveaways powered by ")
+        link("GamerPower.com", "https://www.gamerpower.com")
+        plain(". Mac App Store results from Apple's ")
+        link("iTunes Search API", "https://performance-partners.apple.com/search-api")
+        plain(" (prices in your storefront's currency). Converted prices use ECB reference rates via ")
+        link("Frankfurter", "https://frankfurter.dev")
+        plain(". \u{201C}Installed\u{201D} means a matching Steam app is installed on this Mac. Cube Shop lists PC stores only and doesn't claim a game runs on a Mac.")
+        return result
+    }
+
+    private func layoutDealsFilters() {
+        dealsFilters.arrangedSubviews.forEach { $0.removeFromSuperview() }
+        let views: [NSView] = dealsMode.selectedSegment == 0
+            ? [dealsSearch, dealsStorePopup, dealsSortPopup]
+            : [giveawayPlatformPopup, giveawayTypePopup, giveawaySortPopup, NSView()]
+        views.forEach { dealsFilters.addArrangedSubview($0) }
+        dealsSearch.setContentHuggingPriority(.defaultLow, for: .horizontal)
+    }
+
+    private func dealsArguments(page: Int = 0) -> [String] {
+        func value(_ button: NSPopUpButton) -> String { (button.selectedItem?.representedObject as? String) ?? "" }
+        var arguments: [String]
+        if dealsMode.selectedSegment == 0 {
+            arguments = ["--source", "cheapshark", "--page", String(page), "--sort", value(dealsSortPopup).isEmpty ? "rating" : value(dealsSortPopup)]
+            if !value(dealsStorePopup).isEmpty { arguments += ["--store", value(dealsStorePopup)] }
+            let search = dealsSearch.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !search.isEmpty { arguments += ["--search", String(search.prefix(100))] }
+        } else {
+            arguments = ["--source", "gamerpower", "--sort", value(giveawaySortPopup).isEmpty ? "date" : value(giveawaySortPopup)]
+            if !value(giveawayPlatformPopup).isEmpty { arguments += ["--platform", value(giveawayPlatformPopup)] }
+            if !value(giveawayTypePopup).isEmpty { arguments += ["--type", value(giveawayTypePopup)] }
+        }
+        if shopScopeMine { arguments.append("--mine") }
+        return arguments
+    }
+
+    /// Loads deals only when the Deals page is shown. Identical in-flight requests are coalesced; visible results stay while refreshing.
+    private func openDeals() {
+        dealsOpened = true
+        let key = dealsArguments().joined(separator: "\u{1F}")
+        if dealsLoadedKey[dealsMode.selectedSegment] == key { renderDeals(); return }
+        loadDeals(page: 0, refresh: false)
+    }
+
+    private func loadDeals(page: Int, refresh: Bool) {
+        guard dealsOpened else { return }
+        let mode = dealsMode.selectedSegment
+        let base = dealsArguments(page: page)
+        let key = base.joined(separator: "\u{1F}") + (refresh ? "\u{1F}refresh" : "")
+        if dealsLoadingKey == key { return }
+        dealsLoadingKey = key
+        dealsGeneration += 1
+        let generation = dealsGeneration
+        let filtersKey = dealsArguments().joined(separator: "\u{1F}")
+        setShopLoading("deals", true)
+        dealsRetry.isHidden = true
+        dealsMore.isEnabled = false
+        if (mode == 0 ? storeDeals.isEmpty : giveaways.isEmpty) { dealsStatus.stringValue = "Loading\u{2026}" }
+        dealsRead(base + (refresh ? ["--refresh"] : [])) { [weak self] code, data, errors in
+            guard let self else { return }
+            // Ignore replies for filters or modes the user has already left.
+            guard generation == self.dealsGeneration else { return }
+            self.dealsLoadingKey = nil
+            self.setShopLoading("deals", false)
+            self.dealsMore.isEnabled = true
+            guard code == 0 else {
+                let message = String(decoding: data, as: UTF8.self) + errors
+                self.dealsFailed(self.dealsErrorText(message))
+                return
+            }
+            if mode == 0, let reply = decodeDeals(StoreDealsReply.self, data) {
+                self.dealsStores = reply.stores
+                self.updateDealStores()
+                self.storeDeals = page == 0 ? reply.deals : self.storeDeals + reply.deals.filter { deal in !self.storeDeals.contains { $0.id == deal.id } }
+                self.storeDealsPage = reply.page
+                self.storeDealsHasMore = reply.more
+                self.dealsLoadedKey[0] = filtersKey
+                if let stores = reply.myStores { self.myStores = stores; self.updateScopeHint() }
+                self.renderDeals(reply.stale ? self.dealsErrorText(reply.error ?? "") : nil, fetched: reply.fetched)
+            } else if mode == 1, let reply = decodeDeals(GiveawaysReply.self, data) {
+                self.giveaways = reply.giveaways
+                self.dealsLoadedKey[1] = filtersKey
+                if let stores = reply.myStores { self.myStores = stores; self.updateScopeHint() }
+                self.renderDeals(reply.stale ? self.dealsErrorText(reply.error ?? "") : nil, fetched: reply.fetched)
+            } else {
+                self.dealsFailed("The deals service returned data Couch Cube couldn't read.")
+            }
+        }
+    }
+
+    func dealsErrorText(_ raw: String) -> String {
+        let message = raw.replacingOccurrences(of: "ERROR:", with: "").trimmingCharacters(in: .whitespacesAndNewlines)
+        if let range = message.range(of: "rate-limited:") {
+            let seconds = Int(message[range.upperBound...].prefix { $0.isNumber }) ?? 60
+            return "The deals service asked Couch Cube to slow down. Try again in about \(max(1, (seconds + 59) / 60)) min."
+        }
+        return message.isEmpty ? "Couldn't load deals. Check your internet connection." : String(message.prefix(300))
+    }
+
+    private func dealsFailed(_ message: String) {
+        let empty = dealsMode.selectedSegment == 0 ? storeDeals.isEmpty : giveaways.isEmpty
+        dealsStatus.stringValue = empty ? message : "\(message) Showing the last loaded deals."
+        dealsRetry.isHidden = false
+        dealsMore.isHidden = dealsMode.selectedSegment != 0 || !storeDealsHasMore
+    }
+
+    private func updateDealStores() {
+        let selected = dealsStorePopup.selectedItem?.representedObject as? String ?? ""
+        dealsStorePopup.removeAllItems()
+        dealsStorePopup.addItem(withTitle: "All Stores")
+        dealsStorePopup.lastItem?.representedObject = ""
+        for store in dealsStores {
+            dealsStorePopup.addItem(withTitle: store.name)
+            dealsStorePopup.lastItem?.representedObject = store.id
+        }
+        if let index = dealsStorePopup.itemArray.firstIndex(where: { $0.representedObject as? String == selected }) {
+            dealsStorePopup.selectItem(at: index)
+        }
+    }
+
+    private func renderDeals(_ warning: String? = nil, fetched: Double? = nil) {
+        dealsList.arrangedSubviews.forEach { $0.removeFromSuperview() }
+        let store = dealsMode.selectedSegment == 0
+        let count = store ? storeDeals.count : giveaways.count
+        if let fetched { dealsFetched[dealsMode.selectedSegment] = fetched }
+        let fetched = fetched ?? dealsFetched[dealsMode.selectedSegment]
+        if store {
+            for deal in storeDeals { addDealRow(storeDealRow(deal)) }
+        } else {
+            for giveaway in giveaways { addDealRow(giveawayRow(giveaway)) }
+        }
+        dealsMore.isHidden = !store || !storeDealsHasMore || storeDeals.isEmpty
+        if let warning {
+            dealsStatus.stringValue = "\(warning) Showing saved deals."
+            dealsRetry.isHidden = false
+        } else if dealsLoadingKey == nil || count > 0 {
+            dealsRetry.isHidden = true
+            if count == 0 {
+                dealsStatus.stringValue = dealsLoadedKey[dealsMode.selectedSegment] == nil ? "" :
+                    store ? "No deals match these filters." : "No active giveaways match these filters."
+            } else {
+                var line = store ? "\(count) deals" : "\(count) active giveaways"
+                if let fetched, fetched > 0 {
+                    let formatter = RelativeDateTimeFormatter()
+                    formatter.unitsStyle = .short
+                    line += " \u{00B7} updated \(formatter.localizedString(for: Date(timeIntervalSince1970: fetched), relativeTo: Date()))"
+                }
+                dealsStatus.stringValue = line
+            }
+        }
+    }
+
+    private func addDealRow(_ view: NSView) { addShopRow(view, to: dealsList) }
+
+    private func addShopRow(_ view: NSView, to list: NSStackView, separated: Bool = true) {
+        if separated, let last = list.arrangedSubviews.last, last.accessibilityIdentifier() != "shopSection" {
+            let line = separator()
+            list.addArrangedSubview(line)
+            line.widthAnchor.constraint(equalTo: list.widthAnchor).isActive = true
+        }
+        list.addArrangedSubview(view)
+        view.widthAnchor.constraint(equalTo: list.widthAnchor).isActive = true
+    }
+
+    private func dealArtwork(_ source: String?, width: CGFloat, height: CGFloat) -> RemoteImageView {
+        let image = RemoteImageView()
+        image.imageScaling = .scaleProportionallyUpOrDown
+        image.wantsLayer = true
+        image.layer?.cornerRadius = 4
+        image.layer?.masksToBounds = true
+        image.layer?.backgroundColor = NSColor.quaternaryLabelColor.cgColor
+        image.widthAnchor.constraint(equalToConstant: width).isActive = true
+        image.heightAnchor.constraint(equalToConstant: height).isActive = true
+        image.setAccessibilityElement(false)
+        image.load(safeDealURL(source), enabled: !ProcessInfo.processInfo.arguments.contains("--smoke-test"))
+        return image
+    }
+
+    private func dealRow(artwork: NSView, title: String, detail: NSAttributedString, detailTip: String, trailing: [NSView],
+                         accessibility: String, compact: Bool = false, open: @escaping () -> Void) -> NSView {
+        let name = NSTextField(labelWithString: title)
+        name.font = .systemFont(ofSize: 13, weight: .medium)
+        name.lineBreakMode = .byTruncatingTail
+        name.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        // Rating badges wrap to a second line instead of truncating; full wording lives in the tooltip.
+        let info = WrappingLabel(labelWithAttributedString: detail)
+        info.lineBreakMode = .byWordWrapping
+        info.maximumNumberOfLines = 0
+        info.cell?.wraps = true
+        info.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        info.setAccessibilityIdentifier("dealBadges")
+        let texts = NSStackView(views: [name, info])
+        texts.orientation = .vertical
+        texts.alignment = .leading
+        texts.spacing = 3
+        texts.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        info.widthAnchor.constraint(equalTo: texts.widthAnchor).isActive = true
+        let line = row([artwork, texts] + trailing)
+        line.spacing = 12
+        line.alignment = .centerY
+        for view in trailing { view.setContentCompressionResistancePriority(.required, for: .horizontal) }
+        let rowView = ClickableRowView()
+        rowView.toolTip = detailTip.isEmpty ? title : "\(title)\n\(detailTip)"
+        rowView.setAccessibilityLabel(accessibility)
+        rowView.setAccessibilityIdentifier("dealRow")
+        rowView.onActivate = open
+        line.translatesAutoresizingMaskIntoConstraints = false
+        rowView.addSubview(line)
+        NSLayoutConstraint.activate([
+            line.leadingAnchor.constraint(equalTo: rowView.leadingAnchor, constant: 6),
+            line.trailingAnchor.constraint(equalTo: rowView.trailingAnchor, constant: -6),
+            line.topAnchor.constraint(equalTo: rowView.topAnchor, constant: compact ? 5 : 8),
+            line.bottomAnchor.constraint(equalTo: rowView.bottomAnchor, constant: compact ? -5 : -8),
+            rowView.heightAnchor.constraint(greaterThanOrEqualToConstant: compact ? 36 : 59)
+        ])
+        return rowView
+    }
+
+    /// Compact inline badges: a mini symbol plus a short colored value, kept together with no-break spaces.
+    private func dealBadges(_ parts: [(symbol: String?, text: String, color: NSColor)]) -> NSAttributedString {
+        let font = NSFont.systemFont(ofSize: 11, weight: .medium)
+        let result = NSMutableAttributedString()
+        for (index, part) in parts.enumerated() {
+            if index > 0 {
+                result.append(NSAttributedString(string: "  \u{00B7}  ", attributes: [.font: font, .foregroundColor: NSColor.tertiaryLabelColor]))
+            }
+            if let symbol = part.symbol,
+               let image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)?
+                .withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: 9, weight: .semibold)
+                    .applying(NSImage.SymbolConfiguration(paletteColors: [part.color]))) {
+                let attachment = NSTextAttachment()
+                attachment.image = image
+                attachment.bounds = NSRect(x: 0, y: -1, width: image.size.width, height: image.size.height)
+                result.append(NSAttributedString(attachment: attachment))
+                result.append(NSAttributedString(string: "\u{00A0}", attributes: [.font: font]))
+            }
+            result.append(NSAttributedString(string: part.text.replacingOccurrences(of: " ", with: "\u{00A0}"),
+                                             attributes: [.font: font, .foregroundColor: part.color]))
+        }
+        return result
+    }
+
+    static func ratingColor(_ value: Double, good: Double, fair: Double) -> NSColor {
+        value >= good ? .systemGreen : value >= fair ? .systemOrange : .systemRed
+    }
+
+    private func dealBadge(_ title: String, color: NSColor) -> NSTextField {
+        let badge = NSTextField(labelWithString: title)
+        badge.font = .systemFont(ofSize: 10, weight: .semibold)
+        badge.textColor = color
+        badge.wantsLayer = true
+        badge.layer?.backgroundColor = color.withAlphaComponent(0.14).cgColor
+        badge.layer?.cornerRadius = 4
+        badge.alignment = .center
+        badge.widthAnchor.constraint(greaterThanOrEqualToConstant: badge.intrinsicContentSize.width + 10).isActive = true
+        badge.heightAnchor.constraint(equalToConstant: 17).isActive = true
+        return badge
+    }
+
+    private func storeDealRow(_ deal: StoreDeal) -> NSView {
+        var badges: [(symbol: String?, text: String, color: NSColor)] = [(nil, deal.store ?? "Store", .secondaryLabelColor)]
+        var tips = [deal.store ?? "Store"]
+        if let percent = deal.steamRatingPercent {
+            badges.append(("hand.thumbsup.fill", "Steam \(percent)%", Self.ratingColor(Double(percent), good: 80, fair: 50)))
+            tips.append("Steam reviews: " + (deal.steamRating.map { "\($0) (\(percent)%)" } ?? "\(percent)%"))
+        }
+        if let metacritic = deal.metacritic {
+            badges.append(("m.square.fill", "\(metacritic)", Self.ratingColor(Double(metacritic), good: 75, fair: 50)))
+            tips.append("Metacritic score: \(metacritic)")
+        }
+        if let rating = deal.dealRating {
+            badges.append(("tag.fill", String(format: "%.1f", rating), Self.ratingColor(rating, good: 8, fair: 5)))
+            tips.append(String(format: "CheapShark deal rating: %.1f of 10", rating))
+        }
+        let salePrice = shopPrice(deal.salePrice, "USD")
+        let sale = priceLabel(salePrice)
+        var prices: [NSView] = [sale]
+        if let normal = deal.normalPrice, normal > deal.salePrice {
+            let was = NSTextField(labelWithAttributedString: NSAttributedString(string: shopPrice(normal, "USD").text, attributes: [
+                .font: NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .regular),
+                .foregroundColor: NSColor.secondaryLabelColor,
+                .strikethroughStyle: NSUnderlineStyle.single.rawValue]))
+            was.alignment = .right
+            prices.append(was)
+        }
+        let priceStack = NSStackView(views: prices)
+        priceStack.orientation = .vertical
+        priceStack.alignment = .trailing
+        priceStack.spacing = 1
+        var trailing: [NSView] = []
+        if deal.installed { trailing.append(dealBadge("Installed", color: .systemGreen)) }
+        if deal.savings > 0 { trailing.append(dealBadge("\u{2212}\(deal.savings)%", color: .systemBlue)) }
+        trailing.append(priceStack)
+        trailing.append(wishlistHeart(key: deal.gameId.map { "cs:" + $0 } ?? "title:" + deal.title.lowercased(), title: deal.title,
+                                      payload: ["title": deal.title, "game_id": deal.gameId ?? "", "steam_app_id": deal.steamAppId ?? ""]))
+        priceStack.widthAnchor.constraint(greaterThanOrEqualToConstant: 58).isActive = true
+        if salePrice.converted { tips.append("Price: \(salePrice.spoken)") }
+        var spoken = "\(deal.title), \(salePrice.spoken)"
+        if let normal = deal.normalPrice, normal > deal.salePrice { spoken += ", was \(shopPrice(normal, "USD").spoken), \(deal.savings)% off" }
+        spoken += (deal.installed ? ", installed" : "") + ". " + tips.dropFirst().joined(separator: ". ")
+        return dealRow(artwork: dealArtwork(deal.thumb, width: 92, height: 35), title: deal.title,
+                       detail: dealBadges(badges), detailTip: tips.joined(separator: "\n"), trailing: trailing,
+                       accessibility: "Open \(deal.title) deal at \(deal.store ?? "store"), " + spoken) { [weak self] in
+            self?.openShopLink(deal.url, hosts: cheapSharkHosts)
+        }
+    }
+
+    private func giveawayRow(_ giveaway: Giveaway) -> NSView {
+        var badges: [(symbol: String?, text: String, color: NSColor)] = []
+        var tips: [String] = []
+        if let type = giveaway.type { badges.append((nil, type, .secondaryLabelColor)); tips.append(type) }
+        if !giveaway.platforms.isEmpty {
+            badges.append(("gamecontroller.fill", giveaway.platforms.prefix(3).joined(separator: ", ")
+                           + (giveaway.platforms.count > 3 ? " +\(giveaway.platforms.count - 3)" : ""), .secondaryLabelColor))
+            tips.append("Platforms: " + giveaway.platforms.joined(separator: ", "))
+        }
+        var trailing: [NSView] = []
+        if let end = DealExpiry.parseGamerPowerEnd(giveaway.endDate), end > dealsNow() {
+            tips.append("Ends " + DateFormatter.localizedString(from: end, dateStyle: .medium, timeStyle: .short))
+            let key = "giveaway:" + giveaway.id
+            if let id = dealReminders[key], reminderStore.access == .granted, !reminderStore.exists(id) {
+                dealReminders[key] = nil
+            }
+            let remind = NSButton(title: "", target: self, action: #selector(dealReminderClicked(_:)))
+            remind.identifier = NSUserInterfaceItemIdentifier(giveaway.id)
+            configureReminderButton(remind, giveaway: giveaway, end: end)
+            trailing.append(remind)
+        }
+        // GamerPower lists the usual value in US dollars ("$19.99").
+        let worthPrice = giveaway.worth.flatMap { Double($0.replacingOccurrences(of: "$", with: "")) }.map { shopPrice($0, "USD") }
+        if let worth = worthPrice?.text ?? giveaway.worth {
+            let was = NSTextField(labelWithAttributedString: NSAttributedString(string: worth, attributes: [
+                .font: NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .regular),
+                .foregroundColor: NSColor.secondaryLabelColor,
+                .strikethroughStyle: NSUnderlineStyle.single.rawValue]))
+            trailing.append(was)
+        }
+        trailing.append(dealBadge("Free", color: .systemGreen))
+        trailing.append(wishlistHeart(key: "title:" + giveaway.title.lowercased(), title: giveaway.title, payload: ["title": giveaway.title]))
+        if let worthPrice, worthPrice.converted { tips.append("Usually \(worthPrice.spoken)") }
+        return dealRow(artwork: dealArtwork(giveaway.thumb, width: 92, height: 43), title: giveaway.title,
+                       detail: dealBadges(badges), detailTip: tips.joined(separator: "\n"), trailing: trailing,
+                       accessibility: "Open \(giveaway.title) giveaway, free" + ((worthPrice?.spoken ?? giveaway.worth).map { ", usually \($0)" } ?? "")
+                        + (tips.isEmpty ? "" : ". " + tips.joined(separator: ". "))) { [weak self] in
+            self?.openShopLink(giveaway.url, hosts: gamerPowerHosts)
+        }
+    }
+
+    private func configureReminderButton(_ button: NSButton, giveaway: Giveaway, end: Date) {
+        button.bezelStyle = .inline
+        button.controlSize = .small
+        button.imagePosition = .imageLeading
+        button.setAccessibilityIdentifier("dealReminder")
+        let set = dealReminders["giveaway:" + giveaway.id] != nil
+        let expiry = DealExpiry.label(until: end, now: dealsNow())
+        let title = set ? "Reminder set" : expiry?.text ?? "Ended"
+        let color: NSColor = set ? .systemGreen : expiry?.urgent == true ? .systemOrange : .secondaryLabelColor
+        button.image = NSImage(systemSymbolName: set ? "checkmark.circle.fill" : "bell", accessibilityDescription: nil)
+        button.contentTintColor = color
+        button.attributedTitle = NSAttributedString(string: title, attributes: [
+            .font: NSFont.systemFont(ofSize: 11, weight: .medium), .foregroundColor: color])
+        button.toolTip = set ? "A reminder is set for the day before this giveaway ends. Click to remove it."
+            : "Remind me at 9:00 the day before this giveaway ends."
+        button.setAccessibilityLabel(set ? "Reminder set for the day before this deal ends. Activate to remove it."
+            : "Remind me the day before this deal ends" + (expiry.map { ", \($0.text.lowercased())" } ?? ""))
+    }
+
+    private func showReminderNote(_ text: String, error: Bool = false, privacy: Bool = false) {
+        dealsReminderNote.stringValue = text
+        dealsReminderNote.textColor = error ? .systemRed : .secondaryLabelColor
+        dealsReminderSettings.isHidden = !privacy
+        dealsReminderBar.isHidden = false
+    }
+
+    @objc private func openReminderPrivacy() {
+        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Reminders") { dealsOpener(url) }
+    }
+
+    @objc private func dealReminderClicked(_ sender: NSButton) {
+        guard let id = sender.identifier?.rawValue,
+              let giveaway = (giveaways + (shopHome?.free ?? [])).first(where: { $0.id == id }) else { return }
+        guard let end = DealExpiry.parseGamerPowerEnd(giveaway.endDate) else { return }
+        let key = "giveaway:" + giveaway.id
+        let store = reminderStore
+        if let id = dealReminders[key] {
+            if store.access == .granted, !store.exists(id) {
+                dealReminders[key] = nil
+                configureReminderButton(sender, giveaway: giveaway, end: end)
+                showReminderNote("That reminder was deleted in Reminders. Click again to add a new one.")
+                return
+            }
+            guard confirmReminderRemoval(giveaway.title) else { return }
+            do { try store.remove(id) } catch {
+                showReminderNote("Couldn't remove the reminder: \(error.localizedDescription)", error: true)
+                return
+            }
+            dealReminders[key] = nil
+            configureReminderButton(sender, giveaway: giveaway, end: end)
+            showReminderNote("Reminder removed.")
+            return
+        }
+        let denied = { [weak self] in
+            self?.showReminderNote("Couch Cube isn't allowed to add reminders. Turn it on in Privacy & Security \u{203A} Reminders.",
+                                   error: true, privacy: true)
+        }
+        switch store.access {
+        case .denied: denied()
+        case .granted: addDealReminder(giveaway, end: end, button: sender)
+        case .notDetermined:
+            store.requestAccess { [weak self] granted in
+                guard let self else { return }
+                if granted { self.addDealReminder(giveaway, end: end, button: sender) } else { denied() }
+            }
+        }
+    }
+
+    private func addDealReminder(_ giveaway: Giveaway, end: Date, button: NSButton) {
+        let key = "giveaway:" + giveaway.id
+        guard dealReminders[key] == nil else { return }
+        guard let due = DealExpiry.reminderDate(for: end, now: dealsNow()) else {
+            showReminderNote("This giveaway ends too soon for a reminder.")
+            return
+        }
+        let store = giveaway.platforms.first { $0 != "PC" } ?? giveaway.platforms.first ?? "GamerPower"
+        let endText = DateFormatter.localizedString(from: end, dateStyle: .full, timeStyle: .short)
+        var notes = "Free" + (giveaway.worth.map { " (usually \($0))" } ?? "") + " on \(giveaway.platforms.joined(separator: ", ")).\n"
+        notes += "Ends: \(endText). GamerPower lists end times without a time zone; read as UTC.\n"
+        notes += giveaway.url
+        do {
+            let id = try reminderStore.add(title: "\(giveaway.title) deal ends \u{2014} \(store)", notes: notes,
+                                           url: safeDealURL(giveaway.url, hosts: gamerPowerHosts), due: due.date)
+            dealReminders[key] = id
+        } catch {
+            showReminderNote("Couldn't add the reminder: \(error.localizedDescription)", error: true)
+            return
+        }
+        configureReminderButton(button, giveaway: giveaway, end: end)
+        let when = DateFormatter.localizedString(from: due.date, dateStyle: .medium, timeStyle: .short)
+        showReminderNote(due.adjusted
+            ? "9:00 the day before has already passed, so the reminder is set for \(when) in your default Reminders list."
+            : "Reminder set for \(when) in your default Reminders list.")
+    }
+
+    /// Shop links open in the default browser, and only as https links on the expected service's own hosts.
+    private func openShopLink(_ value: String?, hosts: Set<String>) {
+        guard let link = safeDealURL(value, hosts: hosts) else {
+            showReminderNote("This link isn't from CheapShark, GamerPower or the Mac App Store, so Couch Cube didn't open it.", error: true)
+            return
+        }
+        dealsOpener(link)
+    }
+
+    @objc private func dealsModeChanged() {
+        UserDefaults.standard.set(dealsMode.selectedSegment, forKey: dealsModeKey)
+        dealsGeneration += 1
+        dealsLoadingKey = nil
+        setShopLoading("deals", false)
+        layoutDealsFilters()
+        renderDeals()
+        openDeals()
+    }
+
+    @objc private func dealsFiltersChanged() {
+        if let sort = dealsSortPopup.selectedItem?.representedObject as? String { UserDefaults.standard.set(sort, forKey: dealsSortKey) }
+        if let sort = giveawaySortPopup.selectedItem?.representedObject as? String { UserDefaults.standard.set(sort, forKey: giveawaySortKey) }
+        if dealsLoadedKey[dealsMode.selectedSegment] == dealsArguments().joined(separator: "\u{1F}") { return }
+        if dealsMode.selectedSegment == 0 { storeDealsPage = 0 }
+        loadDeals(page: 0, refresh: false)
+    }
+
+    @objc private func refreshDeals() { loadDeals(page: 0, refresh: true) }
+
+    // MARK: Cube Shop
+
+    private func configureShopPane(_ pane: NSStackView, _ views: [NSView], full: [NSView]) {
+        pane.orientation = .vertical
+        pane.alignment = .leading
+        pane.spacing = 12
+        pane.setViews(views, in: .leading)
+        for view in full { view.widthAnchor.constraint(equalTo: pane.widthAnchor).isActive = true }
+    }
+
+    private func shopList(_ list: NSStackView, id: String) {
+        list.orientation = .vertical
+        list.alignment = .leading
+        list.spacing = 0
+        list.setAccessibilityIdentifier(id)
+    }
+
+    private func shopStatusLabel(_ label: NSTextField) {
+        label.font = .systemFont(ofSize: 11)
+        label.textColor = .secondaryLabelColor
+        label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+    }
+
+    private func cubeShopPage() -> NSView {
+        let deals = dealsPage()
+        let saved = UserDefaults.standard.object(forKey: shopTabKey) as? Int
+        // The old Deals page remembered store deals vs. giveaways; carry that over as the Deals / Free Games tab.
+        shopTab.selectedSegment = saved.map { min(max($0, 0), 4) } ?? (UserDefaults.standard.integer(forKey: dealsModeKey) == 1 ? 2 : 1)
+        shopTab.target = self
+        shopTab.action = #selector(shopTabChanged)
+        shopTab.setAccessibilityLabel("Cube Shop section")
+        shopTab.segmentDistribution = .fit
+        shopScope.target = self
+        shopScope.action = #selector(shopScopeChanged)
+        shopScope.controlSize = .small
+        shopScope.selectedSegment = shopScopeMine ? 0 : 1
+        shopScope.setAccessibilityLabel("Show deals for")
+        shopScope.setToolTip("Only the stores whose app or launcher is installed on this Mac", forSegment: 0)
+        shopScope.setToolTip("Every PC store", forSegment: 1)
+        shopStatusLabel(shopScopeHint)
+        shopScopeHint.setAccessibilityIdentifier("shopScopeHint")
+        shopScopeBar.orientation = .horizontal
+        shopScopeBar.alignment = .centerY
+        shopScopeBar.spacing = 10
+        shopScopeBar.setViews([shopScope, shopScopeHint], in: .leading)
+        shopStatusLabel(shopCurrencyNote)
+        shopCurrencyNote.setAccessibilityIdentifier("shopCurrencyNote")
+        let header = row([shopTab, NSView(), dealsProgress, dealsRefreshButton])
+        shopStatusLabel(homeStatus)
+        shopList(homeList, id: "shopHomeList")
+        configureShopPane(homePane, [homeStatus, homeList], full: [homeStatus, homeList])
+        shopSearchField.placeholderString = "Search every store"
+        shopSearchField.sendsWholeSearchString = true
+        shopSearchField.target = self
+        shopSearchField.action = #selector(shopSearchSubmitted)
+        shopSearchField.setAccessibilityLabel("Search every store")
+        NotificationCenter.default.addObserver(self, selector: #selector(shopSearchTyped), name: NSControl.textDidChangeNotification, object: shopSearchField)
+        shopStatusLabel(searchStatus)
+        shopList(searchList, id: "shopSearchList")
+        configureShopPane(searchPane, [shopSearchField, searchStatus, searchList], full: [shopSearchField, searchStatus, searchList])
+        shopStatusLabel(wishlistStatus)
+        wishlistStatus.setAccessibilityIdentifier("wishlistStatus")
+        shopList(wishlistList, id: "wishlistList")
+        configureShopPane(wishlistPane, [wishlistStatus, wishlistList], full: [wishlistStatus, wishlistList])
+        let attribution = NSTextField(labelWithAttributedString: dealsAttribution())
+        attribution.isSelectable = true
+        attribution.allowsEditingTextAttributes = true
+        attribution.lineBreakMode = .byWordWrapping
+        attribution.maximumNumberOfLines = 0
+        attribution.setAccessibilityIdentifier("dealsAttribution")
+        let page = column([header, shopScopeBar, shopCurrencyNote, dealsReminderBar, homePane, deals, searchPane, wishlistPane, attribution])
+        page.spacing = 12
+        for view in [header, shopCurrencyNote, homePane, deals, searchPane, wishlistPane, attribution] {
+            view.widthAnchor.constraint(equalTo: page.widthAnchor).isActive = true
+        }
+        shopPageView = page
+        updateScopeHint()
+        updateCurrencyNotes()
+        showShopTab()
+        return page
+    }
+
+    private func showShopTab() {
+        let tab = shopTab.selectedSegment
+        homePane.isHidden = tab != 0
+        dealsPane.isHidden = tab != 1 && tab != 2
+        searchPane.isHidden = tab != 3
+        wishlistPane.isHidden = tab != 4
+        shopScopeBar.isHidden = tab > 2
+    }
+
+    private func openCubeShop() {
+        dealsOpened = true
+        loadRates(refresh: false)
+        if wishlistCheckedAt.map({ Date().timeIntervalSince($0) > 600 }) ?? true { checkWishlist(refresh: false) }
+        shopTabChanged()
+    }
+
+    func selectShopTab(_ tab: Int) {
+        shopTab.selectedSegment = tab
+        shopTabChanged()
+    }
+
+    @objc private func shopTabChanged() {
+        let tab = shopTab.selectedSegment
+        UserDefaults.standard.set(tab, forKey: shopTabKey)
+        showShopTab()
+        dealsReminderBar.isHidden = true
+        guard dealsOpened else { return }
+        switch tab {
+        case 0: loadHome(refresh: false)
+        case 1, 2:
+            dealsMode.selectedSegment = tab - 1
+            dealsModeChanged()
+        case 3: renderSearch()
+        default: renderWishlist()
+        }
+    }
+
+    @objc private func refreshShop() {
+        if shopCurrency != nil { loadRates(refresh: true) }
+        switch shopTab.selectedSegment {
+        case 0: loadHome(refresh: true)
+        case 1, 2: loadDeals(page: 0, refresh: true)
+        case 3: runSearch(refresh: true)
+        default: checkWishlist(refresh: true)
+        }
+    }
+
+    private func setShopLoading(_ name: String, _ on: Bool) {
+        if on { shopLoading.insert(name) } else { shopLoading.remove(name) }
+        if shopLoading.isEmpty { dealsProgress.stopAnimation(nil) } else { dealsProgress.startAnimation(nil) }
+    }
+
+    /// Re-renders every Shop list after a currency, rate or wishlist change (rows are cheap; data stays as loaded).
+    private func rerenderShop() {
+        guard dealsOpened else { return }
+        renderDeals()
+        renderHome()
+        renderSearch()
+        renderWishlist()
+    }
+
+    // MARK: My Stores / All Stores
+
+    private var shopScopeMine: Bool { UserDefaults.standard.string(forKey: shopScopeKey) != "all" }
+
+    @objc private func shopScopeChanged() {
+        UserDefaults.standard.set(shopScope.selectedSegment == 0 ? "mine" : "all", forKey: shopScopeKey)
+        updateScopeHint()
+        switch shopTab.selectedSegment {
+        case 0: loadHome(refresh: false)
+        case 1, 2: dealsFiltersChanged()
+        default: break
+        }
+    }
+
+    private func updateScopeHint() {
+        if let stores = myStores, stores.isEmpty {
+            // Nothing installed: show every store, and say why My Stores is unavailable.
+            shopScope.setEnabled(false, forSegment: 0)
+            shopScope.selectedSegment = 1
+            shopScopeHint.stringValue = "No store apps found on this Mac, so every PC store is shown. Install Steam, GOG Galaxy or a Windows launcher to see just your stores."
+            return
+        }
+        shopScope.setEnabled(true, forSegment: 0)
+        shopScope.selectedSegment = shopScopeMine ? 0 : 1
+        if !shopScopeMine {
+            shopScopeHint.stringValue = "Showing every PC store."
+        } else if let stores = myStores {
+            shopScopeHint.stringValue = "Showing " + ListFormatter.localizedString(byJoining: stores.map(\.name)) + ", installed on this Mac."
+        } else {
+            shopScopeHint.stringValue = "Showing the stores installed on this Mac."
+        }
+    }
+
+    // MARK: Currency
+
+    /// The display currency, or nil for original prices. Defaults to the Mac's locale currency.
+    var shopCurrency: String? {
+        let saved = UserDefaults.standard.string(forKey: shopCurrencyKey)
+        if saved == "original" { return nil }
+        if let saved, ShopMoney.currencies.contains(saved) { return saved }
+        let local = Locale.current.currency?.identifier ?? "USD"
+        return ShopMoney.currencies.contains(local) ? local : "USD"
+    }
+
+    private var shopFeePercent: Decimal {
+        let value = UserDefaults.standard.double(forKey: shopFeeKey)
+        return value > 0 && value <= 20 ? ShopMoney.decimal(value) : 0
+    }
+
+    func shopPrice(_ amount: Double, _ currency: String) -> ShopPrice {
+        let value = ShopMoney.decimal(amount)
+        let original = currency == "USD" && shopCurrency == nil ? dealPrice(amount) : ShopMoney.format(value, currency)
+        if amount == 0 { return ShopPrice(text: "Free", original: "Free", converted: false, value: 0) }
+        guard let target = shopCurrency else { return ShopPrice(text: original, original: original, converted: false, value: value) }
+        if target == currency { return ShopPrice(text: ShopMoney.format(value, currency), original: original, converted: false, value: value) }
+        guard let converted = ShopMoney.convert(value, from: currency, to: target, rates: exchangeRates, feePercent: shopFeePercent) else {
+            return ShopPrice(text: original, original: original, converted: false, value: nil)
+        }
+        return ShopPrice(text: "\u{2248} " + ShopMoney.format(converted, target), original: ShopMoney.plain(value, currency),
+                         converted: true, value: converted)
+    }
+
+    private func priceLabel(_ price: ShopPrice, highlight: Bool = false) -> NSTextField {
+        let label = NSTextField(labelWithString: price.text)
+        label.font = .monospacedDigitSystemFont(ofSize: 13, weight: .semibold)
+        label.textColor = highlight ? .systemGreen : .labelColor
+        label.alignment = .right
+        if price.converted {
+            label.toolTip = "\(price.text) (\(price.original))"
+            label.setAccessibilityLabel(price.spoken)
+        }
+        return label
+    }
+
+    private func loadRates(refresh: Bool) {
+        guard shopCurrency != nil, !ratesLoading else { updateCurrencyNotes(); return }
+        if !refresh, exchangeRates != nil, let loaded = ratesLoadedAt, Date().timeIntervalSince(loaded) < 3600 { updateCurrencyNotes(); return }
+        ratesLoading = true
+        updateCurrencyNotes()
+        shopRead(["rates"] + (refresh ? ["--refresh"] : [])) { [weak self] code, data, _ in
+            guard let self else { return }
+            self.ratesLoading = false
+            if code == 0, let rates = decodeDeals(ExchangeRates.self, data) {
+                let changed = rates != self.exchangeRates
+                self.exchangeRates = rates
+                self.ratesFailed = false
+                self.ratesLoadedAt = Date()
+                self.updateCurrencyNotes()
+                if changed { self.rerenderShop() }
+            } else {
+                self.ratesFailed = true
+                self.updateCurrencyNotes()
+            }
+        }
+    }
+
+    private func updateCurrencyNotes() {
+        let source = "ECB reference rate via Frankfurter"
+        let caveat = "Revolut/bank rates may differ slightly."
+        guard let target = shopCurrency else {
+            shopCurrencyNote.isHidden = true
+            shopRatesNote.stringValue = "Prices are shown in the currency each store uses."
+            return
+        }
+        shopCurrencyNote.isHidden = false
+        let fee = shopFeePercent > 0 ? " incl. \(shopFeePercent)% card/FX fee" : ""
+        if let rates = exchangeRates {
+            let date = rates.stale == true ? "rates from \(rates.date)" : "updated \(rates.date)"
+            shopRatesNote.stringValue = "\(source), \(date); \(caveat) Prices are converted for display only."
+            shopCurrencyNote.stringValue = "Prices shown \u{2248} in \(target)\(fee) \u{00B7} \(source), \(date). Hover a price for the original."
+        } else if ratesLoading {
+            shopRatesNote.stringValue = "\(source), loading\u{2026} \(caveat)"
+            shopCurrencyNote.stringValue = "Loading exchange rates\u{2026}"
+        } else if ratesFailed {
+            shopRatesNote.stringValue = "\(source) couldn't be reached and no saved rates exist yet, so prices stay in their original currency. \(caveat)"
+            shopCurrencyNote.stringValue = "Exchange rates aren't available, so prices are shown in their original currency."
+        } else {
+            shopRatesNote.stringValue = "\(source), loaded when you open Cube Shop. \(caveat)"
+            shopCurrencyNote.stringValue = ""
+        }
+    }
+
+    private func shopSettingsCard() -> NSView {
+        shopCurrencyPopup.removeAllItems()
+        shopCurrencyPopup.addItem(withTitle: "Original prices")
+        shopCurrencyPopup.lastItem?.representedObject = "original"
+        shopCurrencyPopup.menu?.addItem(.separator())
+        for code in ShopMoney.currencies {
+            let name = Locale.current.localizedString(forCurrencyCode: code) ?? code
+            shopCurrencyPopup.addItem(withTitle: "\(code) \u{2014} \(name)")
+            shopCurrencyPopup.lastItem?.representedObject = code
+            if code == "GBP" { shopCurrencyPopup.menu?.addItem(.separator()) }
+        }
+        let selected = shopCurrency ?? "original"
+        if let item = shopCurrencyPopup.itemArray.first(where: { $0.representedObject as? String == selected }) { shopCurrencyPopup.select(item) }
+        shopCurrencyPopup.target = self
+        shopCurrencyPopup.action = #selector(shopCurrencyChanged)
+        shopCurrencyPopup.controlSize = .small
+        shopCurrencyPopup.setAccessibilityLabel("Shop currency")
+        shopFeeField.stringValue = shopFeePercent == 0 ? "0" : "\(shopFeePercent)"
+        shopFeeField.alignment = .right
+        shopFeeField.controlSize = .small
+        shopFeeField.font = .systemFont(ofSize: 11)
+        shopFeeField.target = self
+        shopFeeField.action = #selector(shopFeeChanged)
+        shopFeeField.setAccessibilityLabel("Card or FX fee percent")
+        shopFeeField.widthAnchor.constraint(equalToConstant: 52).isActive = true
+        shopStatusLabel(shopRatesNote)
+        shopRatesNote.setAccessibilityIdentifier("shopRatesNote")
+        updateCurrencyNotes()
+        return card("Cube Shop", subtitle: nil, views: [
+            settingsRow("Shop currency", subtitle: "Show Cube Shop prices converted to this currency.", symbol: "dollarsign.circle",
+                        color: .systemGreen, trailing: shopCurrencyPopup, detail: nil),
+            separator(),
+            settingsRow("Add card/FX fee", subtitle: "Added to converted prices, e.g. a weekend exchange markup.", symbol: "percent",
+                        color: .systemOrange, trailing: row([shopFeeField, text("%", size: 12)]), detail: nil),
+            shopRatesNote
+        ])
+    }
+
+    @objc private func shopCurrencyChanged() {
+        UserDefaults.standard.set(shopCurrencyPopup.selectedItem?.representedObject as? String ?? "original", forKey: shopCurrencyKey)
+        updateCurrencyNotes()
+        loadRates(refresh: false)
+        rerenderShop()
+    }
+
+    @objc private func shopFeeChanged() {
+        let text = shopFeeField.stringValue.replacingOccurrences(of: ",", with: ".").replacingOccurrences(of: "%", with: "")
+            .trimmingCharacters(in: .whitespaces)
+        if let value = Double(text.isEmpty ? "0" : text), value >= 0, value <= 20 {
+            UserDefaults.standard.set(value, forKey: shopFeeKey)
+        }
+        shopFeeField.stringValue = shopFeePercent == 0 ? "0" : "\(shopFeePercent)"
+        updateCurrencyNotes()
+        rerenderShop()
+    }
+
+    // MARK: Home
+
+    private func loadHome(refresh: Bool) {
+        let scope = shopScopeMine ? "mine" : "all"
+        let key = scope + (refresh ? "\u{1F}refresh" : "")
+        if homeLoadingKey == key { return }
+        if !refresh, homeLoadedScope == scope, shopHome != nil { renderHome(); return }
+        homeLoadingKey = key
+        setShopLoading("home", true)
+        if shopHome == nil { homeStatus.stringValue = "Loading\u{2026}" }
+        shopRead(["shop-home", "--scope", scope] + (refresh ? ["--refresh"] : [])) { [weak self] code, data, errors in
+            guard let self, self.homeLoadingKey == key else { return }
+            self.homeLoadingKey = nil
+            self.setShopLoading("home", false)
+            guard code == 0, let reply = decodeDeals(ShopHomeReply.self, data) else {
+                self.homeError = self.dealsErrorText(String(decoding: data, as: UTF8.self) + errors)
+                self.renderHome()
+                return
+            }
+            self.shopHome = reply
+            self.homeLoadedScope = scope
+            self.homeError = reply.errors.first.map(self.dealsErrorText)
+            self.myStores = reply.myStores
+            self.updateScopeHint()
+            if self.wishlist == nil, let wishlist = reply.wishlist { self.wishlist = wishlist }
+            self.renderHome()
+        }
+    }
+
+    private func sectionHeader(_ title: String, trailing: [NSView] = []) -> NSView {
+        let label = NSTextField(labelWithString: title)
+        label.font = .systemFont(ofSize: 13, weight: .semibold)
+        label.lineBreakMode = .byTruncatingTail
+        label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        let line = row([label, NSView()] + trailing)
+        line.edgeInsets = NSEdgeInsets(top: 14, left: 6, bottom: 4, right: 6)
+        line.setAccessibilityIdentifier("shopSection")
+        line.setAccessibilityElement(true)
+        line.setAccessibilityRole(.group)
+        line.setAccessibilityLabel(title)
+        return line
+    }
+
+    private func renderHome() {
+        homeList.arrangedSubviews.forEach { $0.removeFromSuperview() }
+        guard let home = shopHome else {
+            homeStatus.stringValue = homeError ?? (homeLoadingKey == nil ? "" : "Loading\u{2026}")
+            return
+        }
+        func section(_ title: String, _ rows: [NSView]) {
+            guard !rows.isEmpty else { return }
+            addShopRow(sectionHeader(title), to: homeList, separated: false)
+            rows.forEach { addShopRow($0, to: homeList) }
+        }
+        let hits = (wishlist?.items ?? []).filter { $0.onSale || $0.targetHit }
+        section("Wishlist deals", hits.map(wishlistRow))
+        section("Featured deals", home.featured.map(storeDealRow))
+        section("Price drops", home.drops.map(storeDealRow))
+        section("Free now", home.free.map(giveawayRow))
+        if homeList.arrangedSubviews.isEmpty {
+            homeStatus.stringValue = homeError ?? "Nothing to recommend right now. Try All Stores or Refresh."
+        } else {
+            homeStatus.stringValue = homeError.map { "\($0) Some sections may be missing." } ??
+                "Picked locally from discounts, ratings, recency and your wishlist. Nothing about you is sent anywhere."
+        }
+    }
+
+    // MARK: Search
+
+    private var shopCountry: String { Locale.current.region?.identifier ?? "US" }
+
+    @objc private func shopSearchTyped() {
+        searchTimer?.invalidate()
+        searchTimer = Timer.scheduledTimer(withTimeInterval: 0.8, repeats: false) { [weak self] _ in self?.runSearch(refresh: false) }
+    }
+
+    @objc private func shopSearchSubmitted() {
+        searchTimer?.invalidate()
+        searchTimer = nil
+        runSearch(refresh: false)
+    }
+
+    private func runSearch(refresh: Bool) {
+        let query = String(shopSearchField.stringValue.split(whereSeparator: \.isWhitespace).joined(separator: " ").prefix(60))
+        guard query.count >= 2 else {
+            searchReply = nil
+            searchLoadedQuery = nil
+            searchLoadingQuery = nil
+            searchError = nil
+            setShopLoading("search", false)
+            renderSearch()
+            return
+        }
+        // Identical searches are combined; results are cached by the backend.
+        if searchLoadingQuery == query { return }
+        if !refresh, searchLoadedQuery == query { renderSearch(); return }
+        searchLoadingQuery = query
+        setShopLoading("search", true)
+        searchStatus.stringValue = "Searching every store for \u{201C}\(query)\u{201D}\u{2026}"
+        shopRead(["shop-search", "--query", query, "--country", shopCountry] + (refresh ? ["--refresh"] : [])) { [weak self] code, data, errors in
+            guard let self, self.searchLoadingQuery == query else { return }
+            self.searchLoadingQuery = nil
+            self.setShopLoading("search", false)
+            guard code == 0, let reply = decodeDeals(ShopSearchReply.self, data) else {
+                self.searchError = self.dealsErrorText(String(decoding: data, as: UTF8.self) + errors)
+                self.renderSearch()
+                return
+            }
+            self.searchReply = reply
+            self.searchLoadedQuery = query
+            self.searchError = reply.errors.first.map(self.dealsErrorText)
+            self.renderSearch()
+        }
+    }
+
+    /// Offers in price order. With a Shop currency every store is compared by its converted price; with original
+    /// prices only same-currency offers are compared and other currencies follow, grouped and labelled.
+    func sortedShopOffers(_ offers: [ShopOffer]) -> [(offer: ShopOffer, price: ShopPrice, cheapest: Bool)] {
+        let priced = offers.map { (offer: $0, price: shopPrice($0.price, $0.currency)) }
+        let converting = shopCurrency != nil && exchangeRates != nil
+        func group(_ item: (offer: ShopOffer, price: ShopPrice)) -> String {
+            converting ? (item.price.value == nil ? "~" + item.offer.currency : "") : (item.offer.currency == "USD" ? "" : item.offer.currency)
+        }
+        let ordered = priced.sorted { a, b in
+            let (ga, gb) = (group(a), group(b))
+            if ga != gb { return ga < gb }
+            let (va, vb) = (a.price.value ?? ShopMoney.decimal(a.offer.price), b.price.value ?? ShopMoney.decimal(b.offer.price))
+            return va != vb ? va < vb : a.offer.store.localizedCaseInsensitiveCompare(b.offer.store) == .orderedAscending
+        }
+        guard let first = ordered.first else { return [] }
+        let lowest = first.price.value ?? ShopMoney.decimal(first.offer.price)
+        return ordered.map { item in
+            (item.offer, item.price, group(item) == group(first) && (item.price.value ?? ShopMoney.decimal(item.offer.price)) == lowest)
+        }
+    }
+
+    private func symbolArtwork(_ symbol: String, size: CGFloat = 24) -> NSView {
+        let image = NSImageView(image: NSImage(systemSymbolName: symbol, accessibilityDescription: nil) ?? NSImage())
+        image.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: size * 0.6, weight: .regular)
+        image.contentTintColor = .secondaryLabelColor
+        image.widthAnchor.constraint(equalToConstant: size).isActive = true
+        image.heightAnchor.constraint(equalToConstant: size).isActive = true
+        image.setAccessibilityElement(false)
+        return image
+    }
+
+    private func offerRow(_ game: String, _ offer: ShopOffer, _ price: ShopPrice, cheapest: Bool) -> NSView {
+        let appStore = offer.storeId == nil
+        var badges: [(symbol: String?, text: String, color: NSColor)] = []
+        var tips: [String] = []
+        if cheapest { badges.append(("checkmark.seal.fill", "Cheapest", .systemGreen)) }
+        if let savings = offer.savings, savings > 0 {
+            badges.append((nil, "\u{2212}\(savings)%", .systemBlue))
+            tips.append("\(savings)% off")
+        }
+        if let normal = offer.normalPrice, normal > offer.price {
+            let was = shopPrice(normal, offer.currency)
+            badges.append((nil, "was " + was.text, .secondaryLabelColor))
+            tips.append("Usually \(was.spoken)")
+        }
+        if appStore {
+            badges.append(("apple.logo", "Prices in \(offer.currency)", .secondaryLabelColor))
+            tips.append("Mac App Store price in \(offer.currency)")
+        }
+        if price.converted { tips.append("Price: \(price.spoken)") }
+        let view = dealRow(artwork: symbolArtwork(appStore ? "apple.logo" : "cart"), title: offer.store, detail: dealBadges(badges),
+                           detailTip: tips.joined(separator: "\n"), trailing: [priceLabel(price, highlight: cheapest)],
+                           accessibility: "Open \(game) at \(offer.store), \(price.spoken)" + (cheapest ? ", cheapest" : ""),
+                           compact: true) { [weak self] in
+            self?.openShopLink(offer.url, hosts: appStore ? appStoreHosts : cheapSharkHosts)
+        }
+        view.setAccessibilityIdentifier("shopOffer")
+        return view
+    }
+
+    private func appStoreRow(_ app: AppStoreGame) -> NSView {
+        let price = shopPrice(app.price, app.currency)
+        var badges: [(symbol: String?, text: String, color: NSColor)] = [("apple.logo", "Mac App Store", .secondaryLabelColor)]
+        if let seller = app.seller { badges.append((nil, seller, .secondaryLabelColor)) }
+        let heart = wishlistHeart(key: "app:" + app.id, title: app.title, payload: ["title": app.title, "app_store_id": app.id])
+        let view = dealRow(artwork: dealArtwork(app.thumb, width: 35, height: 35), title: app.title, detail: dealBadges(badges),
+                           detailTip: price.converted ? "Price: \(price.spoken)" : "Mac App Store price in \(app.currency)",
+                           trailing: [priceLabel(price), heart],
+                           accessibility: "Open \(app.title) in the Mac App Store, \(price.spoken)", compact: true) { [weak self] in
+            self?.openShopLink(app.url, hosts: appStoreHosts)
+        }
+        view.setAccessibilityIdentifier("shopAppStoreRow")
+        return view
+    }
+
+    private func renderSearch() {
+        searchList.arrangedSubviews.forEach { $0.removeFromSuperview() }
+        guard let reply = searchReply else {
+            searchStatus.stringValue = searchError ?? (searchLoadingQuery != nil ? searchStatus.stringValue :
+                "Search Steam, GOG, Epic, Humble and other PC stores plus the Mac App Store at once. Press Return or pause typing.")
+            return
+        }
+        for game in reply.games {
+            let heart = wishlistHeart(key: "cs:" + game.id, title: game.title,
+                                      payload: ["title": game.title, "game_id": game.id, "steam_app_id": game.steamAppId ?? ""])
+            addShopRow(sectionHeader(game.title, trailing: [heart]), to: searchList, separated: false)
+            let offers = game.offers + (game.appStoreOffer.map { [$0.offer] } ?? [])
+            for item in sortedShopOffers(offers) { addShopRow(offerRow(game.title, item.offer, item.price, cheapest: item.cheapest), to: searchList) }
+        }
+        if !reply.appStore.apps.isEmpty {
+            let currency = reply.appStore.currency ?? reply.appStore.apps[0].currency
+            addShopRow(sectionHeader("Mac App Store \u{00B7} prices in \(currency)"), to: searchList, separated: false)
+            for app in reply.appStore.apps { addShopRow(appStoreRow(app), to: searchList) }
+        }
+        let found = reply.games.count + reply.appStore.apps.count
+        var line = found == 0 ? "No PC store or Mac App Store games match \u{201C}\(reply.query)\u{201D}." :
+            "\(found) result\(found == 1 ? "" : "s") for \u{201C}\(reply.query)\u{201D}."
+        if found > 0 {
+            line += shopCurrency != nil && exchangeRates != nil ? " Stores are sorted by converted price." :
+                " Store prices are in USD; Mac App Store prices are in \(reply.appStore.currency ?? "your storefront's currency")."
+        }
+        if let searchError { line += " \(searchError)" }
+        searchStatus.stringValue = line
+    }
+
+    // MARK: Wishlist
+
+    private func wishlistItem(key: String, title: String) -> WishlistItem? {
+        wishlist?.items.first { $0.key == key || $0.title.caseInsensitiveCompare(title) == .orderedSame }
+    }
+
+    private var wishlistEditable: Bool { wishlist.map { !$0.readOnly && !$0.offline } ?? false }
+
+    private func wishlistHeart(key: String, title: String, payload: [String: String]) -> NSButton {
+        let heart = NSButton(title: "", target: self, action: #selector(wishlistHeartClicked(_:)))
+        heart.identifier = NSUserInterfaceItemIdentifier(key)
+        heart.bezelStyle = .inline
+        heart.isBordered = false
+        heart.imagePosition = .imageOnly
+        heart.setAccessibilityIdentifier("wishlistHeart")
+        heart.widthAnchor.constraint(equalToConstant: 22).isActive = true
+        wishlistPayloads[key] = (title, payload.filter { !$0.value.isEmpty })
+        configureHeart(heart)
+        return heart
+    }
+
+    private func configureHeart(_ heart: NSButton) {
+        guard let key = heart.identifier?.rawValue, let entry = wishlistPayloads[key] else { return }
+        let saved = wishlistItem(key: key, title: entry.title) != nil
+        heart.image = NSImage(systemSymbolName: saved ? "heart.fill" : "heart", accessibilityDescription: nil)
+        heart.contentTintColor = saved ? .systemPink : .secondaryLabelColor
+        heart.isEnabled = wishlistEditable
+        heart.toolTip = !wishlistEditable ? (wishlist?.note ?? "Connect your Couch Cube drive to change the wishlist. It's saved on the drive.")
+            : saved ? "Remove from wishlist" : "Add to wishlist"
+        heart.setAccessibilityLabel(saved ? "Remove \(entry.title) from wishlist" : "Add \(entry.title) to wishlist")
+    }
+
+    private func refreshHearts() {
+        func views(_ root: NSView) -> [NSView] { [root] + root.subviews.flatMap(views) }
+        guard let page = shopPageView else { return }
+        for heart in views(page).compactMap({ $0 as? NSButton }) where heart.accessibilityIdentifier() == "wishlistHeart" { configureHeart(heart) }
+    }
+
+    @objc private func wishlistHeartClicked(_ sender: NSButton) {
+        guard let key = sender.identifier?.rawValue, let entry = wishlistPayloads[key], wishlistEditable else { return }
+        if let item = wishlistItem(key: key, title: entry.title) {
+            changeWishlist(["--remove", item.key])
+        } else if let json = try? JSONSerialization.data(withJSONObject: entry.payload, options: [.sortedKeys]) {
+            changeWishlist(["--add", String(decoding: json, as: UTF8.self)])
+        }
+    }
+
+    private func changeWishlist(_ arguments: [String]) {
+        shopRead(["wishlist"] + arguments) { [weak self] code, data, errors in
+            guard let self else { return }
+            guard code == 0, let reply = decodeDeals(WishlistReply.self, data) else {
+                self.showReminderNote(self.dealsErrorText(String(decoding: data, as: UTF8.self) + errors), error: true)
+                return
+            }
+            self.applyWishlist(reply)
+        }
+    }
+
+    private func checkWishlist(refresh: Bool) {
+        guard !wishlistLoading else { return }
+        wishlistLoading = true
+        setShopLoading("wishlist", true)
+        renderWishlist()
+        shopRead(["wishlist", "--check", "--country", shopCountry] + (refresh ? ["--refresh"] : [])) { [weak self] code, data, errors in
+            guard let self else { return }
+            self.wishlistLoading = false
+            self.setShopLoading("wishlist", false)
+            self.wishlistCheckedAt = Date()
+            guard code == 0, let reply = decodeDeals(WishlistReply.self, data) else {
+                self.wishlistStatus.stringValue = self.dealsErrorText(String(decoding: data, as: UTF8.self) + errors)
+                return
+            }
+            self.applyWishlist(reply)
+        }
+    }
+
+    private func applyWishlist(_ reply: WishlistReply) {
+        wishlist = reply
+        refreshHearts()
+        switch shopTab.selectedSegment {
+        case 0: renderHome()
+        case 4: renderWishlist()
+        default: break
+        }
+    }
+
+    private func wishlistRow(_ item: WishlistItem) -> NSView {
+        var badges: [(symbol: String?, text: String, color: NSColor)] = []
+        var tips: [String] = []
+        if let sale = item.saleText { badges.append(("tag.fill", sale, .systemGreen)); tips.append(sale) }
+        var trailing: [NSView] = []
+        if let best = item.best {
+            let price = shopPrice(best.price, best.currency)
+            if let store = best.store, item.saleText == nil { badges.append((nil, "Best at \(store)", .secondaryLabelColor)) }
+            tips.append("Best price: \(price.spoken)" + (best.store.map { " at \($0)" } ?? ""))
+            if let checked = best.checked {
+                let formatter = RelativeDateTimeFormatter()
+                formatter.unitsStyle = .short
+                tips.append("Checked " + formatter.localizedString(for: Date(timeIntervalSince1970: checked), relativeTo: Date()))
+            }
+            trailing.append(priceLabel(price, highlight: item.onSale))
+        }
+        if let target = item.targetPrice {
+            let price = shopPrice(target, "USD")
+            badges.append((item.targetHit ? "target" : nil, (item.targetHit ? "Target reached: " : "Target ") + price.text,
+                           item.targetHit ? .systemOrange : .secondaryLabelColor))
+            tips.append("Target price: \(price.spoken)")
+        }
+        if badges.isEmpty { badges.append((nil, item.best == nil ? "No price checked yet" : "Not on sale", .secondaryLabelColor)) }
+        let target = NSButton(title: item.targetPrice == nil ? "Set Target\u{2026}" : "Target\u{2026}", target: self, action: #selector(wishlistTargetClicked(_:)))
+        target.identifier = NSUserInterfaceItemIdentifier(item.key)
+        target.controlSize = .small
+        target.bezelStyle = .inline
+        target.isEnabled = wishlistEditable
+        target.setAccessibilityIdentifier("wishlistTarget")
+        target.setAccessibilityLabel("Set a target price for \(item.title)")
+        let remove = NSButton(title: "", target: self, action: #selector(wishlistRemoveClicked(_:)))
+        remove.identifier = NSUserInterfaceItemIdentifier(item.key)
+        remove.image = NSImage(systemSymbolName: "heart.fill", accessibilityDescription: nil)
+        remove.contentTintColor = .systemPink
+        remove.bezelStyle = .inline
+        remove.isBordered = false
+        remove.isEnabled = wishlistEditable
+        remove.toolTip = "Remove from wishlist"
+        remove.setAccessibilityIdentifier("wishlistRemove")
+        remove.setAccessibilityLabel("Remove \(item.title) from wishlist")
+        trailing += [target, remove]
+        let view = dealRow(artwork: symbolArtwork(item.appStoreId != nil ? "apple.logo" : "gamecontroller", size: 28), title: item.title,
+                           detail: dealBadges(badges), detailTip: tips.joined(separator: "\n"), trailing: trailing,
+                           accessibility: "Search every store for \(item.title). " + tips.joined(separator: ". ")) { [weak self] in
+            self?.searchFor(item.title)
+        }
+        view.setAccessibilityIdentifier("wishlistRow")
+        return view
+    }
+
+    private func searchFor(_ title: String) {
+        shopSearchField.stringValue = title
+        selectShopTab(3)
+        shopSearchSubmitted()
+    }
+
+    private func renderWishlist() {
+        wishlistList.arrangedSubviews.forEach { $0.removeFromSuperview() }
+        guard let wishlist else {
+            wishlistStatus.stringValue = wishlistLoading ? "Loading your wishlist\u{2026}" : ""
+            return
+        }
+        let items = wishlist.items.sorted { a, b in
+            (a.onSale || a.targetHit) != (b.onSale || b.targetHit) ? (a.onSale || a.targetHit)
+                : a.title.localizedCaseInsensitiveCompare(b.title) == .orderedAscending
+        }
+        items.forEach { addShopRow(wishlistRow($0), to: wishlistList) }
+        var lines: [String] = []
+        if let note = wishlist.note { lines.append(note) }
+        if items.isEmpty {
+            lines.append("Your wishlist is empty. Click \u{2661} on any deal, free game or search result to add it.")
+        } else {
+            let hits = items.filter { $0.onSale || $0.targetHit }.count
+            lines.append("\(items.count) game\(items.count == 1 ? "" : "s")" + (hits > 0 ? ", \(hits) on sale or at your target" : "") + ".")
+        }
+        lines.append(wishlist.offline ? "Saved on your Couch Cube drive; it works offline and moves with the drive."
+            : "Saved on your Couch Cube drive (Couch Cube/Wishlist/wishlist.json); it works offline and moves with the drive. Prices are checked when you open Cube Shop or refresh.")
+        wishlistStatus.stringValue = lines.joined(separator: " ")
+    }
+
+    @objc private func wishlistTargetClicked(_ sender: NSButton) {
+        guard let key = sender.identifier?.rawValue, let item = wishlist?.items.first(where: { $0.key == key }), wishlistEditable,
+              let choice = askTargetPrice(item.title, item.targetPrice) else { return }
+        changeWishlist(["--target", key] + (choice.map { ["--price", String(format: "%.2f", $0)] } ?? []))
+    }
+
+    @objc private func wishlistRemoveClicked(_ sender: NSButton) {
+        guard let key = sender.identifier?.rawValue, wishlistEditable else { return }
+        changeWishlist(["--remove", key])
+    }
+
+    /// In-memory stand-ins for the shop backend used by smoke tests (no network, no drive writes).
+    private func smokeShopReply(_ arguments: [String]) -> (Int32, String) {
+        func json(_ object: Any) -> String { String(decoding: try! JSONSerialization.data(withJSONObject: object, options: [.sortedKeys]), as: UTF8.self) }
+        func report() -> [String: Any] {
+            ["items": smokeWishlist, "library": smokeWishlistOffline ? NSNull() : "/Volumes/Smoke/Couch Cube" as Any,
+             "read_only": smokeWishlistOffline, "offline": smokeWishlistOffline, "merged": 0,
+             "note": smokeWishlistOffline ? "The Couch Cube drive isn't connected. Showing the last saved wishlist (read-only)." as Any : NSNull()]
+        }
+        func value(_ flag: String) -> String? { arguments.firstIndex(of: flag).flatMap { arguments.indices.contains($0 + 1) ? arguments[$0 + 1] : nil } }
+        switch arguments.first {
+        case "rates": return (0, smokeRatesJSON)
+        case "shop-search": return (0, smokeShopSearchJSON)
+        case "shop-home":
+            var home = try! JSONSerialization.jsonObject(with: Data(smokeShopHomeJSON.utf8)) as! [String: Any]
+            home["wishlist"] = report()
+            if value("--scope") == "all" { home["scope"] = "all" }
+            return (0, json(home))
+        case "wishlist":
+            if arguments.contains("--check") || arguments.count == 1 { return (0, json(report())) }
+            guard !smokeWishlistOffline else { return (1, "ERROR: Connect your Couch Cube drive to change the wishlist.") }
+            if let raw = value("--add"), let item = try? JSONSerialization.jsonObject(with: Data(raw.utf8)) as? [String: String] {
+                let key = item["game_id"].map { "cs:" + $0 } ?? item["app_store_id"].map { "app:" + $0 } ?? "title:" + (item["title"] ?? "").lowercased()
+                smokeWishlist.append(["key": key, "title": item["title"] ?? "", "game_id": item["game_id"] ?? NSNull(),
+                                      "steam_app_id": item["steam_app_id"] ?? NSNull(), "app_store_id": item["app_store_id"] ?? NSNull(),
+                                      "added": 1_700_000_000, "target_price": NSNull(), "best": NSNull(), "on_sale": false,
+                                      "target_hit": false, "sale_text": NSNull()])
+            } else if let key = value("--remove") {
+                smokeWishlist.removeAll { $0["key"] as? String == key }
+            } else if let key = value("--target"), let index = smokeWishlist.firstIndex(where: { $0["key"] as? String == key }) {
+                smokeWishlist[index]["target_price"] = value("--price").flatMap(Double.init) ?? NSNull()
+            }
+            return (0, json(report()))
+        default: return (1, "ERROR: unknown command")
+        }
+    }
+
+    @objc private func retryDeals() { loadDeals(page: 0, refresh: false) }
+
+    @objc private func loadMoreDeals() {
+        guard dealsMode.selectedSegment == 0, storeDealsHasMore else { return }
+        loadDeals(page: storeDealsPage + 1, refresh: false)
+    }
+
     private func headerIconButton(_ symbol: String, label: String, action: Selector) -> NSButton {
         let control = NSButton(title: "", target: self, action: action)
         control.image = symbol.isEmpty ? nil : NSImage(systemSymbolName: symbol, accessibilityDescription: label)
@@ -4489,21 +8376,21 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
         var hiddenApps: [ObjectIdentifier: Int] = [:]
         let order = ["steam", "steamac", "gog-galaxy", "ea", "epic-games", "battle-net", "curseforge", "es-de", "retroarch-metal", "dolphin", "pcsx2", "rpcs3", "cemu-wiiu", "switch", "porting-kit", "crossover"]
         appStates.sort { (order.firstIndex(of: $0.id) ?? 100) < (order.firstIndex(of: $1.id) ?? 100) }
-        if let steam = appStates.firstIndex(where: { $0.id == "steam" }) {
-            if appStates[steam].installed || !collapsedAppCategories.contains("TV menus") {
-                addAppRow(appStates[steam], index: steam, to: appMenuRows, title: "Steam Big Picture",
-                          purpose: "Steam TV menu")
+        for (index, app) in appStates.enumerated() {
+            for placement in appPlacements(app) {
+                if !appPlacementVisible(app, placement) {
+                    hiddenApps[ObjectIdentifier(placement.rows), default: 0] += 1
+                    continue
+                }
+                addAppRow(app, index: index, to: placement.rows, title: placement.title, purpose: placement.purpose)
             }
         }
-        for (index, app) in appStates.enumerated() {
-            let rows = app.id == "es-de" ? appMenuRows :
-                computerGameApps.contains(app.id) ? appPCRows :
-                ["porting-kit", "crossover"].contains(app.id) ? appWindowsRows : appRetroRows
-            if !app.installed && collapsedAppCategories.contains(appCategoryTitle(for: rows)) {
-                hiddenApps[ObjectIdentifier(rows), default: 0] += 1
+        for item in windowsDownloads {
+            if !item.downloaded && windowsDownloadJobs[item.id] == nil && collapsedAppCategories.contains("Windows games") {
+                hiddenApps[ObjectIdentifier(appWindowsRows), default: 0] += 1
                 continue
             }
-            addAppRow(app, index: index, to: rows)
+            addRow(makeWindowsDownloadRow(item), to: appWindowsRows)
         }
         for rows in [appMenuRows, appPCRows, appWindowsRows, appRetroRows] {
             guard let hidden = hiddenApps[ObjectIdentifier(rows)] else { continue }
@@ -4515,6 +8402,20 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
         updateAllButton.isEnabled = task == nil && appStates.contains { $0.installed && $0.managed && $0.update?.isEmpty == false }
         updateAllButton.isHidden = !appStates.contains { $0.installed && $0.managed && $0.update?.isEmpty == false }
         if highlightedAppID != nil { DispatchQueue.main.async { self.highlightAppRow() } }
+    }
+
+    /// Every place an app is listed. One app can appear in several categories (Steam is both a TV menu and a PC game app);
+    /// all its rows are built from the same app state and operation, so they always show the same status.
+    private func appPlacements(_ app: ManagedApp) -> [(rows: NSStackView, title: String?, purpose: String?)] {
+        if app.id == "steam" { return [(appMenuRows, "Steam Big Picture", "Steam TV menu"), (appPCRows, nil, nil)] }
+        let rows = app.id == "es-de" ? appMenuRows :
+            computerGameApps.contains(app.id) ? appPCRows :
+            ["porting-kit", "crossover"].contains(app.id) ? appWindowsRows : appRetroRows
+        return [(rows, nil, nil)]
+    }
+
+    private func appPlacementVisible(_ app: ManagedApp, _ placement: (rows: NSStackView, title: String?, purpose: String?)) -> Bool {
+        app.installed || !collapsedAppCategories.contains(appCategoryTitle(for: placement.rows))
     }
 
     private let appPurposes = [
@@ -4588,29 +8489,282 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
 
     private func addAppRow(_ app: ManagedApp, index: Int, to rows: NSStackView, title: String? = nil,
                            purpose: String? = nil) {
-        let hasUpdate = app.installed && app.managed && app.update?.isEmpty == false
+        addRow(makeAppRow(app, index: index, title: title, purpose: purpose), to: rows)
+    }
+
+    private func addRow(_ line: NSView, to rows: NSStackView) {
+        rows.addArrangedSubview(line)
+        line.widthAnchor.constraint(equalTo: rows.widthAnchor).isActive = true
+        let separator = self.separator()
+        rows.addArrangedSubview(separator)
+        separator.widthAnchor.constraint(equalTo: rows.widthAnchor).isActive = true
+    }
+
+    /// Replaces only this app's row(s) in place, so the list keeps its scroll position and other rows don't flicker.
+    private func refreshAppRow(_ id: String) {
+        guard let index = appStates.firstIndex(where: { $0.id == id }) else { return }
+        let app = appStates[index]
+        let placements = appPlacements(app).filter { appPlacementVisible(app, $0) }
+        let existing = [appMenuRows, appPCRows, appWindowsRows, appRetroRows].flatMap { rows in
+            rows.arrangedSubviews.filter { $0.identifier?.rawValue == "app-row-" + id }.map { (rows, $0) }
+        }
+        // A row appeared or disappeared (for example in a collapsed category): rebuild the list instead.
+        guard existing.count == placements.count,
+              zip(existing, placements).allSatisfy({ $0.0 === $1.rows }) else { return renderApps() }
+        for ((rows, old), placement) in zip(existing, placements) {
+            guard let position = rows.arrangedSubviews.firstIndex(of: old) else { continue }
+            let line = makeAppRow(app, index: index, title: placement.title, purpose: placement.purpose)
+            actions.removeAll { $0.isDescendant(of: old) }
+            rows.insertArrangedSubview(line, at: position)
+            line.widthAnchor.constraint(equalTo: rows.widthAnchor).isActive = true
+            rows.removeArrangedSubview(old)
+            old.removeFromSuperview()
+        }
+    }
+
+    private func loadWindowsDownloads(verifying id: String? = nil) {
+        windowsDownloadsGeneration += 1
+        let generation = windowsDownloadsGeneration
+        windowsDownloadsRead { [weak self] code, data in
+            guard let self, generation == self.windowsDownloadsGeneration else { return }
+            let reply = code == 0 ? try? JSONDecoder().decode(WindowsDownloadsReply.self, from: data) : nil
+            if let id, self.windowsDownloadJobs[id]?.running == true {
+                if reply?.items.first(where: { $0.id == id })?.downloaded == true {
+                    self.windowsDownloadJobs[id] = nil
+                } else {
+                    self.windowsDownloadJobs[id]?.running = false
+                    self.windowsDownloadJobs[id]?.failure = "The download finished, but Couch Cube couldn't find the installer in Downloads."
+                }
+            }
+            guard let reply else {
+                if let id { self.refreshWindowsDownloadRow(id) }
+                return
+            }
+            let changedList = reply.items.map(\.id) != self.windowsDownloads.map(\.id)
+            let changed = reply.items.filter { item in self.windowsDownloads.first { $0.id == item.id } != item }.map(\.id)
+            let libraryChanged = reply.library != self.windowsLibrary
+            self.windowsDownloads = reply.items
+            self.windowsLibrary = reply.library
+            if changedList || libraryChanged { self.renderApps() }
+            else { Set(changed + (id.map { [$0] } ?? [])).forEach { self.refreshWindowsDownloadRow($0) } }
+        }
+    }
+
+    private func refreshWindowsDownloadRow(_ id: String) {
+        guard let item = windowsDownloads.first(where: { $0.id == id }),
+              let old = appWindowsRows.arrangedSubviews.first(where: { $0.identifier?.rawValue == "win-row-" + id }),
+              let position = appWindowsRows.arrangedSubviews.firstIndex(of: old) else { return renderApps() }
+        let line = makeWindowsDownloadRow(item)
+        actions.removeAll { $0.isDescendant(of: old) }
+        appWindowsRows.insertArrangedSubview(line, at: position)
+        line.widthAnchor.constraint(equalTo: appWindowsRows.widthAnchor).isActive = true
+        appWindowsRows.removeArrangedSubview(old)
+        old.removeFromSuperview()
+    }
+
+    private func makeWindowsDownloadRow(_ item: WindowsDownloadItem) -> NSView {
+        let index = windowsDownloads.firstIndex(of: item) ?? 0
+        let job = windowsDownloadJobs[item.id]
         let controls = row([])
-        if app.id == "crossover" && app.installed {
-            let open = button("Open", #selector(openCrossOver(_:)))
-            open.tag = index
-            controls.addArrangedSubview(open)
-        }
-        if app.installed {
-            controls.addArrangedSubview(appPillButton("Remove", app: app, index: index,
-                                                      action: #selector(appAction(_:)), destructive: true))
+        if job?.running == true {
+            let progress = NSProgressIndicator()
+            progress.style = .spinning
+            progress.controlSize = .small
+            progress.minValue = 0
+            progress.maxValue = 1
+            // Determinate only from the real byte count; spins when the server didn't send a size.
+            progress.isIndeterminate = (job?.total ?? 0) == 0
+            if progress.isIndeterminate { progress.startAnimation(nil) }
+            else { progress.doubleValue = Double(job!.done) / Double(job!.total) }
+            let cancel = NSButton(image: NSImage(systemSymbolName: "xmark.circle.fill", accessibilityDescription: "Cancel download")!,
+                                  target: self, action: #selector(cancelWindowsDownload(_:)))
+            cancel.isBordered = false
+            cancel.contentTintColor = .secondaryLabelColor
+            cancel.tag = index
+            cancel.toolTip = "Cancel downloading \(item.name)"
+            cancel.setAccessibilityLabel(cancel.toolTip)
+            let slot = row([progress, cancel])
+            slot.spacing = 6
+            slot.identifier = NSUserInterfaceItemIdentifier("win-progress")
+            slot.widthAnchor.constraint(equalToConstant: 64).isActive = true
+            slot.heightAnchor.constraint(equalToConstant: 26).isActive = true
+            progress.setAccessibilityLabel(windowsDownloadStatus(item, job: job).title + " " + item.name)
+            controls.addArrangedSubview(slot)
+        } else if item.downloaded {
+            let help = NSButton(image: NSImage(systemSymbolName: "questionmark.circle", accessibilityDescription: nil)!,
+                                target: self, action: #selector(windowsDownloadHelp(_:)))
+            help.isBordered = false
+            help.contentTintColor = .secondaryLabelColor
+            help.tag = index
+            help.toolTip = "How to run this installer"
+            help.setAccessibilityLabel("How to run \(item.name)")
+            let show = button("Show in Finder", #selector(showWindowsDownload(_:)))
+            show.tag = index
+            show.setAccessibilityLabel("Show \(item.name) installer in Finder")
+            controls.addArrangedSubview(help)
+            controls.addArrangedSubview(show)
         } else {
-            controls.addArrangedSubview(appPillButton("Get", app: app, index: index, action: #selector(appAction(_:))))
+            let get = NSButton(title: job?.failure == nil ? "Get" : "Retry", target: self, action: #selector(getWindowsDownload(_:)))
+            get.bezelStyle = .rounded
+            get.tag = index
+            get.isEnabled = windowsLibrary != nil
+            get.toolTip = windowsLibrary == nil ? "Set up a game library first. The installer is saved in its Downloads folder." :
+                "Download the official \(item.kind == "msi" ? ".msi" : ".exe") installer from \(item.vendor)"
+            get.setAccessibilityLabel("\(get.title) \(item.name) installer")
+            get.widthAnchor.constraint(equalToConstant: 64).isActive = true
+            controls.addArrangedSubview(get)
         }
-        let unknown = !appsHaveResults && app.path.isEmpty && app.version.isEmpty
-        let initialCheck = appsChecking && unknown
-        let state = unknown ? (appsChecking ? "Checking..." : "Not checked") :
-            app.installed ? (hasUpdate ? "Installed · Update available" : "Installed") : "Not installed"
-        let statusLine = row([statusIndicator(state,
-            color: initialCheck ? .systemBlue : unknown ? .systemGray :
-                app.installed ? hasUpdate ? .systemYellow : .systemGreen : .systemRed,
-            pulsing: initialCheck), NSView()])
+        let state = windowsDownloadStatus(item, job: job)
+        let statusLine = row([statusIndicator(state.title, color: state.color, pulsing: state.pulsing), NSView()])
+        statusLine.identifier = NSUserInterfaceItemIdentifier("app-status")
+        statusLine.distribution = .fill
+        let detail: NSTextField
+        if let failure = job?.failure, job?.running != true {
+            detail = text(failure, size: 11, secondary: true)
+            detail.textColor = .systemRed
+        } else if item.downloaded, let file = item.file {
+            let size = item.size.map { " \u{00B7} " + ByteCountFormatter.string(fromByteCount: $0, countStyle: .file) } ?? ""
+            detail = text((file as NSString).lastPathComponent + size +
+                          " \u{00B7} Not run or installed. Open it with Porting Kit or CrossOver.", size: 11, secondary: true)
+            detail.toolTip = file + (item.sha256.map { "\nSHA-256 \($0)" } ?? "")
+        } else {
+            detail = text("Official Windows installer from \(item.vendor) \u{00B7} Saved to Downloads in your game library",
+                          size: 11, secondary: true)
+        }
+        detail.identifier = NSUserInterfaceItemIdentifier("win-detail")
+        let info = column([statusLine, detail])
+        info.spacing = 4
+        let line = settingsRow(item.name, subtitle: "", symbol: "arrow.down.app", color: .systemGray, trailing: controls, detail: info)
+        let macID = String(item.id.dropFirst(4))
+        if let image = Bundle.main.resourceURL.flatMap({ NSImage(contentsOf: $0.appendingPathComponent("AppIcons/\(macID).png")) }),
+           let stack = line as? NSStackView, let first = stack.arrangedSubviews.first {
+            let icon = NSImageView(image: image)
+            icon.widthAnchor.constraint(equalToConstant: 32).isActive = true
+            icon.heightAnchor.constraint(equalToConstant: 32).isActive = true
+            stack.removeArrangedSubview(first)
+            first.removeFromSuperview()
+            stack.insertArrangedSubview(icon, at: 0)
+        }
+        line.identifier = NSUserInterfaceItemIdentifier("win-row-" + item.id)
+        return line
+    }
+
+    @objc private func getWindowsDownload(_ sender: NSButton) {
+        guard windowsDownloads.indices.contains(sender.tag), windowsLibrary != nil else { return }
+        let item = windowsDownloads[sender.tag]
+        guard windowsDownloadJobs[item.id]?.running != true else { return }
+        windowsDownloadJobs[item.id] = WindowsDownloadJob()
+        refreshWindowsDownloadRow(item.id)
+        let cancel = windowsDownloadRun(item.id, { [weak self] line in
+            guard let self, let progress = windowsDownloadProgress(line), self.windowsDownloadJobs[item.id]?.running == true else { return }
+            self.windowsDownloadJobs[item.id]?.done = progress.done
+            self.windowsDownloadJobs[item.id]?.total = progress.total
+            self.refreshWindowsDownloadRow(item.id)
+        }, { [weak self] code, errors in
+            guard let self, let job = self.windowsDownloadJobs[item.id], job.running else { return }
+            if job.canceled {
+                self.windowsDownloadJobs[item.id] = nil
+                self.loadWindowsDownloads(verifying: nil)
+                self.refreshWindowsDownloadRow(item.id)
+            } else if code == 0 {
+                self.loadWindowsDownloads(verifying: item.id)
+            } else {
+                self.windowsDownloadJobs[item.id]?.running = false
+                self.windowsDownloadJobs[item.id]?.cancel = nil
+                self.windowsDownloadJobs[item.id]?.failure = backendErrorMessage(errors, fallback: "The download failed. Nothing was saved.")
+                self.refreshWindowsDownloadRow(item.id)
+            }
+        })
+        if windowsDownloadJobs[item.id]?.running == true { windowsDownloadJobs[item.id]?.cancel = cancel }
+    }
+
+    @objc private func cancelWindowsDownload(_ sender: NSButton) {
+        guard windowsDownloads.indices.contains(sender.tag) else { return }
+        cancelWindowsDownload(id: windowsDownloads[sender.tag].id)
+    }
+
+    private func cancelWindowsDownload(id: String) {
+        guard windowsDownloadJobs[id]?.running == true else { return }
+        windowsDownloadJobs[id]?.canceled = true
+        windowsDownloadJobs[id]?.cancel?()
+    }
+
+    @objc private func showWindowsDownload(_ sender: NSButton) {
+        guard windowsDownloads.indices.contains(sender.tag), let file = windowsDownloads[sender.tag].file else { return }
+        let url = URL(fileURLWithPath: file)
+        // Only reveal files the backend reported inside the library's Downloads folder.
+        guard let library = windowsLibrary, url.standardizedFileURL.deletingLastPathComponent().path ==
+                URL(fileURLWithPath: library).appendingPathComponent("Downloads").standardizedFileURL.path,
+              FileManager.default.fileExists(atPath: url.path) else {
+            loadWindowsDownloads()
+            return
+        }
+        NSWorkspace.shared.activateFileViewerSelecting([url])
+    }
+
+    @objc private func windowsDownloadHelp(_ sender: NSButton) {
+        guard windowsDownloads.indices.contains(sender.tag) else { return }
+        let item = windowsDownloads[sender.tag]
+        let alert = NSAlert()
+        alert.messageText = "Running \(item.name)"
+        alert.informativeText = "Couch Cube only downloaded the official installer. It doesn't run Windows programs.\n\n" +
+            "To install the launcher, open the installer with a Windows compatibility app such as Porting Kit or CrossOver " +
+            "(listed above under Windows games). Whether a launcher or game works depends on that app and its settings."
+        alert.addButton(withTitle: "OK")
+        alert.addButton(withTitle: "Show Porting Kit & CrossOver")
+        let show = { (response: NSApplication.ModalResponse) in
+            guard response == .alertSecondButtonReturn else { return }
+            self.highlightedAppID = "porting-kit"
+            self.highlightAppRow()
+        }
+        if window.isVisible && window.attachedSheet == nil { alert.beginSheetModal(for: window, completionHandler: show) }
+        else { show(alert.runModal()) }
+    }
+
+    private func makeAppRow(_ app: ManagedApp, index: Int, title: String? = nil, purpose: String? = nil) -> NSView {
+        let controls = row([])
+        let operation = appOperations[app.id]
+        if operation?.running == true {
+            // A spinner takes the action button's place at the same size; Homebrew doesn't report real percentages here.
+            let progress = NSProgressIndicator()
+            progress.style = .spinning
+            progress.controlSize = .small
+            progress.isIndeterminate = true
+            progress.startAnimation(nil)
+            progress.translatesAutoresizingMaskIntoConstraints = false
+            let slot = NSView()
+            slot.addSubview(progress)
+            NSLayoutConstraint.activate([
+                slot.widthAnchor.constraint(equalToConstant: app.installed ? 26 : 64),
+                slot.heightAnchor.constraint(equalToConstant: 26),
+                progress.centerXAnchor.constraint(equalTo: slot.centerXAnchor),
+                progress.centerYAnchor.constraint(equalTo: slot.centerYAnchor)
+            ])
+            slot.identifier = NSUserInterfaceItemIdentifier("app-progress")
+            slot.setAccessibilityElement(true)
+            slot.setAccessibilityRole(.progressIndicator)
+            slot.setAccessibilityLabel(appRowStatus(app, operation: operation, unknown: false, checking: false).title + " " + app.name)
+            controls.addArrangedSubview(slot)
+        } else {
+            if app.id == "crossover" && app.installed {
+                let open = button("Open", #selector(openCrossOver(_:)))
+                open.tag = index
+                controls.addArrangedSubview(open)
+            }
+            if app.installed {
+                controls.addArrangedSubview(appPillButton("Remove", app: app, index: index,
+                                                          action: #selector(appAction(_:)), destructive: true))
+            } else {
+                controls.addArrangedSubview(appPillButton(operation?.failure == nil ? "Get" : "Retry", app: app, index: index,
+                                                          action: #selector(appAction(_:))))
+            }
+        }
+        let unknown = !appsHaveResults && app.path.isEmpty && app.version.isEmpty && operation == nil
+        let state = appRowStatus(app, operation: operation, unknown: unknown, checking: appsChecking)
+        let statusLine = row([statusIndicator(state.title, color: state.color, pulsing: state.pulsing), NSView()])
+        statusLine.identifier = NSUserInterfaceItemIdentifier("app-status")
         controls.isHidden = unknown
-        controls.arrangedSubviews.compactMap { $0 as? NSControl }.forEach { $0.isEnabled = !appsChecking }
+        controls.arrangedSubviews.compactMap { $0 as? NSControl }.forEach { $0.isEnabled = !appsChecking && task == nil }
         statusLine.toolTip = app.installed ? "Version \(app.version)" + (app.update.map { " · Update \($0) available" } ?? "") : nil
         statusLine.distribution = .fill
         let info = column([statusLine,
@@ -4630,11 +8784,7 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
             stack.insertArrangedSubview(icon, at: 0)
         }
         line.identifier = NSUserInterfaceItemIdentifier("app-row-" + app.id)
-        rows.addArrangedSubview(line)
-        line.widthAnchor.constraint(equalTo: rows.widthAnchor).isActive = true
-        let separator = self.separator()
-        rows.addArrangedSubview(separator)
-        separator.widthAnchor.constraint(equalTo: rows.widthAnchor).isActive = true
+        return line
     }
 
     private func renderTVMenus() {
@@ -4703,11 +8853,10 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
         alert.addButton(withTitle: "Cancel")
         guard alert.runModal() == .alertFirstButtonReturn else { return }
         updateNextApp(updates)
-        showActivity()
     }
 
     private func updateNextApp(_ remaining: [ManagedApp]) {
-        guard let app = remaining.first else { loadApps(); return }
+        guard let app = remaining.first else { return }
         guard !NSWorkspace.shared.runningApplications.contains(where: { $0.bundleURL?.path == app.path }) else {
             let message = "Quit \(app.name), then try Update all again."
             append(message + "\n")
@@ -4716,14 +8865,9 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
             }
             return
         }
-        execute(["manage-app", "--package", app.id, "--action", "update", "--confirm"]) { code, _ in
-            if code == 0 { self.updateNextApp(Array(remaining.dropFirst())) }
-            else {
-                let message = "Update stopped at \(app.name). Open Activity for details."
-                self.fetchApps(updates: false) { success in
-                    if success { self.appsStatus.stringValue = message }
-                }
-            }
+        runAppOperation(app, action: "update") { verified in
+            if verified { self.updateNextApp(Array(remaining.dropFirst())) }
+            else { self.appsStatus.stringValue = "Update stopped at \(app.name). Try again, or choose View > Activity for details." }
         }
     }
 
@@ -4894,10 +9038,73 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
             }
             return
         }
-        execute(["manage-app", "--package", app.id, "--action", action, "--confirm"]) { code, _ in
-            if code == 0 { self.loadApps() }
+        runAppOperation(app, action: action)
+    }
+
+    /// Runs one Homebrew app operation, then re-checks only that app before showing it as done (green).
+    private func runAppOperation(_ app: ManagedApp, action: String, completed: ((Bool) -> Void)? = nil) {
+        guard task == nil, appOperations[app.id]?.running != true else {
+            appsStatus.stringValue = "Wait for the current operation to finish."
+            completed?(false)
+            return
         }
-        showActivity()
+        appsStatus.stringValue = ""
+        // Results of app checks started before this change must not overwrite it.
+        appsLoadGeneration += 1
+        appsChecking = false
+        appOperations[app.id] = AppOperation(action: action, phase: nil, failure: nil, running: true)
+        refreshAppRow(app.id)
+        appOperationOutput = { [weak self] output in
+            guard let self, let phase = appOperationPhase(output, action: action),
+                  self.appOperations[app.id]?.running == true, self.appOperations[app.id]?.phase != phase else { return }
+            self.appOperations[app.id]?.phase = phase
+            self.refreshAppRow(app.id)
+        }
+        appOperationRun(["manage-app", "--package", app.id, "--action", action, "--confirm"]) { code in
+            self.appOperationOutput = nil
+            self.verifyApp(app.id, action: action, succeeded: code == 0, completed: completed)
+        }
+    }
+
+    private func verifyApp(_ id: String, action: String, succeeded: Bool, completed: ((Bool) -> Void)?) {
+        appVerifyTokens[id, default: 0] += 1
+        let token = appVerifyTokens[id]!
+        appOperations[id]?.phase = "Checking"
+        refreshAppRow(id)
+        appVerifyRead(["apps", "--updates", "--package", id]) { code, data in
+            guard self.appVerifyTokens[id] == token else { return }
+            let verified = code == 0 ? (try? JSONDecoder().decode([ManagedApp].self, from: data))?.first { $0.id == id } : nil
+            if let verified, let index = self.appStates.firstIndex(where: { $0.id == id }) { self.appStates[index] = verified }
+            let reached = verified.map { action == "remove" ? !$0.installed : $0.installed && $0.update?.isEmpty != false } ?? false
+            let name = verified?.name ?? self.appStates.first { $0.id == id }?.name ?? id
+            if succeeded && reached {
+                self.appOperations[id] = nil
+            } else {
+                let verb = action == "remove" ? "remove" : action == "update" ? "update" : "install"
+                self.appOperations[id] = AppOperation(action: action, phase: nil,
+                    failure: verified == nil ? "Couldn't confirm the \(verb)" : "Couldn't \(verb)", running: false)
+                self.appsStatus.stringValue = verified == nil
+                    ? "Couldn't check \(name) after the \(verb). Reopen App Store to check again."
+                    : "Couldn't \(verb) \(name). Try again, or choose View > Activity for details."
+            }
+            // Any full app check still in flight predates this verified state.
+            self.appsLoadGeneration += 1
+            self.appsChecking = false
+            self.lastAppsData = nil
+            if let report = self.report {
+                self.report = Assessment(state: report.state, issues: report.issues, notes: report.notes,
+                                         missing: self.appStates.filter { !$0.installed }.map { $0.id },
+                                         preferred_frontend: self.preferredFrontend ?? report.preferred_frontend)
+                self.updateSetupSummary()
+            }
+            self.refreshAppRow(id)
+            let updates = self.appStates.contains { $0.installed && $0.managed && $0.update?.isEmpty == false }
+            self.updateAllButton.isHidden = !updates
+            self.updateAllButton.isEnabled = updates && self.task == nil
+            self.renderTVMenus()
+            self.renderGeneral()
+            completed?(succeeded && reached)
+        }
     }
 
     private func loadSystems() {
@@ -4929,7 +9136,7 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
         guard task == nil, let root = consoleRoot(), report?.state == "valid layout" else {
             consolesChecking = false
             renderSystems()
-            consoleStatus.stringValue = "Create game folders in Settings → Library storage first. Wait for any current operation to finish."
+            consoleStatus.stringValue = "Create game folders in Settings → Game library first. Wait for any current operation to finish."
             return
         }
         consoleRefreshPending = false
@@ -4942,9 +9149,9 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
             guard self.consoleRoot() == root else { return }
             guard code == 0 else {
                 if !self.consolesLoaded { self.renderSystems() }
-                self.consoleStatus.stringValue = ""
+                self.consoleStatus.stringValue = "Couldn't read console selection. Choose View > Activity for details."
                 self.append("Couldn't read console selection.\n")
-                self.showActivity()
+                self.activityNeeded()
                 return
             }
             do {
@@ -4963,6 +9170,14 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
         clearRows(consoleRows)
         systemSwitches = []
         systemStatusLines = []
+        consoleBulkToggles = []
+        let present = Set(consoleSystems.map(\.id))
+        func ids(_ groups: [String]) -> Set<String> {
+            Set(ConsoleArtwork.groups.filter { groups.contains($0.title) }.flatMap(\.systems)).intersection(present)
+        }
+        let allRow = consoleBulkRow("All consoles", scope: "all consoles", ids: present, size: 13)
+        consoleRows.addArrangedSubview(allRow)
+        allRow.widthAnchor.constraint(equalTo: consoleRows.widthAnchor).isActive = true
         let order = ConsoleArtwork.groups.flatMap { $0.systems }
         consoleSystems.sort {
             (order.firstIndex(of: $0.id) ?? 100) < (order.firstIndex(of: $1.id) ?? 100)
@@ -4974,7 +9189,9 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
             rows.alignment = .leading
             rows.spacing = 0
             manufacturerRows[manufacturer] = rows
-            let box = card(manufacturer, subtitle: nil, views: [rows])
+            let groups = ConsoleArtwork.groups.map(\.title).filter { $0 == manufacturer || ($0.hasPrefix(manufacturer) && manufacturer == "Nintendo") }
+            let heading = consoleBulkRow(manufacturer, scope: manufacturer + " consoles", ids: ids(groups), size: 13)
+            let box = card("", subtitle: nil, views: [heading, rows])
             consoleRows.addArrangedSubview(box)
             box.widthAnchor.constraint(equalTo: consoleRows.widthAnchor).isActive = true
         }
@@ -4985,7 +9202,19 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
             guard let rows = manufacturerRows[manufacturer] else { continue }
             if group != previousGroup {
                 if manufacturer == "Nintendo" {
-                    addSectionHeading(group == "Nintendo home consoles" ? "Home consoles" : "Handhelds", to: rows)
+                    let title = group == "Nintendo home consoles" ? "Home consoles" : "Handhelds"
+                    let heading = consoleBulkRow(title, scope: "Nintendo " + title.lowercased(), ids: ids([group]), size: 12)
+                    let container = NSView()
+                    heading.translatesAutoresizingMaskIntoConstraints = false
+                    container.addSubview(heading)
+                    NSLayoutConstraint.activate([
+                        heading.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+                        heading.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+                        heading.topAnchor.constraint(equalTo: container.topAnchor, constant: rows.arrangedSubviews.isEmpty ? 4 : 18),
+                        heading.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -6)
+                    ])
+                    rows.addArrangedSubview(container)
+                    container.widthAnchor.constraint(equalTo: rows.widthAnchor).isActive = true
                 }
                 previousGroup = group
             } else {
@@ -5021,6 +9250,70 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
             line.widthAnchor.constraint(equalTo: rows.widthAnchor).isActive = true
             line.heightAnchor.constraint(greaterThanOrEqualToConstant: 58).isActive = true
         }
+        updateConsoleBulkToggles()
+    }
+
+    /// A heading with a trailing switch for every console beneath it; "3 of 7" marks a mixed group.
+    private func consoleBulkRow(_ title: String, scope: String, ids: Set<String>, size: CGFloat) -> NSStackView {
+        let heading = text(title, size: size, secondary: size < 13)
+        heading.font = .systemFont(ofSize: size, weight: .semibold)
+        let count = text("", size: 11, secondary: true)
+        count.identifier = NSUserInterfaceItemIdentifier("console-bulk-count")
+        let toggle = NSSwitch()
+        toggle.controlSize = .small
+        toggle.target = self
+        toggle.action = #selector(toggleConsoleGroup(_:))
+        toggle.identifier = NSUserInterfaceItemIdentifier("console-bulk")
+        consoleBulkToggles.append((toggle, count, ids, scope))
+        let line = row([heading, NSView(), count, toggle])
+        line.distribution = .fill
+        return line
+    }
+
+    /// On only when every console beneath is shown; a mixed group shows Off plus a count, so a click shows all.
+    private func updateConsoleBulkToggles() {
+        let enabled = Set(consoleSystems.filter(\.enabled).map(\.id))
+        for bulk in consoleBulkToggles {
+            let shown = bulk.ids.intersection(enabled).count, total = bulk.ids.count
+            let mixed = shown > 0 && shown < total
+            bulk.toggle.state = total > 0 && shown == total ? .on : .off
+            bulk.toggle.isEnabled = consolesLoaded && total > 0
+            bulk.count.stringValue = mixed ? "\(shown) of \(total)" : ""
+            bulk.count.isHidden = !mixed
+            let state = shown == total ? "all \(total) shown" : shown == 0 ? "all hidden" : "\(shown) of \(total) shown"
+            let action = shown == total ? "Hide" : "Show"
+            bulk.toggle.setAccessibilityLabel("Show all \(bulk.scope), \(state)")
+            bulk.toggle.toolTip = "\(action) all \(bulk.scope) (\(state))"
+        }
+    }
+
+    /// Same fast path as single switches: rows update in place and one debounced save covers the whole batch.
+    /// Showing consoles never installs emulators or asks to.
+    @objc private func toggleConsoleGroup(_ sender: NSSwitch) {
+        guard consolesLoaded, let bulk = consoleBulkToggles.first(where: { $0.toggle === sender }),
+              systemSwitches.count == consoleSystems.count else {
+            updateConsoleBulkToggles()
+            consoleStatus.stringValue = "Wait until your consoles are loaded."
+            return
+        }
+        if esdeRunning {
+            updateConsoleBulkToggles()
+            consoleStatus.stringValue = "Quit ES-DE first. It must not overwrite updated frontend settings."
+            return
+        }
+        let show = sender.state == .on
+        if consolePersistedEnabled == nil { consolePersistedEnabled = Set(consoleSystems.filter(\.enabled).map(\.id)) }
+        var changed = false
+        for index in consoleSystems.indices where bulk.ids.contains(consoleSystems[index].id) && consoleSystems[index].enabled != show {
+            consoleSystems[index].enabled = show
+            systemSwitches[index].state = show ? .on : .off
+            fillSystemStatus(systemStatusLines[index], consoleSystems[index])
+            changed = true
+        }
+        updateConsoleBulkToggles()
+        guard changed else { return }
+        consoleEditGeneration += 1
+        scheduleConsoleSave()
     }
 
     private func fillSystemStatus(_ statusLine: NSStackView, _ system: ConsoleSystem) {
@@ -5071,7 +9364,52 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
             systemSwitches[index].isEnabled = consolesLoaded
             fillSystemStatus(systemStatusLines[index], system)
         }
+        updateConsoleBulkToggles()
         return true
+    }
+
+    /// A background backend run that reports stdout line by line and can be canceled with terminate().
+    private func runBackendStreaming(_ arguments: [String], line: @escaping (String) -> Void,
+                                     completed: @escaping (Int32, String) -> Void) -> Process {
+        precondition(!ProcessInfo.processInfo.arguments.contains("--smoke-test"), "Smoke tests must never download")
+        let process = Process()
+        process.executableURL = Bundle.main.resourceURL!.appendingPathComponent("python/bin/python3")
+        process.arguments = ["-I", "-B", backend.path] + arguments
+        var environment = ProcessInfo.processInfo.environment
+        environment["PYTHONUNBUFFERED"] = "1"
+        environment["PYTHONDONTWRITEBYTECODE"] = "1"
+        environment["PATH"] = "/usr/bin:/bin:/usr/sbin:/sbin"
+        process.environment = environment
+        let output = Pipe(), errors = Pipe()
+        process.standardOutput = output
+        process.standardError = errors
+        process.standardInput = FileHandle.nullDevice
+        DispatchQueue.global(qos: .utility).async {
+            do { try process.run() } catch {
+                DispatchQueue.main.async { completed(1, "ERROR: Cannot start bundled runtime: \(error.localizedDescription)") }
+                return
+            }
+            var errorData = Data()
+            let group = DispatchGroup()
+            group.enter()
+            DispatchQueue.global().async { errorData = errors.fileHandleForReading.readDataToEndOfFile(); group.leave() }
+            var buffer = Data()
+            while true {
+                let chunk = output.fileHandleForReading.availableData
+                if chunk.isEmpty { break }
+                buffer.append(chunk)
+                while let newline = buffer.firstIndex(of: 10) {
+                    let text = String(decoding: buffer[buffer.startIndex..<newline], as: UTF8.self)
+                    buffer.removeSubrange(buffer.startIndex...newline)
+                    DispatchQueue.main.async { line(text) }
+                }
+            }
+            process.waitUntilExit()
+            group.wait()
+            let code = process.terminationStatus
+            DispatchQueue.main.async { completed(code, String(decoding: errorData, as: UTF8.self)) }
+        }
+        return process
     }
 
     private func runBackendInBackground(_ arguments: [String], completed: @escaping (Int32, Data, String) -> Void) {
@@ -5155,18 +9493,6 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
         indicator.distribution = .fill
         let missing = bios.files.filter { !$0.present }
         guard !missing.isEmpty && bios.state != "present" else { return indicator }
-        func pill(_ title: String, symbol: String, action: Selector, value: String, help: String) -> NSButton {
-            let control = NSButton(title: title, target: self, action: action)
-            control.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)
-            control.imagePosition = .imageLeading
-            control.bezelStyle = .inline
-            control.controlSize = .small
-            control.font = .systemFont(ofSize: 11)
-            control.identifier = NSUserInterfaceItemIdentifier(value)
-            control.toolTip = help
-            control.setAccessibilityLabel(help)
-            return control
-        }
         var sections: [NSView] = [indicator]
         var folders: [String] = []
         for file in missing {
@@ -5221,6 +9547,20 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
         return result
     }
 
+    /// Small inline link used for BIOS and library folders; the identifier carries the value.
+    private func pill(_ title: String, symbol: String, action: Selector, value: String, help: String) -> NSButton {
+        let control = NSButton(title: title, target: self, action: action)
+        control.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)
+        control.imagePosition = .imageLeading
+        control.bezelStyle = .inline
+        control.controlSize = .small
+        control.font = .systemFont(ofSize: 11)
+        control.identifier = NSUserInterfaceItemIdentifier(value)
+        control.toolTip = help
+        control.setAccessibilityLabel(help)
+        return control
+    }
+
     @objc private func openBIOSFolder(_ sender: NSButton) {
         guard var url = sender.identifier.map({ URL(fileURLWithPath: $0.rawValue) }) else { return }
         while !FileManager.default.fileExists(atPath: url.path) && url.path != "/" {
@@ -5267,6 +9607,7 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
         consoleSystems[index].enabled = sender.state == .on
         consoleEditGeneration += 1
         fillSystemStatus(systemStatusLines[index], consoleSystems[index])
+        updateConsoleBulkToggles()
         if sender.state == .on {
             let system = consoleSystems[index]
             let app = appStates.first { $0.id == system.package }
@@ -5311,7 +9652,7 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
             return
         }
         guard let root = consoleRoot(), !consoleSystems.isEmpty else {
-            revertConsoleSelection("Load your console selection first. Create game folders in Settings → Library storage if needed.")
+            revertConsoleSelection("Load your console selection first. Create game folders in Settings → Game library if needed.")
             return
         }
         if esdeRunning {
@@ -5326,7 +9667,7 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
             guard code == 0 else {
                 if !errors.isEmpty { self.append(errors) }
                 self.revertConsoleSelection("Couldn't save console selection. Your last saved choices are shown. Open Activity for details.")
-                self.showActivity()
+                self.activityNeeded()
                 return
             }
             self.consolePersistedEnabled = Set(enabled)
@@ -5394,14 +9735,14 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
             return
         }
         execute(["cleanup-plan"], capture: true) { code, data in
-            guard code == 0 else { self.showActivity(); return }
+            guard code == 0 else { self.activityNeeded("Couldn't scan for cleanup items."); return }
             do {
                 let plan = try JSONDecoder().decode(CleanupPlan.self, from: data)
                 self.presentGamingCleanup(plan)
             } catch {
                 self.status.stringValue = "Couldn't read cleanup items: \(error.localizedDescription)"
                 self.append(self.status.stringValue + "\n")
-                self.showActivity()
+                self.activityNeeded(self.status.stringValue)
             }
         }
     }
@@ -5498,7 +9839,7 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
         execute(arguments, capture: true) { code, data in
             guard code == 0 else {
                 self.status.stringValue = "Cleanup stopped. Some apps may already be uninstalled. Review Activity and scan again."
-                self.showActivity()
+                self.activityNeeded(self.status.stringValue)
                 return
             }
             do {
@@ -5522,7 +9863,7 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
                             let remaining = urls.filter { moved[$0] == nil }.map(\.path).joined(separator: "\n")
                             self.status.stringValue = "Cleanup incomplete: \(error.localizedDescription)"
                             self.append(self.status.stringValue + "\nNot moved:\n" + remaining + "\n")
-                            self.showActivity()
+                            self.activityNeeded(self.status.stringValue)
                         } else if removeSelf.state == .on {
                             NSApp.terminate(nil)
                         } else {
@@ -5540,7 +9881,7 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
             } catch {
                 self.status.stringValue = "Cleanup stopped after app removal: \(error.localizedDescription)"
                 self.append(self.status.stringValue + "\n")
-                self.showActivity()
+                self.activityNeeded(self.status.stringValue)
             }
         }
     }
@@ -5581,7 +9922,7 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
             guard code == 0 else {
                 self.overviewCheckFailures.insert(.automatic)
                 self.autoLaunchStatus.stringValue = "Cannot read login settings. Open Details for the error."
-                self.showActivity()
+                self.activityNeeded()
                 return
             }
             do {
@@ -5597,7 +9938,7 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
                 self.overviewCheckFailures.insert(.automatic)
                 self.autoLaunchStatus.stringValue = "Cannot read login settings: \(error.localizedDescription)"
                 self.append(self.autoLaunchStatus.stringValue + "\n")
-                self.showActivity()
+                self.activityNeeded()
             }
         }
     }
@@ -5609,7 +9950,7 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
         }
         let enabled = autoLaunchToggle.state == .on
         guard !enabled || (selected != nil && report?.state == "valid layout" && report?.issues.isEmpty == true) else {
-            autoLaunchStatus.stringValue = "Choose Settings → Library storage before enabling automatic console mode."
+            autoLaunchStatus.stringValue = "Choose Settings → Game library before enabling automatic console mode."
             return
         }
         guard let delay = Int(autoLaunchDelay.stringValue), (5...300).contains(delay) else {
@@ -5631,8 +9972,30 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
             if code == 0 { self.loadAutoLaunch() }
             else {
                 self.autoLaunchStatus.stringValue = "Couldn't save console mode. Open Details for the error."
-                self.showActivity()
+                self.activityNeeded()
             }
+        }
+    }
+
+    /// Only an explicit debug flag lets Activity open by itself; release builds open it solely from View > Activity.
+    static let activityAutoOpens = ProcessInfo.processInfo.environment["COUCH_CUBE_DEBUG_ACTIVITY"] == "1"
+    private(set) var lastProblemNotice: String?
+
+    /// Called where something failed or an operation started. Problems are shown in the app; the log stays closed.
+    private func activityNeeded(_ problem: String? = nil) {
+        if SetupController.activityAutoOpens { showActivity(); return }
+        guard let problem = problem?.trimmingCharacters(in: .whitespacesAndNewlines), !problem.isEmpty else { return }
+        lastProblemNotice = problem
+        guard !ProcessInfo.processInfo.arguments.contains("--smoke-test"), let window = mainWindow ?? self.window,
+              window.isVisible, window.attachedSheet == nil else { return }
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = "Something went wrong"
+        alert.informativeText = String(problem.prefix(600))
+        alert.addButton(withTitle: "OK")
+        alert.addButton(withTitle: "Show Activity")
+        alert.beginSheetModal(for: window) { response in
+            if response == .alertSecondButtonReturn { self.showActivity() }
         }
     }
 
@@ -5642,6 +10005,7 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
                                  styleMask: [.titled, .closable, .resizable], backing: .buffered, defer: false)
             panel.title = "Activity"
             panel.isReleasedWhenClosed = false
+            panel.isRestorable = false
             let scroll = NSScrollView(frame: panel.contentView!.bounds)
             scroll.translatesAutoresizingMaskIntoConstraints = false
             scroll.hasVerticalScroller = true
@@ -5694,6 +10058,7 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
     }
 
     private func append(_ text: String) {
+        appOperationOutput?(text)
         log.textStorage?.append(NSAttributedString(string: text, attributes: [
             .foregroundColor: NSColor.textColor,
             .font: NSFont.monospacedSystemFont(ofSize: 11, weight: .regular)
@@ -5724,7 +10089,12 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
             return
         }
         lastError = ""
-        let readOnly = capture && ["drives", "storage-status", "assess", "apps", "systems", "system-catalog", "login-status", "frontend", "steam-status"].contains(arguments.first ?? "")
+        if ["transfer-library", "retire-library", "initialize-drive", "removal-verify", "erase", "prepare-portable",
+            "copy-app", "copy-installer", "cleanup-prepare", "cleanup-host", "setup"].contains(arguments.first ?? "") {
+            // The library is about to change: stop installer downloads so no partial file is copied or left behind.
+            for (id, job) in windowsDownloadJobs where job.running { cancelWindowsDownload(id: id) }
+        }
+        let readOnly = capture && ["drives", "storage-status", "assess", "apps", "systems", "system-catalog", "login-status", "frontend", "steam-status", "drive-detail", "removal-plan"].contains(arguments.first ?? "")
         if !readOnly { busy(true) }
         let process = Process()
         process.executableURL = Bundle.main.resourceURL!.appendingPathComponent("python/bin/python3")
@@ -5756,7 +10126,7 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
             lastError = "Cannot start bundled runtime: \(error.localizedDescription)"
             append(lastError + "\n")
             status.stringValue = lastError
-            showActivity()
+            activityNeeded(lastError)
             completed(1, Data())
             return
         }
@@ -5792,7 +10162,7 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
             DispatchQueue.main.async {
                 self.task = nil
                 if !readOnly { self.busy(false) }
-                if process.terminationStatus != 0 && !capture { self.showActivity() }
+                if process.terminationStatus != 0 && !capture { self.activityNeeded(self.lastError.isEmpty ? "The operation didn't finish." : self.lastError) }
                 completed(process.terminationStatus, result)
                 if self.consoleRefreshPending && self.task == nil && !self.smokeFinishing {
                     self.consoleRefreshPending = false
@@ -5803,13 +10173,17 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
                 self.runPendingAppsPreload()
                 if self.appRefreshPending && self.task == nil && !self.smokeFinishing {
                     self.appRefreshPending = false
-                    if [1, 2].contains(self.tabs.indexOfTabViewItem(self.tabs.selectedTabViewItem!)) {
+                    if [1, 6].contains(self.tabs.indexOfTabViewItem(self.tabs.selectedTabViewItem!)) {
                         self.loadApps()
                     }
                 }
                 if self.refreshPending && self.task == nil && !self.smokeFinishing {
                     self.refreshPending = false
                     self.refresh()
+                }
+                if self.driveDetailPending && self.task == nil && !self.smokeFinishing {
+                    self.driveDetailPending = false
+                    if self.currentPage == 12 { self.loadDriveDetail() }
                 }
             }
         }
@@ -5841,7 +10215,7 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
             } else {
                 self.overviewCheckFailures.formUnion(OverviewCheck.allCases)
                 self.status.stringValue = "Drive discovery failed. Open Activity for details."
-                self.showActivity()
+                self.activityNeeded(self.status.stringValue)
             }
             self.populateVolumes(previous: previous)
             self.renderStorageLocations()
@@ -5864,6 +10238,239 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
         }
     }
 
+    /// Game library and Library storage share one drive overview; each drive opens a read-only detail page.
+    private func smokeTestDriveOverview() {
+        func views(_ root: NSView) -> [NSView] { [root] + root.subviews.flatMap(views) }
+        func labels(_ root: NSView) -> [String] { views(root).compactMap { ($0 as? NSTextField)?.stringValue } }
+        func overviewRows(_ stack: NSStackView) -> [StorageOverviewRow] { stack.arrangedSubviews.compactMap { $0 as? StorageOverviewRow } }
+        let saved = (storageStatus, driveDetailCache, driveDetailID, backendRead, driveDetailParent, driveDetailErrors, currentPage, driveDetailLoading)
+        let savedGames = (driveGamesRead, driveGamesCache, driveGamesShowAll,
+                          UserDefaults.standard.object(forKey: romsBySystemKey), UserDefaults.standard.object(forKey: pcByLauncherKey))
+        let scans = SmokeScanLog()
+        driveGamesRead = { id, done in scans.calls.append((id, done)) }
+        UserDefaults.standard.removeObject(forKey: romsBySystemKey)
+        UserDefaults.standard.removeObject(forKey: pcByLauncherKey)
+        defer {
+            (driveGamesRead, driveGamesCache, driveGamesShowAll) = (savedGames.0, savedGames.1, savedGames.2)
+            UserDefaults.standard.set(savedGames.3, forKey: romsBySystemKey)
+            UserDefaults.standard.set(savedGames.4, forKey: pcByLauncherKey)
+            driveGamesScanning = nil
+            driveGamesGeneration += 1
+            (storageStatus, driveDetailCache, driveDetailID, backendRead, driveDetailParent, driveDetailErrors) = (saved.0, saved.1, saved.2, saved.3, saved.4, saved.5)
+            driveDetailLoading = saved.7
+            driveDetailGeneration += 1
+            renderStorageLocations()
+            selectPage(saved.6)
+        }
+        let local = Drive(id: "local", uuid: "u0", mode: "local", name: "Macintosh HD", root: "/Users/test/Games/Couch Cube",
+                          filesystem: "apfs", free: 100, mount: "/")
+        func ssd(_ number: Int) -> Drive {
+            Drive(id: "ssd\(number)", uuid: "u\(number)", mode: "portable", name: "Game SSD \(number) (portable console)",
+                  root: "/Volumes/G\(number)/Couch Cube", filesystem: "apfs", free: 100, mount: "/Volumes/G\(number)")
+        }
+        for entry in [StorageOverviewEntry(id: "local", mode: "local", title: "This Mac", state: "ready", active: true,
+                                           path: "/Users/test/Games/Couch Cube"),
+                      StorageOverviewEntry(id: nil, mode: "portable", title: "External SSD", state: "connect", active: false, path: nil)] {
+            let probe = storageOverviewRow(entry)
+            probe.frame = NSRect(x: 0, y: 0, width: 600, height: 80)
+            probe.layoutSubtreeIfNeeded()
+            for field in views(probe).compactMap({ $0 as? NSControl }) where field is NSTextField || field.identifier?.rawValue == entry.path {
+                precondition(field.frame.width + 0.5 >= field.intrinsicContentSize.width,
+                             "Drive titles, status and paths must not truncate when the row has room: \(field.stringValue)")
+            }
+        }
+        storageStatus = nil
+        precondition(storageOverviewEntries().map(\.state) == ["checking", "checking"], "Unchecked drives are never shown as ready or missing")
+        storageStatus = StorageStatus(locations: [.init(drive: local, configured: true, issue: nil, environment: "ready")],
+                                      active: .init(id: "local", uuid: "u0"), transfer: nil)
+        renderStorageOverview()
+        for stack in [gameLibraryOverviewRows] {
+            let rows = overviewRows(stack)
+            precondition(rows.count == 2 && rows[0].driveID == "local" && labels(rows[0]).contains("This Mac") &&
+                         labels(rows[0]).contains("Ready · Active"), "This Mac is always listed with its readiness")
+            precondition(rows[1].driveID == nil && rows[1].alphaValue < 1 && labels(rows[1]).contains("External SSD") &&
+                         labels(rows[1]).contains("Connect one"), "Without a drive, External SSD is a disabled Connect one row")
+        }
+        precondition(gameLibraryOverviewRows.isDescendant(of: tabs.tabViewItems[6].view!), "Game library shows the drive overview")
+        storageStatus = StorageStatus(locations: [
+            .init(drive: local, configured: true, issue: nil, environment: "ready"),
+            .init(drive: ssd(1), configured: false, issue: nil, environment: "absent"),
+            .init(drive: ssd(2), configured: false, issue: "A Couch Cube folder is already there.", environment: "occupied"),
+            .init(drive: ssd(3), configured: true, issue: nil, environment: "ready")
+        ], active: .init(id: "local", uuid: "u0"), transfer: nil)
+        renderStorageOverview()
+        let rows = overviewRows(gameLibraryOverviewRows)
+        precondition(rows.map(\.driveID) == ["local", "ssd1", "ssd2", "ssd3"], "Every connected drive gets its own row")
+        precondition(labels(rows[1]).contains("Game SSD 1") && labels(rows[1]).contains("Not set up") &&
+                     labels(rows[2]).contains { $0.hasPrefix("Not set up ·") } && labels(rows[3]).contains("Ready"))
+        precondition(rows.allSatisfy { row in views(row).contains { $0.identifier?.rawValue == "storage-overview-badge" } },
+                     "Readiness is drawn on each drive icon")
+        precondition(!views(rows[1]).contains { ($0 as? NSButton)?.action == #selector(openBIOSFolder(_:)) },
+                     "A path that doesn't exist yet isn't offered in Finder")
+        let unchanged = rows[0]
+        renderStorageOverview()
+        precondition(overviewRows(gameLibraryOverviewRows)[0] === unchanged, "Silent refreshes keep rows in place")
+        mainWindow.contentView?.layoutSubtreeIfNeeded()
+        selectPage(6)
+        mainWindow.contentView?.layoutSubtreeIfNeeded()
+        let finder = views(rows[0]).compactMap { $0 as? NSButton }.first { $0.action == #selector(openBIOSFolder(_:)) }!
+        precondition(finder.identifier?.rawValue == local.root, "The library path opens in Finder like BIOS folders")
+        let finderPoint = rows[0].superview!.convert(NSPoint(x: finder.bounds.midX, y: finder.bounds.midY), from: finder)
+        precondition(rows[0].hitTest(finderPoint).map { $0 === finder || $0.isDescendant(of: finder) } == true,
+                     "The Finder link keeps its own click instead of opening the drive")
+        let title = views(rows[0]).compactMap { $0 as? NSTextField }.first { $0.stringValue == "This Mac" }!
+        precondition(rows[0].hitTest(rows[0].superview!.convert(NSPoint(x: title.bounds.midX, y: title.bounds.midY), from: title)) === rows[0],
+                     "The rest of the row opens the drive")
+        var reads: [([String], (Int32, Data) -> Void)] = []
+        backendRead = { arguments, done in reads.append((arguments, done)) }
+        func detailJSON(_ drive: Drive, steam: String, retro: String) -> Data {
+            Data("""
+            {"drive":{"id":"\(drive.id)","uuid":"\(drive.uuid)","mode":"\(drive.mode)","name":"\(drive.name)","root":"\(drive.root)","filesystem":"apfs","free":100,"mount":"\(drive.mount)"},
+             "environment":"ready","issue":null,"active":false,
+             "capacity":{"total":1000000000000,"used":600000000000,"free":400000000000,"couch":5000000000},
+             "steam":\(steam),"retro":\(retro),"errors":[]}
+            """.utf8)
+        }
+        rows[1].onOpen?("ssd1")
+        precondition(currentPage == 12 && driveDetailID == "ssd1" && driveDetailParent == 6 &&
+                     sidebar.selectedRow == sidebarPages.firstIndex(of: 6) && screenTitle.stringValue == "Game SSD 1",
+                     "A drive row opens its detail page under Game library")
+        precondition(reads.last?.0 == ["drive-detail", "--drive", "ssd1"])
+        precondition(views(driveDetailRows).contains { ($0 as? NSButton)?.identifier?.rawValue == "drive-initialize" && ($0 as? NSButton)?.isEnabled == true },
+                     "A drive without a library offers Initialize")
+        precondition(!views(driveDetailRows).contains { $0.identifier?.rawValue == "drive-remove" })
+        precondition(labels(driveDetailRows).contains("Reading this drive..."))
+        showDriveDetail("ssd3")
+        precondition(reads.count == 2 && reads[1].0 == ["drive-detail", "--drive", "ssd3"])
+        reads[0].1(0, detailJSON(ssd(1), steam: "[]", retro: "[]"))
+        precondition(driveDetailCache["ssd1"] == nil && driveDetailID == "ssd3" && labels(driveDetailRows).contains("Reading this drive..."),
+                     "A stale result for another drive never replaces the current page")
+        reads[1].1(0, detailJSON(ssd(3), steam: """
+            [{"path":"/Volumes/G3/SteamLibrary","games":[{"appid":"620","name":"Portal 2","state":"Installed","installed":true,"bytes":1000}]}]
+            """, retro: """
+            [{"id":"snes","name":"Super Nintendo","games":3,"path":"/Volumes/G3/Couch Cube/ROMs/snes"}]
+            """))
+        let detailLabels = labels(driveDetailRows)
+        for heading in ["Couch Cube library", "Storage", "Drive size", "Used (all files)", "Couch Cube files", "Free space", "Steam", "Retro games", "Super Nintendo"] {
+            precondition(detailLabels.contains(heading), "Drive detail shows \(heading)")
+        }
+        precondition(!detailLabels.contains("Reading this drive..."))
+        let buttons = views(driveDetailRows).compactMap { $0 as? NSButton }
+        precondition(buttons.contains { $0.identifier?.rawValue == "620" && $0.title == "Play" } &&
+                     buttons.contains { $0.identifier?.rawValue == "620" && $0.title == "Manage" && $0.action == #selector(manageSteamGame(_:)) },
+                     "Steam games on the drive keep Play and get a Steam manage link")
+        precondition(buttons.contains { $0.identifier?.rawValue == "drive-remove" } && buttons.contains { $0.title == "Use this library..." },
+                     "A ready library that isn't active can be activated or removed")
+        precondition(views(driveDetailRows).contains { $0.identifier?.rawValue == "drive-retro-snes" } &&
+                     !views(driveDetailRows).contains { $0.identifier?.rawValue.hasPrefix("drive-retro-") == true && $0.identifier?.rawValue != "drive-retro-snes" })
+        smokeTestDriveGames(scans, labels: labels, views: views)
+        reads.removeAll()
+        showDriveDetail("ssd1")
+        precondition(reads.count == 1)
+        reads[0].1(0, detailJSON(ssd(1), steam: "[]", retro: "[]"))
+        precondition(!labels(driveDetailRows).contains("Steam") && !labels(driveDetailRows).contains("Retro games"),
+                     "Systems and stores without games on this drive are left out")
+        storageStatus = StorageStatus(locations: [.init(drive: local, configured: true, issue: nil, environment: "ready")],
+                                      active: .init(id: "local", uuid: "u0"), transfer: nil)
+        reads.removeAll()
+        renderStorageLocations()
+        precondition(labels(driveDetailRows).contains { $0.hasPrefix("Disconnected.") } && reads.isEmpty,
+                     "Unplugging the drive shows it as disconnected without reading it")
+        precondition(driveGamesCache["ssd1"] == nil && driveGamesScanning == nil,
+                     "Unplugging drops the drive's game sizes so a reconnect measures it again")
+    }
+
+    /// Game storage breakdown: one scan per drive, stale scans dropped, grouping is presentation-only.
+    private func smokeTestDriveGames(_ log: SmokeScanLog, labels: (NSView) -> [String], views: (NSView) -> [NSView]) {
+        precondition(log.calls.map(\.0) == ["ssd1", "ssd3"], "Opening a drive measures its games once, separately from the detail read")
+        func item(_ id: String, _ kind: String, _ source: String, _ sourceName: String, _ name: String, _ system: String?,
+                  _ bytes: Int64?, measured: Bool = true, unreadable: Int = 0) -> String {
+            let systemNames = ["psx": "PlayStation", "snes": "Super Nintendo"]
+            let systemJSON = system.map { "\"\($0)\"" } ?? "null"
+            let systemName = system.flatMap { systemNames[$0] }.map { "\"\($0)\"" } ?? "null"
+            return """
+            {"id":"\(id)","kind":"\(kind)","source":"\(source)","source_name":"\(sourceName)","name":"\(name)","system":\(systemJSON),
+             "system_name":\(systemName),"bytes":\(bytes.map(String.init) ?? "null"),"measured":\(measured),"unreadable":\(unreadable),"path":"/Volumes/G3/x"}
+            """
+        }
+        var items = [item("rom:psx:A", "rom", "rom", "ROMs", "Alpha", "psx", 300_000_000),
+                     item("rom:psx:B", "rom", "rom", "ROMs", "Beta", "psx", 100_000_000, unreadable: 2),
+                     item("rom:snes:C", "rom", "rom", "ROMs", "Gamma", "snes", 50_000_000),
+                     item("steam:1", "pc", "steam", "Steam", "Portal 2", nil, 500_000_000),
+                     item("steam:2", "pc", "steam", "Steam", "Reported", nil, 40_000_000, measured: false),
+                     item("gog:1", "pc", "gog", "GOG", "Witcher", nil, 9_000_000),
+                     item("bottle:1", "pc", "bottle", "Windows bottles", "Steam (CrossOver bottle)", nil, 1_000),
+                     item("epic:1", "pc", "epic", "Epic Games", "Unknown size", nil, nil)]
+        items += (0..<6).map { item("rom:snes:t\($0)", "rom", "rom", "ROMs", "Tiny \($0)", "snes", 1_000) }
+        func games(_ drive: String, _ items: [String]) -> Data {
+            Data("""
+            {"drive":{"id":"\(drive)","uuid":"u3"},"items":[\(items.joined(separator: ","))],
+             "coverage":[{"source":"rom","name":"ROMs","status":"scanned","games":9,"note":null},
+                         {"source":"other","name":"Other launchers","status":"unsupported","games":0,"note":"Amazon isn't detected."}],
+             "total":999007000,"unknown":1,"partial":1,"shared":4096,"errors":[]}
+            """.utf8)
+        }
+        log.calls[0].1(0, games("ssd1", []))
+        precondition(driveGamesCache["ssd1"] == nil && labels(driveDetailRows).contains("Measuring games on this drive..."),
+                     "A scan for a drive that is no longer shown never lands")
+        log.calls[1].1(0, games("ssd3", items))
+        let decoded = driveGamesCache["ssd3"]!.games
+        let individual = GameStorageSlice.slices(decoded, romsBySystem: false, pcByLauncher: false)
+        precondition(individual.count == 14 && individual.first?.title == "Portal 2" && individual.last?.bytes == nil,
+                     "Individual view lists every game largest first, unknown sizes last")
+        precondition(individual.map(\.tenths).reduce(0, +) == 1000, "Rounded shares add up to exactly 100%")
+        precondition(individual.first { $0.title == "Tiny 0" }?.percent == "<0.1%", "Tiny games keep a visible share instead of 0%")
+        precondition(individual.first { $0.title == "Unknown size" }?.percent == "—")
+        let bySystem = GameStorageSlice.slices(decoded, romsBySystem: true, pcByLauncher: false)
+        let psx = bySystem.first { $0.id == "system:psx" }!
+        precondition(psx.title == "PlayStation ROMs" && psx.bytes == 400_000_000 && psx.games == 2 && psx.partial, "ROMs sum by system")
+        precondition(bySystem.contains { $0.title == "Portal 2" } && !bySystem.contains { $0.title == "Alpha" },
+                     "Grouping ROMs keeps PC games individual")
+        let byLauncher = GameStorageSlice.slices(decoded, romsBySystem: false, pcByLauncher: true)
+        let steam = byLauncher.first { $0.id == "launcher:steam" }!
+        precondition(steam.title == "Steam games" && steam.bytes == 540_000_000 && steam.games == 2 &&
+                     byLauncher.contains { $0.title == "GOG games" } && byLauncher.contains { $0.title == "Windows bottles (launcher unknown)" } &&
+                     byLauncher.contains { $0.title == "Alpha" }, "PC games sum by launcher; bottles stay unattributed; ROMs stay individual")
+        let epic = byLauncher.first { $0.id == "launcher:epic" }!
+        precondition(epic.bytes == nil && epic.unknown == 1, "A launcher with only unknown sizes isn't shown as zero")
+        let both = GameStorageSlice.slices(decoded, romsBySystem: true, pcByLauncher: true)
+        precondition(Set(both.map(\.id)) == ["system:psx", "system:snes", "launcher:steam", "launcher:gog", "launcher:bottle", "launcher:epic"] &&
+                     both.compactMap(\.bytes).reduce(0, +) == individual.compactMap(\.bytes).reduce(0, +) &&
+                     both.map(\.tenths).reduce(0, +) == 1000, "Both groupings together keep the same total")
+        func rows() -> [NSView] { views(driveDetailRows).filter { $0.identifier?.rawValue == "drive-games-row" } }
+        func checkbox(_ id: String) -> NSButton { views(driveDetailRows).compactMap { $0 as? NSButton }.first { $0.identifier?.rawValue == id }! }
+        let page = labels(driveDetailRows)
+        precondition(page.contains("Game storage") && page.contains { $0.hasPrefix("Share of ") && $0.contains("games found on this drive") },
+                     "The breakdown names its denominator")
+        precondition(views(driveDetailRows).last { $0.identifier?.rawValue == "drive-games-bar" } != nil && rows().count == 12 &&
+                     checkbox("drive-games-more").title == "Show all 14", "The list starts with the biggest games and can show every one")
+        precondition(page.contains { $0.contains("unknown size") && $0.contains("Amazon isn't detected.") }, "Coverage and unknowns are stated")
+        let bar = views(driveDetailRows).compactMap { $0 as? GameStorageBar }.first!
+        precondition(bar.segments.count == GameStorageBar.colored + 1 && bar.segments.last!.title.hasPrefix("Other ("),
+                     "Only the largest games get colors; the rest share one gray segment")
+        views(driveDetailRows).compactMap { $0 as? NSButton }.first { $0.identifier?.rawValue == "drive-games-more" }!.performClick(nil)
+        precondition(rows().count == 14 && checkbox("drive-games-more").title == "Show fewer", "Tiny games stay reachable")
+        checkbox("drive-group-roms").performClick(nil)
+        precondition(UserDefaults.standard.bool(forKey: romsBySystemKey) && labels(driveDetailRows).contains("PlayStation ROMs") &&
+                     labels(driveDetailRows).contains("Portal 2") && log.calls.count == 2, "Grouping by system re-renders without rescanning")
+        checkbox("drive-group-pc").performClick(nil)
+        precondition(checkbox("drive-group-roms").state == .on && labels(driveDetailRows).contains("Steam games") &&
+                     labels(driveDetailRows).contains("PlayStation ROMs") && rows().count == 6 && log.calls.count == 2,
+                     "Launcher grouping keeps the ROM grouping")
+        checkbox("drive-group-roms").performClick(nil)
+        checkbox("drive-group-pc").performClick(nil)
+        precondition(labels(driveDetailRows).contains("Alpha") && labels(driveDetailRows).contains("Portal 2"))
+        showDriveDetail("ssd3")
+        precondition(log.calls.count == 2, "Reopening a recently measured drive reuses its results")
+        views(driveDetailRows).compactMap { $0 as? NSButton }.first { $0.identifier?.rawValue == "drive-games-rescan" }!.performClick(nil)
+        precondition(log.calls.count == 3 && log.calls[2].0 == "ssd3" && labels(driveDetailRows).contains { $0.hasPrefix("Rescanning...") },
+                     "Rescan measures again while showing the previous results")
+        log.calls[2].1(1, Data())
+        precondition(driveGamesCache["ssd3"] != nil && labels(driveDetailRows).contains("Alpha"),
+                     "A failed rescan keeps the last good results")
+        driveGamesShowAll = false
+    }
+
     private func finishSmokeTest(success: Bool) {
         guard ProcessInfo.processInfo.arguments.contains("--smoke-test"), !smokeFinishing else { return }
         let arguments = ProcessInfo.processInfo.arguments
@@ -5878,20 +10485,18 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
                         self.steamReport = try JSONDecoder().decode(SteamLibraryReport.self, from: data)
                         self.renderSteamLibraries()
                         self.renderGeneral()
-                        precondition(!self.steamLibraryRows.arrangedSubviews.isEmpty)
                         precondition(!self.steamGuideRows.arrangedSubviews.isEmpty)
                         func views(_ root: NSView) -> [NSView] { [root] + root.subviews.flatMap(views) }
-                        let gameRows = self.steamLibraryRows.arrangedSubviews.filter { $0.identifier?.rawValue == "steam-game" || $0.identifier?.rawValue == "steam-empty" }
-                        precondition(!gameRows.isEmpty, "Steam games must be listed as game rows or a clear empty state")
-                        for game in self.steamReport!.libraries.flatMap(\.games) where game.installed {
-                            precondition(views(self.steamLibraryRows).contains { ($0 as? NSButton)?.identifier?.rawValue == game.appid && ($0 as? NSButton)?.title == "Play" },
-                                         "Installed Steam games need a Play button")
-                        }
+                        self.smokeTestDriveOverview()
+                        self.smokeTestAppOperations()
+                        self.smokeTestWindowsDownloads()
+                        self.smokeTestStoreAccounts()
+                        self.smokeTestActivityStaysClosed()
                         precondition(!self.librarySummary.stringValue.isEmpty)
                         let page = self.tabs.tabViewItems[6].view!
                         precondition(views(page).contains { $0.identifier?.rawValue == "library-storage-menu" })
                         let menu = views(page).compactMap { $0 as? NSPopUpButton }.first { $0.identifier?.rawValue == "library-storage-menu" }!
-                        precondition(menu.itemArray.dropFirst().map(\.title) == ["Check Library", "Change Storage…"])
+                        precondition(menu.itemArray.dropFirst().map(\.title) == ["Check Library"], "Storage is changed on this page, not elsewhere")
                         // Sidebar task model: guided setup shows one page's tasks at a time; off shows all.
                         let tasks = [SidebarTask(page: 1, color: .systemYellow, title: "Get an app", setup: true),
                                      SidebarTask(page: 8, color: .systemYellow, title: "Allow Bluetooth", setup: true),
@@ -5914,14 +10519,14 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
                         precondition(free[7]?.groups.map(\.color) == [.systemRed, .systemYellow] &&
                                      free[7]?.groups.map(\.count) == [1, 1] && free[1]?.groups.count == 1,
                                      "Mixed severities get separate red and yellow counts")
-                        let mixed = sidebarBadges([SidebarTask(page: 2, color: .systemYellow, title: "a", setup: true),
-                                                   SidebarTask(page: 2, color: .systemRed, title: "b", setup: false),
-                                                   SidebarTask(page: 2, color: .systemYellow, title: "c", setup: false),
+                        let mixed = sidebarBadges([SidebarTask(page: 6, color: .systemYellow, title: "a", setup: true),
+                                                   SidebarTask(page: 6, color: .systemRed, title: "b", setup: false),
+                                                   SidebarTask(page: 6, color: .systemYellow, title: "c", setup: false),
                                                    SidebarTask(page: 7, color: .systemRed, title: "d", setup: false)], guided: true)
-                        precondition(mixed.keys.sorted() == [2] && mixed[2]?.groups.map(\.count) == [1, 2] &&
-                                     mixed[2]?.groups[1].titles == ["a", "c"], "Guided step keeps both severity counts; later pages stay hidden")
+                        precondition(mixed.keys.sorted() == [6] && mixed[6]?.groups.map(\.count) == [1, 2] &&
+                                     mixed[6]?.groups[1].titles == ["a", "c"], "Guided step keeps both severity counts; later pages stay hidden")
                         // Guided step stays put while checks arrive in any order.
-                        let storageTask = SidebarTask(page: 2, color: .systemYellow, title: "Prepare", setup: true)
+                        let storageTask = SidebarTask(page: 6, color: .systemYellow, title: "Prepare", setup: true)
                         let appTask = SidebarTask(page: 1, color: .systemRed, title: "Get a TV menu", setup: true)
                         let biosTask = SidebarTask(page: 7, color: .systemRed, title: "BIOS", setup: false)
                         var step = guidedSidebarStep([biosTask], pinned: nil, settled: false, previous: [:])
@@ -5937,7 +10542,7 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
                         precondition(step.pinned == 1 && step.badges.keys.sorted() == [1],
                                      "A newly found earlier task must not displace the current step")
                         step = guidedSidebarStep([biosTask, storageTask], pinned: step.pinned, settled: true, previous: step.badges)
-                        precondition(step.pinned == 2 && step.badges.keys.sorted() == [2], "Once done, the next step in order appears")
+                        precondition(step.pinned == 6 && step.badges.keys.sorted() == [6], "Once done, the next step in order appears")
                         step = guidedSidebarStep([], pinned: step.pinned, settled: true, previous: step.badges)
                         precondition(step.pinned == nil && step.badges.isEmpty, "No stale markers once everything is done")
                         for (page, badge) in self.sidebarTaskCounts {
@@ -6046,7 +10651,7 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
                 let stack = self.detail.subviews.compactMap { $0 as? NSStackView }.first!
                 let discoveryOK = success && !self.volumes.isEmpty && self.window.isVisible
                     && self.selected != nil
-                    && self.tabs.numberOfTabViewItems == 12 && self.logWindow == nil
+                    && self.tabs.numberOfTabViewItems == 14 && self.logWindow == nil
                 precondition(self.sidebarPages.count == self.sidebarTitles.count &&
                              self.sidebarPages.count == self.sidebarSymbols.count)
                 precondition(!self.sidebarPages.contains(3) && !self.sidebarPages.contains(4),
@@ -6098,7 +10703,8 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
                         self.selectPage(page)
                         precondition(!self.navigationBar.isHidden && self.window === self.mainWindow)
                         precondition(self.sidebar.selectedRow == self.sidebarPages.firstIndex(of:
-                            (page == 3 || page == 4) ? 2 : page == 5 ? 6 : page == 9 ? self.inspectorParent : page))
+                            (page == 2 || page == 3 || page == 4) ? 6 : page == 5 ? 6 : page == 9 ? self.inspectorParent : page == 12 ? self.driveDetailParent : page))
+                        if page == 13 { self.assertSmokeDeals() }
                         self.assertSmokePageScrolls()
                         if page == 7 {
                             for toggle in self.systemSwitches {
@@ -6107,20 +10713,36 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
                                 let frame = toggle.convert(toggle.bounds, to: controls)
                                 precondition(abs(frame.maxX - controls.bounds.maxX) < 4, "Console switches must align to the right edge")
                             }
-                            if !self.esdeRunning { self.smokeTestRapidConsoleToggles() }
+                            if !self.esdeRunning {
+                                self.smokeTestRapidConsoleToggles()
+                                self.smokeTestConsoleBulkToggles()
+                            }
                             if !self.esdeRunning { self.smokeTestSilentRefresh() }
                         }
-                        if page == 2 {
+                        if page == 6 {
                             let saved = self.storageStatus
                             let sample = self.availableVolumes[0]
                             self.storageStatus = StorageStatus(locations: [
                                 StorageStatus.Location(drive: sample, configured: true, issue: nil)
                             ], active: StorageStatus.Active(id: sample.id, uuid: sample.uuid), transfer: nil)
                             self.renderStorageLocations()
-                            precondition(self.storageLocationRows.arrangedSubviews.count == 2)
+                            precondition(self.gameLibraryOverviewRows.arrangedSubviews.contains { ($0 as? StorageOverviewRow)?.driveID == sample.id },
+                                         "Game library lists drives with the shared overview rows")
                             precondition(self.setupFolderStatus.stringValue.hasPrefix("Active · "))
-                            precondition(self.setupFolderStatus.isDescendant(of: self.tabs.tabViewItems[2].view!),
-                                         "Library storage must open the chooser directly")
+                            let library = self.tabs.tabViewItems[6].view!
+                            precondition([self.setupFolderStatus, self.gameLibraryOverviewRows, self.transferLibraryButton, self.retireLibraryButton]
+                                            .allSatisfy { $0.isDescendant(of: library) },
+                                         "Game library includes the former Library storage controls")
+                            func texts(_ view: NSView) -> [String] {
+                                ((view as? NSButton).map { [$0.title] } ?? (view as? NSTextField).map { [$0.stringValue] } ?? []) +
+                                    view.subviews.flatMap { texts($0) }
+                            }
+                            let pageTexts = texts(library)
+                            precondition(pageTexts.filter { $0 == "Refresh connected drives" }.count == 1 &&
+                                         pageTexts.contains("Add or prepare an SSD...") && pageTexts.contains("Move library...") &&
+                                         pageTexts.filter { $0 == "Where your games live" }.count == 1,
+                                         "The merged page has no duplicate storage sections")
+                            precondition(texts(self.tabs.tabViewItems[2].view!).isEmpty)
                             self.storageStatus = StorageStatus(locations: [], active: nil, transfer: nil)
                             self.renderStorageLocations()
                             precondition(self.setupFolderStatus.stringValue.contains("first library"))
@@ -6156,9 +10778,85 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
                                     }
                                 }
                             }
+                            let savedBefore = self.controllerCustomizations
+                            let previewArt = ControllerArtwork.menu(selecting: nil)
+                            precondition(Set(ControllerArtwork.sections.flatMap(\.1)) == Set(ControllerArtwork.kinds.dropFirst()) &&
+                                         ControllerArtwork.sections.flatMap(\.1).count == ControllerArtwork.kinds.count - 1,
+                                         "Every artwork choice appears in exactly one company section")
+                            let headers = previewArt.itemArray.filter { !$0.isEnabled && !$0.isSeparatorItem }.map(\.title)
+                            precondition(headers == ControllerArtwork.sections.map(\.0) &&
+                                         previewArt.itemArray.filter { !$0.isEnabled }.allSatisfy { $0.representedObject == nil },
+                                         "Company headers are disabled, unselectable labels")
+                            precondition(ControllerArtwork.selectedKind(in: previewArt) == "Automatic" &&
+                                         ControllerArtwork.selectedKind(in: ControllerArtwork.menu(selecting: "Nintendo")) == "Nintendo" &&
+                                         ControllerArtwork.selectedKind(in: ControllerArtwork.menu(selecting: "8BitDo Micro")) == "8BitDo Micro" &&
+                                         ControllerArtwork.selectedKind(in: ControllerArtwork.menu(selecting: "Removed kind")) == "Automatic",
+                                         "Saved artwork choices reselect the item, never a same-named header")
+                            let previewColor = ControllerPalette.menu(selecting: "", automatic: "Black")
+                            let preview = ControllerCustomizationPreview(controllerName: "Pro Controller", colorPopup: previewColor,
+                                                                         artworkPopup: previewArt)
+                            precondition(preview.kind == "Switch Pro Controller" && preview.colorName == "Black" &&
+                                         preview.savedColor == "" && previewColor.titleOfSelectedItem == "Automatic (Black)" &&
+                                         preview.imageView.image != nil && preview.iconFrame.imageView === preview.imageView &&
+                                         preview.imageView.contentTintColor == ControllerPalette.color(named: "Black"),
+                                         "Automatic is the default choice and shows the model color it resolves to")
+                            func pick(_ popup: NSPopUpButton, _ value: String) {
+                                popup.select(popup.itemArray.first { $0.representedObject as? String == value })
+                                _ = popup.sendAction(popup.action, to: popup.target)
+                            }
+                            pick(previewArt, "Joy-Con (R)")
+                            precondition(preview.colorName == "Neon Red" && previewColor.titleOfSelectedItem == "Automatic (Neon Red)",
+                                         "Automatic follows the chosen artwork's model color")
+                            pick(previewColor, "Shock Blue")
+                            precondition(preview.kind == "Joy-Con (R)" && preview.savedColor == "Shock Blue" &&
+                                         preview.imageView.contentTintColor == ControllerPalette.color(named: "Shock Blue"),
+                                         "A manual color always wins over Automatic")
+                            pick(previewArt, "PS5 · DualSense")
+                            precondition(preview.colorName == "Shock Blue", "Changing artwork keeps a manual color")
+                            pick(previewColor, "")
+                            precondition(preview.colorName == "White" && preview.savedColor == "", "PS5 Automatic is DualSense white")
+                            precondition(preview.iconFrame.subviews == [preview.imageView] && preview.iconFrame.layer?.backgroundColor == nil &&
+                                         preview.iconFrame.frame.size == NSSize(width: 88, height: 60),
+                                         "Controller art has no background: just the icon in a fixed-size frame")
+                            precondition(self.controllerCustomizations.keys == savedBefore.keys &&
+                                         self.controllerCustomizations.values.map(\.color) == savedBefore.values.map(\.color),
+                                         "Previewing must not change saved customizations")
                             precondition(ControllerPalette.defaultName(for: ControllerEntry(
                                 id: "micro", name: "8BitDo Micro", connected: true, transport: "Bluetooth")) == "Micro Green")
-                            precondition(ControllerPalette.defaultName(for: self.controllerEntries[0]) == "Chroma Indigo")
+                            precondition(ControllerPalette.defaultName(for: self.controllerEntries[0]) == "White")
+                            for (kind, expected) in [("PS5 · DualSense", "White"), ("PS4 · DualShock 4", "Black"), ("Xbox", "Black"),
+                                                     ("Switch Pro Controller", "Black"), ("Joy-Con (L)", "Neon Blue"),
+                                                     ("Joy-Con (R)", "Neon Red"), ("Nintendo", "Classic Gray"), ("Steam Controller", "Black")] {
+                                precondition(ControllerPalette.defaultName(forKind: kind) == expected, "Marketing color for \(kind)")
+                            }
+                            let ps5 = ControllerEntry(id: "hid:ps5", name: "DualSense Wireless Controller", connected: true, transport: "USB")
+                            precondition(ControllerPalette.migratedName("Chroma Indigo", for: ps5) == "" &&
+                                         ControllerPalette.migratedName("Galactic Purple", for: ps5) == "Galactic Purple" &&
+                                         ControllerPalette.canonicalName("Chroma Indigo", for: ps5) == "Chroma Indigo" &&
+                                         ControllerPalette.canonicalName("Removed color", for: ps5) == "" &&
+                                         ControllerPalette.resolvedName("", for: ps5) == "White" &&
+                                         ControllerPalette.resolvedName("Galactic Purple", for: ps5) == "Galactic Purple" &&
+                                         ControllerPalette.resolvedName("", for: ps5, artwork: "Xbox") == "Black",
+                                         "Old inferred defaults become Automatic; explicit picks stay")
+                            do {
+                                let backup = (self.controllerEntries, self.controllerCustomizations, self.controllerAliases,
+                                              self.homeSessionControllers, self.controllerConnectedFirst)
+                                let legacy = ControllerPreferences(entries: [ps5], customizations: [
+                                    ps5.id: ControllerCustomization(name: "", color: "Chroma Indigo", artwork: nil)],
+                                    connectedFirst: false)
+                                self.restoreControllerPreferences(try! JSONDecoder().decode(ControllerPreferences.self,
+                                                                                            from: JSONEncoder().encode(legacy)))
+                                precondition(self.controllerCustomizations[ps5.id]?.color == "", "Legacy inferred color migrates to Automatic")
+                                self.controllerCustomizations[ps5.id]?.color = "Chroma Indigo"
+                                let current = self.currentControllerPreferences()
+                                precondition(current.colorVersion == 2)
+                                self.restoreControllerPreferences(try! JSONDecoder().decode(ControllerPreferences.self,
+                                                                                            from: JSONEncoder().encode(current)))
+                                precondition(self.controllerCustomizations[ps5.id]?.color == "Chroma Indigo",
+                                             "A color picked after Automatic exists is never migrated away")
+                                (self.controllerEntries, self.controllerCustomizations, self.controllerAliases,
+                                 self.homeSessionControllers, self.controllerConnectedFirst) = backup
+                            }
                             func identified(_ view: NSView, _ id: String) -> [NSView] {
                                 (view.identifier?.rawValue == id ? [view] : []) + view.subviews.flatMap { identified($0, id) }
                             }
@@ -6168,10 +10866,12 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
                             for (entry, line) in zip(self.controllerEntries, controllerLines) {
                                 precondition(line.arrangedSubviews.first is ControllerDragHandle, "Controllers need a drag handle")
                                 precondition(line.arrangedSubviews.last is NSPopUpButton, "Controllers need a … menu")
-                                let icon = line.arrangedSubviews[1] as! NSImageView
-                                let selectedColor = self.controllerCustomizations[entry.id]?.color
-                                let expected = entry.connected ?
-                                    ControllerPalette.color(named: selectedColor ?? ControllerPalette.defaultName(for: entry)) : NSColor.systemGray
+                                let plate = line.arrangedSubviews[1] as! ControllerIconFrame
+                                let icon = plate.imageView
+                                precondition(plate.frame.size == NSSize(width: 52, height: 38) || plate.frame.isEmpty)
+                                let saved = self.controllerCustomizations[entry.id]
+                                let expected = entry.connected ? ControllerPalette.color(named: ControllerPalette.resolvedName(
+                                    saved?.color, for: entry, artwork: saved?.artwork)) : NSColor.systemGray
                                 precondition(icon.contentTintColor == expected, "Connected controllers use their color, others stay gray")
                             }
                             precondition(identified(self.activeControllerRows, "controller-transport").count == 2,
@@ -6327,6 +11027,57 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
                             separate.representedObject = bluetoothID
                             self.unlinkController(separate)
                             precondition(self.controllerAliases.isEmpty)
+                            // Profiles follow the controller's own Bluetooth address across Forget, re-pair and USB.
+                            precondition(controllerAddressFromSonyReport([0x09, 0xff, 0xee, 0xdd, 0xcc, 0xbb, 0xaa, 0x08], reportID: 0x09) == "aabbccddeeff")
+                            precondition(controllerAddressFromSonyReport([0x12, 0xff, 0xee, 0xdd, 0xcc, 0xbb, 0xaa], reportID: 0x12) == "aabbccddeeff")
+                            for bad in [[0x12, 0xff, 0xee, 0xdd, 0xcc, 0xbb, 0xaa], [0x09, 0, 0, 0, 0, 0, 0], [0x09, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff], [0x09, 1, 2]] as [[UInt8]] {
+                                precondition(controllerAddressFromSonyReport(bad, reportID: 0x09) == nil, "Unproven Sony address reports are rejected")
+                            }
+                            precondition(sonyAddressReportID(vendor: 0x054C, product: 0x0CE6) == 0x09 &&
+                                         sonyAddressReportID(vendor: 0x054C, product: 0x09CC) == 0x12 &&
+                                         sonyAddressReportID(vendor: 0x045E, product: 0x0B13) == nil &&
+                                         sonyAddressReportID(vendor: 0x057E, product: 0x2009) == nil)
+                            self.controllerAliases = [:]
+                            self.controllerEntries = [ControllerEntry(id: bluetoothID, name: "DualSense Wireless Controller", connected: true, transport: "Bluetooth"),
+                                                      ControllerEntry(id: "bt:112233445566", name: "DualSense Wireless Controller", connected: true, transport: "Bluetooth")]
+                            self.controllerCustomizations[bluetoothID] = ControllerCustomization(name: "Mine", color: "Galactic Purple", artwork: "PlayStation")
+                            self.controllerCustomizations["bt:112233445566"] = ControllerCustomization(name: "Guest", color: "Cosmic Red")
+                            self.forgetControllerPairing(bluetoothID, deleteProfile: false)
+                            precondition(!self.controllerEntries.contains { $0.id == bluetoothID } &&
+                                         self.controllerCustomizations[bluetoothID]?.name == "Mine", "Forget keeps the profile")
+                            let afterForget = try! JSONDecoder().decode(ControllerPreferences.self,
+                                from: JSONEncoder().encode(self.currentControllerPreferences()))
+                            self.restoreControllerPreferences(afterForget)
+                            self.mergeControllerList([], paired: [PairedController(name: "DualSense Wireless Controller", address: "AA:BB:CC:DD:EE:FF", connected: true),
+                                                                  PairedController(name: "DualSense Wireless Controller", address: "11-22-33-44-55-66", connected: true)])
+                            let repaired = self.controllerEntries.first { $0.id == bluetoothID }
+                            precondition(repaired != nil && self.controllerDisplayName(repaired!) == "Mine" &&
+                                         self.controllerCustomizations[bluetoothID]?.color == "Galactic Purple" &&
+                                         self.controllerCustomizations[bluetoothID]?.artwork == "PlayStation" &&
+                                         self.controllerCustomizations["bt:112233445566"]?.name == "Guest",
+                                         "Re-pairing restores name, color and icon without touching an identical controller")
+                            // USB first: the profile set over USB moves onto the Bluetooth address the pad reports, in place.
+                            let usbFirst = "hid:1356:3302:USB:location:77"
+                            self.controllerEntries = [ControllerEntry(id: "bt:112233445566", name: "DualSense Wireless Controller", connected: false, transport: "Bluetooth"),
+                                                      ControllerEntry(id: usbFirst, name: "DualSense Wireless Controller", connected: true, transport: "Wired")]
+                            self.controllerCustomizations = [usbFirst: ControllerCustomization(name: "Desk", color: "Starlight Blue"),
+                                                             "bt:112233445566": ControllerCustomization(name: "Guest", color: "Cosmic Red")]
+                            self.mergeControllerList([ControllerEntry(id: usbFirst, name: "DualSense Wireless Controller", connected: true, transport: "Wired",
+                                                                      hardwareAddress: "a0b1c2d3e4f5")], paired: [])
+                            precondition(self.controllerEntries.map(\.id) == ["bt:112233445566", "bt:a0b1c2d3e4f5"] &&
+                                         self.controllerAliases[usbFirst] == "bt:a0b1c2d3e4f5" &&
+                                         self.controllerCustomizations["bt:a0b1c2d3e4f5"]?.name == "Desk" &&
+                                         self.controllerCustomizations[usbFirst] == nil, "A USB-reported address adopts the profile in place")
+                            self.mergeControllerList([], paired: [PairedController(name: "DualSense Wireless Controller", address: "a0-b1-c2-d3-e4-f5", connected: true)])
+                            precondition(self.controllerEntries.count == 2 && self.controllerEntries[1].transport == "Bluetooth" &&
+                                         self.controllerDisplayName(self.controllerEntries[1]) == "Desk", "Bluetooth later uses the same profile")
+                            // Joy-Cons never adopt anything, even with an address-looking serial.
+                            let joyUSB = ControllerEntry(id: "hid:1406:8198:USB:serial:aa-bb-cc-dd-ee-ff", name: "Joy-Con (L)", connected: true,
+                                                         transport: "Wired", model: "Joy-Con (L)", hardwareAddress: "aabbccddeeff")
+                            precondition(controllerProfileAlias(for: joyUSB, knownBluetoothIDs: [bluetoothID]) == nil)
+                            self.controllerAliases = [:]
+                            self.forgetControllerPairing("bt:112233445566", deleteProfile: true)
+                            precondition(self.controllerCustomizations["bt:112233445566"] == nil, "Forget and Delete Profile removes it")
                             self.controllerAliases = [:]
                             self.controllerEntries = savedPreviewEntries
                             self.controllerCustomizations = savedCustomizations
@@ -6350,8 +11101,11 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
                         precondition(!self.tableView(self.sidebar, shouldSelectRow: index), "Sidebar section headings must not navigate")
                     }
                     precondition(self.systemSwitches.count == 17 && self.activeControllerRows.arrangedSubviews.count == 5)
-                    precondition(self.consoleRows.arrangedSubviews.count == 3,
-                                 "Nintendo, PlayStation and SEGA must each have one card")
+                    precondition(self.consoleRows.arrangedSubviews.count == 4,
+                                 "The all-consoles row, then one card each for Nintendo, PlayStation and SEGA")
+                    precondition(self.consoleBulkToggles.map(\.scope) == ["all consoles", "Nintendo consoles", "PlayStation consoles",
+                                 "SEGA consoles", "Nintendo home consoles", "Nintendo handhelds"],
+                                 "Show/hide-all switches for the page, each section and each subsection")
                     let readyBIOS = BIOSStatus(state: "present", summary: "", files: [])
                     for (enabled, installed, bios, expected) in [
                         (false, false, readyBIOS, NSColor.systemGray),
@@ -6384,6 +11138,41 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
                     precondition(self.homeControllerRowIDs == Array(self.orderedControllers(self.controllerEntries).map(\.id).prefix(4)) &&
                                  self.homeControllerInputLabels.count == 3,
                                  "Home must show the same controllers, in the same order, as Controllers")
+                    do {
+                        // Regression: input on a connected controller must not move a disconnected neighbour's name.
+                        let saved = self.controllerEntries
+                        self.controllerEntries = Array(saved.prefix(2))
+                        self.controllerEntries[0].connected = true
+                        self.controllerEntries[1].connected = false
+                        self.renderHomeControllers()
+                        self.window.contentView!.layoutSubtreeIfNeeded()
+                        let ids = self.homeControllerRowIDs
+                        precondition(ids.count == 2, "Jitter scenario needs two Home rows")
+                        let rows = ids.map { self.homeControllerRowViews[$0]! }
+                        func fields(_ view: NSView) -> [NSTextField] {
+                            ((view as? NSTextField).map { [$0] } ?? []) + view.subviews.flatMap(fields)
+                        }
+                        func nameFrames() -> [NSRect] {
+                            rows.flatMap(fields).map { $0.convert($0.bounds, to: nil) }
+                        }
+                        let frames = nameFrames()
+                        let renders = self.homeControllerRenderCount
+                        for i in 0..<6 {
+                            self.receiveControllerInput(self.controllerEntries[0], message: "Button \(i) pressed")
+                            self.renderHomeControllers()
+                            self.renderGeneral()
+                            self.window.contentView!.layoutSubtreeIfNeeded()
+                            precondition(ids.map { self.homeControllerRowViews[$0]! }.elementsEqual(rows, by: ===),
+                                         "Controller input must not rebuild Home controller rows")
+                            precondition(nameFrames() == frames, "Controller input must not move Home controller names")
+                        }
+                        self.updateHomeControllerActivity(ids[0])
+                        precondition(nameFrames() == frames, "Ending input activity must not move Home controller names")
+                        precondition(self.homeControllerRenderCount == renders,
+                                     "Controller input and unchanged refreshes must not rebuild Home controllers")
+                        self.controllerEntries = saved
+                        self.renderHomeControllers()
+                    }
                     self.window.contentView!.layoutSubtreeIfNeeded()
                     func homeLayout() -> [NSRect] {
                         [self.window.frame, self.homeControllerStatus.frame] + self.homeControllerStatus.arrangedSubviews.map(\.frame) +
@@ -6522,6 +11311,98 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
                     for kind in ControllerArtwork.kinds.dropFirst() {
                         precondition(ControllerArtwork.image(kind).tiffRepresentation != nil)
                     }
+                    let lightBG = NSColor.white, darkBG = NSColor(srgbRed: 0.12, green: 0.12, blue: 0.12, alpha: 1)
+                    func ink(_ name: String, dark: Bool) -> (fill: NSColor, line: NSColor, context: NSColor, rim: NSColor?) {
+                        ControllerInk.choose(fill: ControllerPalette.color(named: name), background: dark ? darkBG : lightBG,
+                                             dark: dark, highContrast: false)
+                    }
+                    precondition(abs(ControllerInk.contrast(.black, .white) - 21) < 0.01 && abs(ControllerInk.contrast(.white, .white) - 1) < 0.01)
+                    precondition(ink("Black", dark: true).line == ControllerInk.lightInk && ink("Black", dark: false).line == ControllerInk.lightInk,
+                                 "Black bodies get light outlines in both appearances")
+                    precondition(ink("Black", dark: true).rim == nil && ink("Black", dark: false).context == ControllerInk.darkInk)
+                    precondition(ink("White", dark: false).line == ControllerInk.darkInk && ink("White", dark: false).rim == nil,
+                                 "White bodies keep a dark outline that separates them from light windows")
+                    for name in ["Neon Red", "Neon Yellow", "Micro Green", "Classic Gray", "Neon Blue"] {
+                        precondition(ink(name, dark: false).line == ControllerInk.darkInk, "\(name) keeps black lines")
+                    }
+                    for name in ["Cobalt Blue", "Galactic Purple", "Chroma Indigo", "Cosmic Red", "Mineral Camo", "Gray Camouflage"] {
+                        for dark in [false, true] {
+                            precondition(ink(name, dark: dark).line == ControllerInk.darkInk, "\(name) is colored, not black: black lines")
+                        }
+                    }
+                    precondition(ControllerInk.isNearBlack(NSColor(srgbRed: 0.05, green: 0.05, blue: 0.06, alpha: 1))
+                                 && !ControllerInk.isNearBlack(NSColor(srgbRed: 0.18, green: 0.05, blue: 0.40, alpha: 1)),
+                                 "Only neutral near-black counts as black")
+                    for (name, _) in ControllerPalette.colors {
+                        for dark in [false, true] {
+                            let choice = ink(name, dark: dark), bg = dark ? darkBG : lightBG
+                            precondition(choice.line == (name == "Black" ? ControllerInk.lightInk : ControllerInk.darkInk),
+                                         "\(name): only Black gets a light outline")
+                            if name == "Black" { precondition(ControllerInk.contrast(choice.line, choice.fill) >= 3, "Black details stay readable") }
+                            precondition(ControllerInk.contrast(choice.context, bg) >= 3)
+                            precondition(choice.rim != nil || max(ControllerInk.contrast(choice.fill, bg), ControllerInk.contrast(choice.line, bg)) >= 3,
+                                         "\(name) silhouette must not vanish")
+                        }
+                    }
+                    for (name, _) in ControllerPalette.colors {
+                        let wall = ControllerInk.choose(fill: ControllerPalette.color(named: name), background: darkBG, dark: true,
+                                                        highContrast: false, style: .doubleWall)
+                        precondition(wall.line == ControllerInk.darkInk, "Double wall keeps black lines on \(name), black included")
+                    }
+                    func pixels(_ image: NSImage, scale: CGFloat) -> Data {
+                        let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: Int(80 * scale), pixelsHigh: Int(52 * scale),
+                                                   bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
+                                                   colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0)!
+                        rep.size = NSSize(width: 80, height: 52)
+                        NSGraphicsContext.saveGraphicsState()
+                        NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
+                        image.draw(in: NSRect(x: 0, y: 0, width: 80, height: 52))
+                        NSGraphicsContext.restoreGraphicsState()
+                        return rep.bitmapData.map { Data(bytes: $0, count: rep.bytesPerRow * rep.pixelsHigh) } ?? Data()
+                    }
+                    let aqua = NSAppearance(named: .aqua)!
+                    let outlineArt = ControllerArtwork.filledImage("Xbox", color: ControllerPalette.color(named: "Black"), appearance: aqua,
+                                                                   highContrast: false, style: .outline)
+                    let wallArt = ControllerArtwork.filledImage("Xbox", color: ControllerPalette.color(named: "Black"), appearance: aqua,
+                                                                highContrast: false, style: .doubleWall)
+                    precondition(outlineArt !== wallArt && pixels(outlineArt, scale: 2) != pixels(wallArt, scale: 2),
+                                 "Both outline styles render and are cached separately")
+                    precondition(ControllerArtwork.outlineStyle == .outline, "Outline (A) is the default style")
+                    for camoName in ["Gray Camouflage", "Mineral Camo"] {
+                        let color = ControllerPalette.color(named: camoName)
+                        precondition(ControllerCamo.matching(color)?.name == camoName, "\(camoName) gets its camo pattern")
+                        precondition(ControllerCamo.matching(color.withAlphaComponent(0.55)) == nil, "Dimmed camo stays flat")
+                        let camo = ControllerArtwork.filledImage("PS5 · DualSense", color: color, appearance: aqua, highContrast: false)
+                        let flat = ControllerArtwork.draw("PS5 · DualSense", fill: color, line: ControllerInk.darkInk,
+                                                          context: ControllerInk.darkInk, rim: nil, boost: 0)
+                        precondition(pixels(camo, scale: 2) == pixels(camo, scale: 2), "Camo is deterministic")
+                        precondition(pixels(camo, scale: 2) != pixels(flat, scale: 2), "Camo is patterned at preview scale")
+                        precondition(pixels(camo, scale: 0.5) == pixels(flat, scale: 0.5), "Tiny camo falls back to the flat color")
+                    }
+                    precondition(ControllerCamo.matching(ControllerPalette.color(named: "Classic Gray")) == nil)
+                    let translucent = ControllerInk.composite(NSColor.black.withAlphaComponent(0.5), over: .white).usingColorSpace(.sRGB)!
+                    precondition(translucent.alphaComponent == 1 && abs(translucent.redComponent - 0.5) < 0.01, "Fills are opaque")
+                    let highContrast = ControllerInk.choose(fill: ControllerPalette.color(named: "Black"), background: darkBG, dark: true, highContrast: true)
+                    precondition(highContrast.line == .white && highContrast.context == .white)
+                    for kind in ControllerArtwork.kinds.dropFirst() {
+                        for appearance in [NSAppearance(named: .aqua)!, NSAppearance(named: .darkAqua)!] {
+                            let red = ControllerArtwork.filledImage(kind, color: ControllerPalette.color(named: "Neon Red"), appearance: appearance, highContrast: false)
+                            let black = ControllerArtwork.filledImage(kind, color: ControllerPalette.color(named: "Black"), appearance: appearance, highContrast: false)
+                            precondition(!red.isTemplate && red.tiffRepresentation != nil && red.tiffRepresentation != black.tiffRepresentation)
+                            precondition(ControllerArtwork.filledImage(kind, color: ControllerPalette.color(named: "Neon Red"), appearance: appearance,
+                                                                       highContrast: false) === red, "Rendered art is cached")
+                        }
+                    }
+                    let artView = ControllerArtView(kind: "Xbox")
+                    precondition(artView.image?.isTemplate == true)
+                    artView.contentTintColor = ControllerPalette.color(named: "White")
+                    let filled = artView.image
+                    precondition(filled?.isTemplate == false)
+                    artView.appearance = NSAppearance(named: .darkAqua)
+                    precondition(artView.image !== filled || NSApp.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua,
+                                 "Appearance changes re-render the fill")
+                    artView.kind = "Steam Controller"
+                    precondition(artView.image?.accessibilityDescription == "Steam Controller")
                     for (name, expected) in [
                         ("DualShock 4 Wireless Controller", "PS4 · DualShock 4"),
                         ("PS4 Controller", "PS4 · DualShock 4"),
@@ -6529,8 +11410,10 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
                         ("DualSense Edge", "PS5 · DualSense"),
                         ("PS5 Controller", "PS5 · DualSense"),
                         ("PlayStation Controller", "PlayStation"),
-                        ("Joy-Con (L)", "Joy-Con"),
-                        ("Joy-Con (R)", "Joy-Con"),
+                        ("Joy-Con (L)", "Joy-Con (L)"),
+                        ("Joy-Con (R)", "Joy-Con (R)"),
+                        ("Joy-Con", "Joy-Con"),
+                        ("Nintendo Wireless Gamepad", "Nintendo"),
                         ("Pro Controller", "Switch Pro Controller"),
                         ("Nintendo Switch Pro Controller", "Switch Pro Controller"),
                         ("Steam Controller", "Steam Controller"),
@@ -6554,6 +11437,118 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
                     precondition(ControllerArtwork.kind(name: "8BitDo Micro gamepad", preference: nil) == "8BitDo Micro")
                     precondition(ControllerArtwork.kind(name: "8BitDo Ultimate", preference: nil) == "8BitDo Ultimate")
                     precondition(ControllerArtwork.kind(name: "DualSense", preference: "Xbox") == "Xbox")
+                    precondition(controllerModel(vendor: 0x057E, product: 0x2009, name: "Pro Controller") == "Switch Pro Controller" &&
+                                 controllerModel(vendor: 0x057E, product: 0x2006, name: "Joy-Con (L)") == "Joy-Con (L)" &&
+                                 controllerModel(vendor: 0x057E, product: 0x2007, name: "Joy-Con (R)") == "Joy-Con (R)" &&
+                                 controllerModel(vendor: 0x057E, product: 0x1234, name: "Wireless Gamepad") == "Nintendo" &&
+                                 controllerModel(vendor: 0x2DC8, product: 0x6001, name: "Pro Controller") == "Generic" &&
+                                 controllerModel(vendor: 0x2DC8, product: 0x6001, name: "8BitDo Pro 2") == nil &&
+                                 controllerModel(vendor: nil, product: nil, name: "Pro Controller") == nil,
+                                 "Only Nintendo's vendor ID proves a genuine Switch controller")
+                    precondition(joyConSide(product: 0x2006) == "Joy-Con (L)" && joyConSide(product: 0x2007) == "Joy-Con (R)" &&
+                                 joyConSide(product: 0x2009) == nil, "Joy-Con L and R stay distinct from the Pro Controller")
+                    precondition(ControllerArtwork.kind(name: "Pro Controller", preference: "Generic") == "Generic" &&
+                                 isBluetoothController(deviceClass: 0, name: "Pro Controller") &&
+                                 isBluetoothController(deviceClass: 0, name: "Joy-Con (R)") &&
+                                 isBluetoothController(deviceClass: 0x002508, name: "Anything"),
+                                 "Pro Controller and Joy-Con must be discoverable for pairing")
+                    precondition(controllerConnectionStatus(connected: true, inputDetected: false, connecting: false) == "Bluetooth only" &&
+                                 controllerConnectionStatus(connected: true, inputDetected: true, connecting: false) == "Connected" &&
+                                 controllerConnectionStatus(connected: true, inputDetected: nil, connecting: false) == "Connected" &&
+                                 controllerConnectionStatus(connected: false, inputDetected: nil, connecting: true) == "Connecting…",
+                                 "A Bluetooth link alone must not claim working game input, nor read as a failure")
+                    let proAddress = "e4-17-d8-e1-5a-ce"
+                    self.mergeControllerList([], paired: [PairedController(name: "Pro Controller", address: proAddress, connected: true)])
+                    let linkOnly = self.controllerEntries.first { $0.id == "bt:e417d8e15ace" }
+                    precondition(linkOnly?.connected == true && linkOnly?.inputDetected == false &&
+                                 self.controllerStatusText(linkOnly!, active: false) == "Bluetooth only",
+                                 "Connected Bluetooth controller absent from HID input must show Bluetooth only")
+                    self.mergeControllerList([ControllerEntry(id: "bt:e417d8e15ace", name: "Pro Controller", connected: true,
+                                                              transport: "Bluetooth", model: "Switch Pro Controller")],
+                                             paired: [PairedController(name: "Pro Controller", address: proAddress, connected: true)])
+                    let withInput = self.controllerEntries.first { $0.id == "bt:e417d8e15ace" }
+                    precondition(withInput?.inputDetected == nil && withInput?.model == "Switch Pro Controller" &&
+                                 self.controllerStatusText(withInput!, active: false) == "Connected",
+                                 "HID input upgrades a Bluetooth-only link to Connected")
+                    func connectButtons(_ view: NSView) -> [NSButton] {
+                        ((view as? NSButton).map { $0.title == "Connect" ? [$0] : [] } ?? []) + view.subviews.flatMap(connectButtons)
+                    }
+                    let discoverAddress = "98-b6-e9-00-00-02"
+                    self.discoveredControllers = [PairedController(name: "Pro Controller", address: discoverAddress, connected: false)]
+                    self.renderDiscoveredControllers()
+                    let fullConnect = connectButtons(self.discoveredControllerRows)
+                    let homePairConnect = connectButtons(self.homeDiscoveredControllerRows)
+                    precondition(fullConnect.count == 1 && homePairConnect.count == 1, "Both Home and Controllers offer Connect")
+                    self.smokePairRequests = []
+                    self.controllerErrors = []
+                    self.bluetoothSettingsOpens = 0
+                    fullConnect[0].performClick(nil)
+                    homePairConnect[0].performClick(nil)
+                    precondition(self.smokePairRequests == [discoverAddress, discoverAddress],
+                                 "Connect on Home and Controllers must pair in-app")
+                    self.devicePairingPINCodeRequest(nil)
+                    self.devicePairingFinished(nil, error: kIOReturnError)
+                    precondition(self.controllerErrors == ["PIN code needed", "Couldn't pair"] && self.bluetoothSettingsOpens == 0,
+                                 "Pair/connect problems must stay in-app and never open Bluetooth Settings")
+                    self.discoveredControllers = []
+                    self.renderDiscoveredControllers()
+                    // A newly found controller appears once, directly under Home's list, and stays put until macOS pairs it.
+                    let previousTab = self.tabs.selectedTabViewItem
+                    self.tabs.selectTabViewItem(at: 0)
+                    let newAddress = "98-b6-e9-00-00-03"
+                    self.discoveredControllers = [PairedController(name: "Wireless Controller", address: newAddress, connected: false)]
+                    self.renderDiscoveredControllers()
+                    self.window.contentView?.layoutSubtreeIfNeeded()
+                    let rendersAfterFind = self.discoveredRenderCount
+                    func windowFrame(_ view: NSView) -> NSRect { view.convert(view.bounds, to: nil) }
+                    let firstRow = self.homeDiscoveredControllerRows.arrangedSubviews.first.map(windowFrame)
+                    let listFrame = windowFrame(self.homeControllerStatus)
+                    precondition(firstRow != nil && abs(listFrame.minY - firstRow!.maxY) <= 17,
+                                 "A discovered controller must sit right under Home's list, not at the card's bottom")
+                    precondition(!self.controllerEntries.contains { $0.id == "bt:98b6e9000003" },
+                                 "A discovered controller is not in the paired list before macOS pairs it")
+                    for _ in 0..<3 { self.renderDiscoveredControllers(); self.renderControllerList() }
+                    self.discoveredControllers.insert(PairedController(name: "Other pad", address: "98-b6-e9-00-00-04", connected: false), at: 0)
+                    self.discoveredControllers.removeFirst()
+                    self.renderDiscoveredControllers()
+                    self.window.contentView?.layoutSubtreeIfNeeded()
+                    precondition(self.discoveredRenderCount == rendersAfterFind &&
+                                 self.homeDiscoveredControllerRows.arrangedSubviews.first.map(windowFrame) == firstRow,
+                                 "Refreshes must not rebuild or move an unchanged Connect row under the pointer")
+                    self.mergeControllerList([], paired: [PairedController(name: "Wireless Controller", address: newAddress, connected: true)])
+                    precondition(self.discoveredControllers.isEmpty && self.homeDiscoveredControllerRows.isHidden &&
+                                 self.controllerEntries.last?.id == "bt:98b6e9000003",
+                                 "Only macOS's paired state moves it into the list")
+                    self.controllerEntries.removeAll { $0.id == "bt:98b6e9000003" }
+                    if let previousTab = previousTab { self.tabs.selectTabViewItem(previousTab) }
+                    let joyEntries = [
+                        ControllerEntry(id: "bt:aa0000000001", name: "Joy-Con (L)", connected: true, transport: "Bluetooth", model: "Joy-Con (L)"),
+                        ControllerEntry(id: "bt:aa0000000002", name: "Joy-Con (R)", connected: true, transport: "Bluetooth", model: "Joy-Con (R)"),
+                        ControllerEntry(id: "hid:1406:8201:USB:serial:aa0000000001", name: "Joy-Con (L)", connected: true, transport: "Wired"),
+                        ControllerEntry(id: "hid:1118:2835:USB:serial:abc", name: "Xbox Controller", connected: true, transport: "Wired")
+                    ]
+                    self.controllerEntries = joyEntries
+                    self.controllerAliases = ["hid:1406:8201:USB:serial:aa0000000001": "bt:aa0000000001"]
+                    self.mergeControllerList(joyEntries, paired: [])
+                    precondition(self.controllerAliases.isEmpty, "Joy-Cons must never be auto-linked or keep stale links")
+                    precondition(Set(self.controllerEntries.map(\.id)).isSuperset(of: joyEntries.prefix(3).map(\.id)),
+                                 "Joy-Con L, R and their USB entry stay separate controllers")
+                    for entry in self.controllerEntries where isJoyCon(entry) {
+                        precondition(self.controllerLinkCandidates(for: entry).isEmpty, "Joy-Cons are never offered Same Controller As")
+                    }
+                    if let xbox = self.controllerEntries.first(where: { $0.name == "Xbox Controller" }) {
+                        precondition(!self.controllerLinkCandidates(for: xbox).contains(where: isJoyCon),
+                                     "Other controllers can't link to a Joy-Con")
+                    }
+                    self.linkController("hid:1406:8201:USB:serial:aa0000000001", to: "bt:aa0000000001")
+                    precondition(self.controllerAliases.isEmpty, "Manual linking refuses Joy-Cons")
+                    precondition(ControllerArtwork.kind(name: "Joy-Con (L)", preference: "Joy-Con (L)") == "Joy-Con (L)" &&
+                                 ControllerArtwork.kind(name: "Nintendo Controller", preference: nil) == "Nintendo" &&
+                                 ControllerArtwork.kind(name: "Steam Controller", preference: nil) == "Steam Controller")
+                    let artKinds = ["Joy-Con (L)", "Joy-Con (R)", "Joy-Con", "Nintendo", "Switch Pro Controller", "Steam Controller", "Generic"]
+                    let artData = artKinds.map { ControllerArtwork.image($0).tiffRepresentation! }
+                    precondition(Set(artData).count == artKinds.count, "Joy-Con L/R/pair, SNES, Switch Pro and Steam art are distinct")
+                    self.controllerAliases = [:]
                     self.controllerEntries = savedEntries
                     self.homeSessionControllers = []
                     self.homeObservedConnections = []
@@ -6691,10 +11686,10 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
                     self.overviewCheckFailures = [.storage]
                     self.guidedSetup = false
                     self.renderGeneral()
-                    precondition(self.sidebarAttention[2] != nil, "Storage errors must mark the sidebar")
+                    precondition(self.sidebarAttention[6] != nil, "Storage errors must mark the sidebar")
                     self.guidedSetup = true
                     self.renderGeneral()
-                    precondition(self.sidebarAttention[2] != nil && self.sidebarAttention.count == 1,
+                    precondition(self.sidebarAttention[6] != nil && self.sidebarAttention.count == 1,
                                  "Guided setup shows storage first and nothing else")
                     let savedCounts = self.sidebarTaskCounts
                     self.sidebarTaskCounts = sidebarBadges([SidebarTask(page: 7, color: .systemYellow, title: "y1", setup: false),
@@ -6792,7 +11787,15 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
                             view.subviews.flatMap { homeHeaderButtons($0) }
                     }
                     let controllerHeaderButtons = homeHeaderButtons(self.homeTiles)
-                    precondition(controllerHeaderButtons.map { $0.action } == [#selector(self.addController), #selector(self.showControllers)])
+                    precondition(controllerHeaderButtons.map { $0.action } == [#selector(self.showControllers)],
+                                 "Home lists discovered controllers itself, so it has no separate add button")
+                    precondition(!self.homeDiscoveredControllerRows.isHidden, "Discovered controllers must appear on Home")
+                    let homeConnect = self.homeDiscoveredControllerRows.arrangedSubviews.flatMap { ($0 as! NSStackView).arrangedSubviews }
+                        .compactMap { $0 as? NSButton }
+                    precondition(homeConnect.map(\.title) == ["Connect"] &&
+                                 homeConnect.first?.identifier?.rawValue == "98-b6-e9-00-00-01" &&
+                                 homeConnect.first?.action == #selector(self.pairDiscoveredController(_:)),
+                                 "Home must offer the same real Connect action as Controllers")
                     precondition(!self.homeTiles.arrangedSubviews[1].subviews.flatMap { $0.subviews }.contains { $0 is TileActionButton },
                                  "The controller tile must not be one big button")
                     for (id, line) in self.homeControllerRowViews {
@@ -6815,13 +11818,13 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
                         control.isEnabled = enabled
                     }
                     precondition(!labels(in: self.homeControllerStatus).contains { $0.contains("controller") && $0.contains("connected") })
-                    controllerHeaderButtons[1].performClick(nil)
+                    controllerHeaderButtons[0].performClick(nil)
                     precondition(self.tabs.selectedTabViewItem === self.tabs.tabViewItems[8])
                     self.selectPage(0)
-                    precondition(Array(self.sidebarPages.prefix(5)) == [-1, 0, 6, 1, 7])
-                    precondition(self.sidebarTitles[1] == "Couch Cube" && self.sidebarSymbols[1] == "house.fill")
+                    precondition(self.sidebarPages == [-1, 0, 8, 13, -1, 6, 1, 7, 10, 11] && !self.sidebarPages.contains(2))
+                    precondition(self.sidebarTitles[0] == "Couch Cube" && self.sidebarTitles[1] == "Play" && self.sidebarSymbols[1] == "play.rectangle.fill")
                     precondition(self.sidebarTitles[self.sidebarPages.firstIndex(of: 1)!] == "App Store")
-                    for page in [0, 6, 1, 7, 8, 10, 2, 11] {
+                    for page in [0, 8, 13, 6, 1, 7, 10, 11] {
                         let sidebarRow = self.sidebarPages.firstIndex(of: page)!
                         let cell = self.tableView(self.sidebar, viewFor: self.sidebar.tableColumns[0], row: sidebarRow)!
                         func colorTiles(in view: NSView) -> [NSBox] {
@@ -6858,10 +11861,11 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
                     self.report = countReport
                     self.window.contentView!.layoutSubtreeIfNeeded()
                     self.selectPage(2)
+                    precondition(self.tabs.selectedTabViewItem === self.tabs.tabViewItems[6], "Library storage opens the merged Game library")
                     self.goBack()
-                    precondition(self.screenTitle.stringValue == "Couch Cube")
+                    precondition(self.screenTitle.stringValue == "Play")
                     self.goForward()
-                    precondition(self.screenTitle.stringValue == "Library storage")
+                    precondition(self.screenTitle.stringValue == "Game library")
                     self.showTVMenus()
                     precondition(self.tabs.selectedTabViewItem === self.tabs.tabViewItems[10])
                     precondition(self.screenTitle.stringValue == "Console Mode")
@@ -7079,6 +12083,101 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
         precondition(appStates.first { $0.id == "steamac" }?.installed == true, "An older App Store read must not overwrite a newer one")
     }
 
+    private func smokeTestConsoleBulkToggles() {
+        let saved = (consoleSaver, consoleRefresher, consoleRoot, consoleSaveDelay, consoleSystems, consolesLoaded, consolesChecking,
+                     pendingEmulatorInstall, pendingAppStoreID)
+        defer {
+            (consoleSaver, consoleRefresher, consoleRoot, consoleSaveDelay) = (saved.0, saved.1, saved.2, saved.3)
+            consoleSaveTimer?.invalidate()
+            consoleSaveTimer = nil
+            consolePersistedEnabled = nil
+            consoleSaveDirty = false
+            consoleStatus.stringValue = ""
+            consoleSystems = saved.4
+            consolesLoaded = saved.5
+            consolesChecking = saved.6
+            (pendingEmulatorInstall, pendingAppStoreID) = (saved.7, saved.8)
+            renderSystems()
+        }
+        var saves: [(enabled: Set<String>, done: (Int32, String) -> Void)] = []
+        consoleSaver = { _, enabled, done in saves.append((Set(enabled), done)) }
+        consoleRefresher = { _, _ in }
+        consoleRoot = { "/smoke" }
+        consoleSaveDelay = 60
+        consolesLoaded = true
+        consolesChecking = false
+        consolePersistedEnabled = nil
+        // Start mixed: every Nintendo home console on, everything else off. Uninstalled emulators are included on purpose.
+        let home = Set(ConsoleArtwork.groups[0].systems), handheld = Set(ConsoleArtwork.groups[1].systems)
+        for index in consoleSystems.indices { consoleSystems[index].enabled = home.contains(consoleSystems[index].id) }
+        renderSystems()
+        let rowsBefore = consoleRows.arrangedSubviews.map(ObjectIdentifier.init)
+        let switchesBefore = systemSwitches.map(ObjectIdentifier.init)
+        func bulk(_ scope: String) -> (toggle: NSSwitch, count: NSTextField, ids: Set<String>, scope: String) {
+            consoleBulkToggles.first { $0.scope == scope }!
+        }
+        func press(_ scope: String) {
+            let toggle = bulk(scope).toggle
+            toggle.state = toggle.state == .on ? .off : .on
+            toggleConsoleGroup(toggle)
+        }
+        func current() -> Set<String> { Set(consoleSystems.filter(\.enabled).map(\.id)) }
+        func switchesMatch() -> Bool { zip(consoleSystems, systemSwitches).allSatisfy { ($0.enabled ? NSControl.StateValue.on : .off) == $1.state } }
+        let all = Set(consoleSystems.map(\.id))
+        let nintendo = home.union(handheld).intersection(all)
+        precondition(bulk("Nintendo home consoles").toggle.state == .on && bulk("Nintendo home consoles").count.isHidden)
+        precondition(bulk("Nintendo handhelds").toggle.state == .off && bulk("Nintendo handhelds").count.isHidden)
+        precondition(bulk("Nintendo consoles").toggle.state == .off && !bulk("Nintendo consoles").count.isHidden &&
+                     bulk("Nintendo consoles").count.stringValue == "\(home.count) of \(nintendo.count)", "Mixed groups show a count")
+        precondition(bulk("all consoles").toggle.accessibilityLabel() == "Show all all consoles, \(home.count) of \(all.count) shown" ||
+                     bulk("all consoles").toggle.accessibilityLabel()?.contains("\(home.count) of \(all.count) shown") == true)
+        // Subsection level; parents recompute instantly.
+        press("Nintendo handhelds")
+        precondition(current() == nintendo && switchesMatch() && bulk("Nintendo consoles").toggle.state == .on &&
+                     bulk("Nintendo consoles").count.isHidden && bulk("all consoles").toggle.state == .off)
+        precondition(pendingEmulatorInstall == nil && pendingAppStoreID == nil, "Showing consoles never installs anything")
+        // Clicking a mixed toggle shows all.
+        precondition(!bulk("all consoles").count.isHidden)
+        press("all consoles")
+        precondition(current() == all && switchesMatch() && consoleBulkToggles.allSatisfy { $0.toggle.state == .on && $0.count.isHidden })
+        // Section level hides only its own systems.
+        press("PlayStation consoles")
+        let playStation = bulk("PlayStation consoles").ids
+        precondition(current() == all.subtracting(playStation) && bulk("all consoles").toggle.state == .off)
+        // An individual switch updates every parent at once.
+        let gb = consoleSystems.firstIndex { $0.id == "gb" }!
+        systemSwitches[gb].state = .off
+        toggleSystem(systemSwitches[gb])
+        precondition(bulk("Nintendo handhelds").count.stringValue == "\(handheld.count - 1) of \(handheld.count)" &&
+                     bulk("Nintendo consoles").toggle.state == .off)
+        press("Nintendo handhelds")
+        let expected = all.subtracting(playStation)
+        precondition(current() == expected && saves.isEmpty, "Bulk and single toggles wait for a pause")
+        precondition(consoleRows.arrangedSubviews.map(ObjectIdentifier.init) == rowsBefore &&
+                     systemSwitches.map(ObjectIdentifier.init) == switchesBefore, "Bulk toggles must not rebuild the list")
+        saveSystems()
+        precondition(saves.count == 1 && saves[0].enabled == expected, "One save for the whole batch")
+        saves[0].done(0, "")
+        precondition(consolePersistedEnabled == expected)
+        // Hide everything, then fail: the last saved choices and the group states come back.
+        press("all consoles")
+        precondition(current() == all, "All on except PlayStation was mixed; the click shows all")
+        press("all consoles")
+        precondition(current().isEmpty && consoleBulkToggles.allSatisfy { $0.toggle.state == .off && $0.count.isHidden })
+        saveSystems()
+        precondition(saves.count == 2 && saves[1].enabled.isEmpty)
+        saves[1].done(1, "Disk is read-only\n")
+        precondition(current() == expected && switchesMatch() && bulk("PlayStation consoles").toggle.state == .off &&
+                     bulk("all consoles").toggle.state == .off && !bulk("all consoles").count.isHidden,
+                     "A failed bulk save reverts the switches and the group states")
+        precondition(consoleStatus.stringValue.hasPrefix("Couldn't save console selection"))
+        precondition(consoleRows.arrangedSubviews.map(ObjectIdentifier.init) == rowsBefore)
+        // Not loaded yet: bulk switches are disabled and refuse.
+        consolesLoaded = false
+        updateConsoleBulkToggles()
+        precondition(consoleBulkToggles.allSatisfy { !$0.toggle.isEnabled })
+    }
+
     private func smokeTestRapidConsoleToggles() {
         let saved = (consoleSaver, consoleRefresher, consoleRoot, consoleSaveDelay, consoleSystems, consolesLoaded, consolesChecking)
         defer {
@@ -7171,6 +12270,731 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
         consoleSystems = try! JSONDecoder().decode([ConsoleSystem].self, from: json(disk))
         renderSystems()
         precondition(current() == second && switchesMatch(), "After restart the last saved selection is shown")
+    }
+
+    /// Release never pops the Activity log on its own; problems surface in the app instead.
+    private func smokeTestActivityStaysClosed() {
+        precondition(!SetupController.activityAutoOpens || ProcessInfo.processInfo.environment["COUCH_CUBE_DEBUG_ACTIVITY"] == "1")
+        guard !SetupController.activityAutoOpens else { return }
+        let open = logWindow?.isVisible == true
+        activityNeeded("Smoke problem")
+        activityNeeded()
+        precondition(lastProblemNotice == "Smoke problem")
+        precondition((logWindow?.isVisible == true) == open, "Problems and operations must not open Activity")
+        precondition(logWindow?.isRestorable != true, "Activity must not be restored at launch")
+    }
+
+    /// Windows launcher installers: download-only rows with real progress, never run and never claimed installed.
+    private func smokeTestStoreAccounts() {
+        func views(_ root: NSView) -> [NSView] { [root] + root.subviews.flatMap(views) }
+        func row(_ id: String) -> NSView { storeAccountsRows.arrangedSubviews.first { $0.identifier?.rawValue == "store-row-" + id }! }
+        func status(_ id: String) -> String {
+            views(row(id)).compactMap { $0 as? NSTextField }.first { $0.accessibilityIdentifier() == "storeAccountStatus" }!.stringValue
+        }
+        func button(_ root: NSView, _ title: String) -> NSButton { views(root).compactMap { $0 as? NSButton }.first { $0.title == title }! }
+        let fixture = Data("""
+        {"clients":[
+         {"id":"mac-steam","name":"Steam","state":"signed_in","detail":"Signed in as Gamer (gamer1)","platform":"Mac","kind":"mac",
+          "accounts":[{"account":"gamer1","persona":"Gamer","most_recent":true},{"account":"kid","persona":null,"most_recent":false}]},
+         {"id":"win-steam","name":"Steam (Windows)","state":"not_signed_in","detail":"Installed \\u2014 not signed in yet","platform":"Windows",
+          "kind":"wine","host":"CrossOver","bottle":"Games","accounts":[]},
+         {"id":"win-epic","name":"Epic Games Launcher","state":"installed","detail":"Installed \\u2014 sign in inside the launcher",
+          "platform":"Windows","kind":"wine","host":"Whisky","bottle":"B1","accounts":[]},
+         {"id":"win-gog","name":"GOG Galaxy","state":"not_installed","detail":"Not installed","platform":"Windows","kind":"wine","accounts":[]}
+        ],"installed":3,"signed_in":1}
+        """.utf8)
+        let savedRead = storeAccountsRead, savedOpen = storeClientOpen
+        defer { storeAccountsRead = savedRead; storeClientOpen = savedOpen; storeWalkthrough = nil }
+        // State machine: stale replies are ignored and a failed check keeps the last good report.
+        var model = StoreAccountsModel()
+        precondition(model.summary.hasPrefix("Checking"))
+        let first = model.begin(), second = model.begin()
+        let report = try! JSONDecoder().decode(StoreAccountsReport.self, from: fixture)
+        precondition(!model.finish(first, report: report, at: Date()) && model.phase == .checking, "A stale check must not land")
+        precondition(model.finish(second, report: report, at: Date()) && model.phase == .loaded && model.summary == "1 of 3 signed in")
+        _ = model.begin()
+        precondition(model.finish(model.generation, report: nil, at: Date()) && model.phase == .failed && model.report == report)
+        // Reads happen only when asked; replies may arrive later.
+        var reads = 0
+        var pending: [(Int32, Data) -> Void] = []
+        storeAccountsRead = { reads += 1; pending.append($0) }
+        loadStoreAccounts()
+        precondition(storeAccounts.phase == .checking && storeAccountsSummary.stringValue.hasPrefix("Checking"))
+        pending.removeFirst()(0, fixture)
+        precondition(reads == 1 && storeAccountsSummary.stringValue == "1 of 3 signed in")
+        precondition(storeAccountsRows.arrangedSubviews.filter { $0.identifier?.rawValue.hasPrefix("store-row-") == true }.count == 4)
+        precondition(status("mac-steam").contains("Signed in as Gamer (gamer1)") && status("mac-steam").contains("1 more account"))
+        precondition(status("win-steam").contains("CrossOver bottle"))
+        precondition(status("win-epic").hasPrefix("Installed \u{2014} sign in inside the launcher"))
+        precondition(status("win-gog") == "Not installed" && button(row("win-gog"), "App Store").isEnabled)
+        // Open waits for the client to quit, guards duplicates, then checks again once.
+        var opens: [String] = []
+        var finishOpen: ((Int32) -> Void)?
+        storeClientOpen = { id, done in opens.append(id); finishOpen = done }
+        button(row("win-epic"), "Open").performClick(nil)
+        precondition(opens == ["win-epic"] && status("win-epic").hasPrefix("Waiting for Epic Games Launcher to quit"))
+        precondition(!button(row("win-epic"), "Open").isEnabled)
+        openStoreClient(button(row("win-epic"), "Open"))
+        precondition(opens == ["win-epic"], "A client that's already open isn't launched twice")
+        finishOpen!(0)
+        precondition(reads == 2 && storeAccounts.phase == .checking)
+        pending.removeFirst()(0, fixture)
+        precondition(storeAccounts.phase == .loaded && storeAccountsError == nil)
+        storeClientOpen = { _, done in done(1) }
+        button(row("mac-steam"), "Open").performClick(nil)
+        pending.removeFirst()(1, Data())
+        precondition(storeAccountsError?.hasPrefix("Couldn't open Steam") == true && storeAccounts.report == report,
+                     "A failed launch or check keeps the last known status and explains it inline")
+        storeAccountsError = nil
+        // Guided walkthrough: installed clients only, one at a time, skippable, with a summary.
+        storeClientOpen = { id, done in opens.append(id); done(0) }
+        startStoreWalkthrough()
+        func step() -> String {
+            views(storeWalkthroughPanel).compactMap { $0 as? NSTextField }.first { $0.accessibilityIdentifier() == "storeWalkthroughStep" }!.stringValue
+        }
+        precondition(storeWalkthrough?.ids == ["mac-steam", "win-steam", "win-epic"] && step().hasPrefix("Step 1 of 3: Steam"))
+        button(storeWalkthroughPanel, "Next").performClick(nil)
+        precondition(step().hasPrefix("Step 2 of 3: Steam (Windows)"))
+        button(storeWalkthroughPanel, "Open Steam (Windows)").performClick(nil)
+        precondition(opens.last == "win-steam")
+        pending.removeFirst()(0, fixture)
+        precondition(step().hasPrefix("Step 2 of 3"), "Returning from a client keeps the walkthrough on its step")
+        button(storeWalkthroughPanel, "Skip").performClick(nil)
+        button(storeWalkthroughPanel, "Next").performClick(nil)
+        precondition(step() == "Done \u{2014} 1 of 3 signed in. Skipped: Steam (Windows).")
+        button(storeWalkthroughPanel, "Done").performClick(nil)
+        precondition(storeWalkthroughPanel.isHidden && pending.isEmpty)
+    }
+
+    private func smokeTestWindowsDownloads() {
+        func views(_ root: NSView) -> [NSView] { [root] + root.subviews.flatMap(views) }
+        func row(_ id: String) -> NSView? { appWindowsRows.arrangedSubviews.first { $0.identifier?.rawValue == "win-row-" + id } }
+        func statusText(_ id: String) -> String {
+            let status = views(row(id)!).first { $0.identifier?.rawValue == "app-status" }!
+            return views(status).compactMap { ($0 as? NSTextField)?.stringValue }.joined()
+        }
+        func dot(_ id: String) -> NSColor? {
+            let status = views(row(id)!).first { $0.identifier?.rawValue == "app-status" }!
+            return views(status).compactMap { $0 as? NSImageView }.first?.contentTintColor
+        }
+        func button(_ id: String, _ title: String) -> NSButton? {
+            views(row(id)!).compactMap { $0 as? NSButton }.first { $0.title == title }
+        }
+        func spinner(_ id: String) -> NSProgressIndicator? { views(row(id)!).compactMap { $0 as? NSProgressIndicator }.first }
+        precondition(windowsDownloadProgress("PROGRESS 5 10")! == (5, 10) && windowsDownloadProgress("PROGRESS -1 10") == nil &&
+                     windowsDownloadProgress("RESULT {}") == nil)
+        precondition(backendErrorMessage("x\nERROR: Drive gone\n", fallback: "f") == "Drive gone")
+        let saved = (windowsDownloads, windowsDownloadJobs, windowsLibrary, windowsDownloadsRead, windowsDownloadRun,
+                     collapsedAppCategories, appOperations)
+        defer {
+            (windowsDownloads, windowsDownloadJobs, windowsLibrary, windowsDownloadsRead, windowsDownloadRun,
+             collapsedAppCategories, appOperations) = saved
+            renderApps()
+            renderGeneral()
+        }
+        let ids = ["win-steam", "win-epic-games", "win-gog-galaxy", "win-ea", "win-battle-net"]
+        var library: String? = nil
+        var downloaded: [String: String] = [:]
+        func reply() -> Data {
+            let items = ids.map { id -> String in
+                let file = downloaded[id].map { "\"\($0)\"" } ?? "null"
+                return "{\"id\":\"\(id)\",\"name\":\"\(id) (Windows)\",\"vendor\":\"Vendor\",\"kind\":\"\(id == "win-epic-games" ? "msi" : "exe")\"," +
+                    "\"downloaded\":\(downloaded[id] != nil),\"file\":\(file),\"size\":\(downloaded[id] != nil ? "2380800" : "null"),\"sha256\":null}"
+            }
+            return Data(("{\"library\":" + (library.map { "\"\($0)\"" } ?? "null") + ",\"folder\":null,\"items\":[" +
+                         items.joined(separator: ",") + "]}").utf8)
+        }
+        var heldRead: ((Int32, Data) -> Void)?
+        var holdRead = false
+        windowsDownloadsRead = { done in if holdRead { heldRead = done } else { done(0, reply()) } }
+        var runs: [String] = [], lineOut: ((String) -> Void)?, finish: ((Int32, String) -> Void)?, canceled: [String] = []
+        windowsDownloadRun = { id, line, done in
+            runs.append(id); lineOut = line; finish = done
+            return { canceled.append(id) }
+        }
+        collapsedAppCategories = []
+        appOperations = [:]
+        loadWindowsDownloads()
+        precondition(ids.allSatisfy { row($0) != nil }, "Windows launchers are listed under Windows games")
+        precondition(button("win-steam", "Get")?.isEnabled == false, "Without a game library there is nowhere to download")
+        library = "/Volumes/Smoke/Couch Cube"
+        loadWindowsDownloads()
+        precondition(button("win-steam", "Get")?.isEnabled == true && statusText("win-steam") == "Not downloaded")
+
+        // Get starts the download at once; real byte progress drives a determinate indicator.
+        getWindowsDownload(button("win-steam", "Get")!)
+        precondition(runs == ["win-steam"] && spinner("win-steam")?.isIndeterminate == true && statusText("win-steam") == "Downloading\u{2026}")
+        lineOut!("PROGRESS 50 100")
+        precondition(spinner("win-steam")?.isIndeterminate == false && spinner("win-steam")?.doubleValue == 0.5)
+        precondition(statusText("win-steam") == "Downloading \u{00B7} 50%")
+        precondition(appOperations["steam"] == nil, "The Mac Steam app has its own, separate state")
+        if let macSteam = appPCRows.arrangedSubviews.first(where: { $0.identifier?.rawValue == "app-row-steam" }) {
+            precondition(!views(macSteam).contains { $0 is NSProgressIndicator })
+        }
+        renderGeneral()
+        precondition(!sidebarTasks.contains { $0.title.contains("Windows") || $0.title.contains("win-") },
+                     "Undownloaded Windows launchers aren't maintenance tasks")
+        downloaded["win-steam"] = "/Volumes/Smoke/Couch Cube/Downloads/SteamSetup.exe"
+        finish!(0, "")
+        precondition(windowsDownloadJobs["win-steam"] == nil && statusText("win-steam") == "Downloaded" && dot("win-steam") == .systemGreen)
+        precondition(button("win-steam", "Show in Finder") != nil && spinner("win-steam") == nil)
+        precondition(views(row("win-steam")!).compactMap { ($0 as? NSTextField)?.stringValue }.contains { $0.contains("Not run or installed") },
+                     "Downloaded never claims installed")
+
+        // A failed run shows the backend's reason with Retry; nothing is green.
+        getWindowsDownload(button("win-ea", "Get")!)
+        finish!(1, "ERROR: The connection dropped during the download. Nothing was saved.\n")
+        precondition(statusText("win-ea") == "Couldn't download" && dot("win-ea") == .systemRed && button("win-ea", "Retry") != nil)
+        precondition(views(row("win-ea")!).compactMap { ($0 as? NSTextField)?.stringValue }.contains { $0.hasPrefix("The connection dropped") })
+        // Success that the status check can't confirm is a failure, not green.
+        getWindowsDownload(button("win-gog-galaxy", "Get")!)
+        finish!(0, "")
+        precondition(statusText("win-gog-galaxy") == "Couldn't download" && dot("win-gog-galaxy") != .systemGreen)
+        // Cancel stops the backend and returns to Get.
+        getWindowsDownload(button("win-battle-net", "Get")!)
+        let cancel = views(row("win-battle-net")!).compactMap { $0 as? NSButton }.first { $0.action == #selector(cancelWindowsDownload(_:)) }!
+        cancelWindowsDownload(cancel)
+        precondition(canceled == ["win-battle-net"])
+        finish!(15, "")
+        precondition(windowsDownloadJobs["win-battle-net"] == nil && statusText("win-battle-net") == "Not downloaded" &&
+                     button("win-battle-net", "Get") != nil)
+        // A second press while running doesn't start a duplicate.
+        getWindowsDownload(button("win-epic-games", "Get")!)
+        let started = runs.count
+        windowsDownloadJobs["win-epic-games"].map { _ in getWindowsDownload({ let b = NSButton(); b.tag = 1; return b }()) }
+        precondition(runs.count == started)
+        // Library changes cancel running downloads before touching storage.
+        canceled = []
+        for (id, job) in windowsDownloadJobs where job.running { cancelWindowsDownload(id: id) }
+        precondition(canceled == ["win-epic-games"])
+        finish!(15, "")
+        // An older status read can't revert a newer result.
+        holdRead = true
+        loadWindowsDownloads()
+        let stale = heldRead!
+        holdRead = false
+        loadWindowsDownloads()
+        downloaded["win-steam"] = nil
+        stale(0, reply())
+        precondition(statusText("win-steam") == "Downloaded")
+        // Collapsed category keeps downloaded and failed rows, hides untouched ones.
+        collapsedAppCategories = ["Windows games"]
+        renderApps()
+        precondition(row("win-steam") != nil && row("win-ea") != nil && row("win-epic-games") == nil)
+        precondition(logWindow?.isVisible != true, "Downloads must not open Activity")
+    }
+
+    /// App Store rows: spinner while working, real phases, and green only after a targeted re-check confirms it.
+    private func smokeTestAppOperations() {
+        func views(_ root: NSView) -> [NSView] { [root] + root.subviews.flatMap(views) }
+        func appRow() -> NSView? { views(appPCRows.superview ?? appPCRows).first { $0.identifier?.rawValue == "app-row-dolphin" }
+            ?? views(appRetroRows).first { $0.identifier?.rawValue == "app-row-dolphin" } }
+        func statusDot(_ row: NSView) -> NSColor? {
+            let status = views(row).first { $0.identifier?.rawValue == "app-status" }!
+            return views(status).compactMap { $0 as? NSImageView }.first?.contentTintColor
+        }
+        func statusText(_ row: NSView) -> String {
+            let status = views(row).first { $0.identifier?.rawValue == "app-status" }!
+            return views(status).compactMap { ($0 as? NSTextField)?.stringValue }.joined()
+        }
+        func progress(_ row: NSView) -> NSProgressIndicator? { views(row).compactMap { $0 as? NSProgressIndicator }.first }
+        func reply(_ app: ManagedApp) -> Data {
+            Data(("[{\"id\":\"\(app.id)\",\"name\":\"\(app.name)\",\"installed\":\(app.installed),\"path\":\"\(app.path)\"," +
+                  "\"version\":\"\(app.version)\",\"brew\":true,\"managed\":\(app.managed),\"update\":" +
+                  (app.update.map { "\"\($0)\"" } ?? "null") + ",\"manual\":false,\"url\":null}]").utf8)
+        }
+        precondition(task == nil)
+        let saved = (appStates, appOperations, appOperationRun, appVerifyRead, backendRead, appsHaveResults, lastAppsData,
+                     collapsedAppCategories, appsStatus.stringValue)
+        defer {
+            (appStates, appOperations, appOperationRun, appVerifyRead, backendRead, appsHaveResults, lastAppsData,
+             collapsedAppCategories, appsStatus.stringValue) = saved
+            appOperationOutput = nil
+            renderApps()
+            renderGeneral()
+        }
+        precondition(appOperationPhase("==> Downloading https://example\n==> Upgrading Cask dolphin", action: "update") == "Updating")
+        precondition(appOperationPhase("==> Fetching downloads for: dolphin", action: "install") == "Downloading")
+        precondition(appOperationPhase("Already installed\n", action: "install") == nil, "No phase is invented")
+        let outdated = ManagedApp(id: "dolphin", name: "Dolphin", installed: true, path: "/Applications/Dolphin.app", version: "1",
+                                  managed: true, update: "2", manual: false, brew: true, url: nil)
+        let current = ManagedApp(id: "dolphin", name: "Dolphin", installed: true, path: "/Applications/Dolphin.app", version: "2",
+                                 managed: true, update: nil, manual: false, brew: true, url: nil)
+        appStates = appStates.filter { $0.id != "dolphin" } + [outdated]
+        appsHaveResults = true
+        renderApps()
+        renderGeneral()
+        precondition(sidebarTasks.contains { $0.title == "Update Dolphin" })
+        window.contentView!.layoutSubtreeIfNeeded()
+        let before = appRow()!.fittingSize.height
+        precondition(statusDot(appRow()!) == .systemYellow && progress(appRow()!) == nil)
+
+        // A full app check that started earlier must not revert the verified result.
+        var staleFetch: ((Int32, Data) -> Void)?
+        backendRead = { _, done in staleFetch = done }
+        fetchApps(updates: false)
+        var runDone: ((Int32) -> Void)?
+        var ran: [[String]] = []
+        appOperationRun = { arguments, done in ran.append(arguments); runDone = done }
+        var verifyReply = reply(current)
+        var verifyDone: ((Int32, Data) -> Void)?
+        appVerifyRead = { arguments, done in
+            precondition(arguments == ["apps", "--updates", "--package", "dolphin"], "Only the changed app is re-checked")
+            verifyDone = done
+        }
+        runAppOperation(outdated, action: "update")
+        precondition(ran == [["manage-app", "--package", "dolphin", "--action", "update", "--confirm"]])
+        var line = appRow()!
+        precondition(progress(line)?.isIndeterminate == true, "Homebrew gives no real percentage, so the spinner is indeterminate")
+        precondition(!views(line).contains { ($0 as? NSPopUpButton) != nil }, "The spinner replaces the ... button")
+        precondition(statusText(line).hasPrefix("Updating") && statusDot(line) == .systemBlue)
+        appOperationOutput?("==> Downloading https://example.invalid/dolphin.dmg\n")
+        line = appRow()!
+        precondition(statusText(line) == "Updating · Downloading\u{2026}")
+        window.contentView!.layoutSubtreeIfNeeded()
+        precondition(abs(line.fittingSize.height - before) < 1, "Row height stays stable while updating")
+        runDone!(0)
+        precondition(statusText(appRow()!).contains("Checking") && progress(appRow()!) != nil, "Green waits for verification")
+        verifyDone!(0, verifyReply)
+        line = appRow()!
+        precondition(statusDot(line) == .systemGreen && statusText(line) == "Installed" && progress(line) == nil)
+        precondition(appOperations["dolphin"] == nil && !sidebarTasks.contains { $0.title == "Update Dolphin" })
+        precondition(updateAllButton.isHidden || appStates.contains { $0.id != "dolphin" && $0.update?.isEmpty == false })
+        staleFetch?(0, Data(("[" + String(decoding: reply(outdated), as: UTF8.self).dropFirst().dropLast() + "]").utf8))
+        precondition(statusDot(appRow()!) == .systemGreen, "A stale full refresh must not revert the verified state")
+
+        // Homebrew succeeded but the re-check still sees the old version: not green, inline failure, retry stays available.
+        appStates = appStates.filter { $0.id != "dolphin" } + [outdated]
+        renderApps()
+        verifyReply = reply(outdated)
+        runAppOperation(outdated, action: "update")
+        runDone!(0)
+        verifyDone!(0, verifyReply)
+        line = appRow()!
+        precondition(statusDot(line) == .systemRed && statusText(line) == "Couldn't update" && progress(line) == nil)
+        precondition(views(line).contains { $0 is NSPopUpButton }, "Update stays available to retry")
+        // A failed Homebrew run is never shown as green, even if the re-check fails too.
+        runAppOperation(outdated, action: "update")
+        runDone!(1)
+        verifyDone!(1, Data())
+        line = appRow()!
+        precondition(statusDot(line) != .systemGreen && statusText(line) == "Couldn't confirm the update")
+
+        // Steam is one app listed twice (TV menus: Steam Big Picture, PC games: Steam): both rows share one state.
+        func steamRows() -> [(NSStackView, NSView)] {
+            [appMenuRows, appPCRows, appWindowsRows, appRetroRows].flatMap { rows in
+                rows.arrangedSubviews.filter { $0.identifier?.rawValue == "app-row-steam" }.map { (rows, $0) } }
+        }
+        func steam(installed: Bool, update: String? = nil) -> ManagedApp {
+            ManagedApp(id: "steam", name: "Steam", installed: installed, path: installed ? "/Applications/Steam.app" : "",
+                       version: installed ? "1" : "", managed: true, update: update, manual: false, brew: true, url: nil)
+        }
+        appVerifyRead = { arguments, done in
+            precondition(arguments == ["apps", "--updates", "--package", "steam"], "Steam is re-checked once for both rows")
+            verifyDone = done
+        }
+        collapsedAppCategories = []
+        appStates = appStates.filter { $0.id != "steam" } + [steam(installed: true, update: "2")]
+        renderApps()
+        renderGeneral()
+        precondition(steamRows().map { $0.0 } == [appMenuRows, appPCRows], "Steam is listed under TV menus and PC games")
+        precondition(sidebarTasks.filter { $0.title == "Update Steam" }.count == 1, "The App Store badge counts Steam once")
+        precondition(Set(steamRows().map { statusText($0.1) }).count == 1)
+        for (rows, line) in steamRows() {
+            precondition(views(line).compactMap { $0 as? NSTextField }.contains { $0.stringValue == (rows === appMenuRows ? "Steam Big Picture" : "Steam") })
+        }
+        // Start from the PC games row; the TV menu row shows the same spinner and phase, and can't start a second run.
+        ran = []
+        runAppOperation(appStates.first { $0.id == "steam" }!, action: "update")
+        appOperationOutput?("==> Downloading https://example.invalid/steam.dmg\n")
+        precondition(steamRows().allSatisfy { progress($0.1) != nil && statusText($0.1) == "Updating \u{00B7} Downloading\u{2026}" })
+        precondition(steamRows().allSatisfy { !views($0.1).contains { $0 is NSButton && ($0 as! NSButton).isEnabled } })
+        runAppOperation(appStates.first { $0.id == "steam" }!, action: "update")
+        precondition(ran.count == 1 && appsStatus.stringValue.hasPrefix("Wait"), "A second Steam row can't start a duplicate run")
+        runDone!(0)
+        verifyDone!(0, reply(steam(installed: true)))
+        renderGeneral()
+        precondition(steamRows().count == 2 && steamRows().allSatisfy { statusDot($0.1) == .systemGreen && statusText($0.1) == "Installed" })
+        precondition(!sidebarTasks.contains { $0.title == "Update Steam" })
+        // A failure shows on both rows, with Retry on both.
+        appStates = appStates.filter { $0.id != "steam" } + [steam(installed: false)]
+        renderApps()
+        runAppOperation(steam(installed: false), action: "install")
+        runDone!(1)
+        verifyDone!(0, reply(steam(installed: false)))
+        precondition(steamRows().count == 2 && steamRows().allSatisfy {
+            statusDot($0.1) == .systemRed && views($0.1).contains { ($0 as? NSButton)?.title == "Retry" } })
+        // Installing from the TV menu row while PC games is collapsed: the PC games row appears once Steam is installed.
+        collapsedAppCategories = ["PC games"]
+        appOperations["steam"] = nil
+        renderApps()
+        precondition(steamRows().map { $0.0 } == [appMenuRows])
+        runAppOperation(steam(installed: false), action: "install")
+        runDone!(0)
+        verifyDone!(0, reply(steam(installed: true)))
+        precondition(steamRows().map { $0.0 } == [appMenuRows, appPCRows] && steamRows().allSatisfy { statusDot($0.1) == .systemGreen })
+        precondition(logWindow?.isVisible != true, "App updates must not open Activity")
+    }
+
+    private func assertSmokeDeals() {
+        func views(_ root: NSView) -> [NSView] { [root] + root.subviews.flatMap(views) }
+        func labels(_ root: NSView) -> [String] { views(root).compactMap { ($0 as? NSTextField)?.stringValue } }
+        let page = tabs.selectedTabViewItem!.view!
+        precondition(dealsOpened, "Cube Shop must load only once its page opens")
+        precondition(screenTitle.stringValue == "Cube Shop")
+        let defaults = UserDefaults.standard
+        let shopKeys = [shopTabKey, shopScopeKey, shopCurrencyKey, shopFeeKey]
+        let savedShop = shopKeys.map { defaults.object(forKey: $0) }
+        defaults.set("original", forKey: shopCurrencyKey)
+        defaults.removeObject(forKey: shopFeeKey)
+        rerenderShop()
+        // URL safety: only https links on the services' own hosts open.
+        precondition(safeDealURL("https://www.cheapshark.com/redirect?dealID=a", hosts: cheapSharkHosts) != nil)
+        precondition(safeDealURL("http://www.cheapshark.com/redirect?dealID=a", hosts: cheapSharkHosts) == nil)
+        precondition(safeDealURL("https://www.cheapshark.com.evil.example/x", hosts: cheapSharkHosts) == nil)
+        precondition(safeDealURL("https://user@www.gamerpower.com/x", hosts: gamerPowerHosts) == nil)
+        precondition(safeDealURL("steam://run/620", hosts: cheapSharkHosts) == nil)
+        precondition(safeDealURL("javascript:alert(1)") == nil)
+        precondition(dealsErrorText("ERROR: rate-limited:90").contains("2 min"))
+        let savedTab = shopTab.selectedSegment, savedOpener = dealsOpener
+        var opened: [URL] = []
+        dealsOpener = { opened.append($0) }
+        defer {
+            dealsOpener = savedOpener
+            for (key, value) in zip(shopKeys, savedShop) {
+                if let value { defaults.set(value, forKey: key) } else { defaults.removeObject(forKey: key) }
+            }
+            updateCurrencyNotes()
+            selectShopTab(savedTab)
+            RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+        }
+        selectShopTab(1)
+        RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+        precondition(storeDeals.count == 2 && dealsStorePopup.numberOfItems == 3, "Store deals and store filter must render")
+        precondition(dealsFilters.arrangedSubviews.contains(dealsSearch) && dealsFilters.arrangedSubviews.contains(dealsSortPopup))
+        var text = labels(page)
+        precondition(text.contains("Portal 2") && text.contains("$1.99") && text.contains("$9.99") && text.contains("\u{2212}80%"))
+        precondition(labels(dealsList).filter { $0 == "Installed" }.count == 1, "Only the Steam-appID-matched deal is marked Installed")
+        precondition(!dealsMore.isHidden, "More pages must offer Load More")
+        let opens = views(dealsList).compactMap { $0 as? ClickableRowView }
+        precondition(opens.count == 2, "Every deal row is one clickable row")
+        precondition(opens.allSatisfy { $0.accessibilityRole() == .link && ($0.accessibilityLabel() ?? "").hasPrefix("Open ") })
+        precondition(views(dealsList).compactMap { $0 as? NSButton }.allSatisfy { $0.accessibilityIdentifier() == "wishlistHeart" },
+                     "Deal rows have no trailing buttons except the wishlist heart")
+        opens.forEach { $0.activate() }
+        precondition(opened.map(\.absoluteString) == ["https://www.cheapshark.com/redirect?dealID=abc"], "Off-host deal links must never open")
+        let attribution = views(page).compactMap { $0 as? NSTextField }.first { $0.accessibilityIdentifier() == "dealsAttribution" }!
+        let links = NSMutableSet()
+        attribution.attributedStringValue.enumerateAttribute(.link, in: NSRange(location: 0, length: attribution.attributedStringValue.length)) { value, _, _ in
+            if let value { links.add("\(value)") }
+        }
+        precondition(links.contains("https://www.gamerpower.com") && links.contains("https://www.cheapshark.com") &&
+                     links.contains("https://frankfurter.dev") && links.contains("https://performance-partners.apple.com/search-api"),
+                     "Attribution must link every data source")
+        // A stale reply from a mode the user already left is ignored.
+        let generation = dealsGeneration
+        selectShopTab(2)
+        precondition(dealsGeneration > generation)
+        RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+        text = labels(dealsList)
+        precondition(giveaways.count == 1 && text.contains("Free Adventure") && text.contains("Free") && !text.contains("Portal 2"))
+        precondition(dealsFilters.arrangedSubviews.contains(giveawayPlatformPopup) && dealsFilters.arrangedSubviews.contains(giveawayTypePopup))
+        precondition(dealsMore.isHidden)
+        opened = []
+        views(dealsList).compactMap { $0 as? ClickableRowView }.forEach { $0.activate() }
+        precondition(opened.map(\.host) == ["www.gamerpower.com"])
+        window.contentView!.layoutSubtreeIfNeeded()
+        precondition(dealsList.frame.width > 300, "Deal rows must use the page width")
+        smokeTestDealReminders(opened: { opened })
+        smokeTestCubeShop(opened: { opened })
+        // Badges wrap instead of clipping, even at the narrowest window.
+        selectShopTab(1)
+        RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+        let savedFrame = window.frame
+        window.setContentSize(window.contentMinSize)
+        window.contentView!.layoutSubtreeIfNeeded()
+        for row in views(dealsList).compactMap({ $0 as? ClickableRowView }) {
+            for badge in views(row).compactMap({ $0 as? NSTextField }).filter({ $0.accessibilityIdentifier() == "dealBadges" }) {
+                let frame = badge.convert(badge.bounds, to: row)
+                precondition(row.bounds.insetBy(dx: -0.5, dy: -0.5).contains(frame), "Deal badges must stay inside their row")
+                precondition(badge.cell!.cellSize(forBounds: NSRect(x: 0, y: 0, width: badge.bounds.width, height: .greatestFiniteMagnitude)).height <= badge.bounds.height + 1,
+                             "Deal badges must wrap, not clip")
+            }
+        }
+        window.setFrame(savedFrame, display: false)
+    }
+
+    private func smokeTestCubeShop(opened: () -> [URL]) {
+        func views(_ root: NSView) -> [NSView] { [root] + root.subviews.flatMap(views) }
+        func labels(_ root: NSView) -> [String] { views(root).compactMap { ($0 as? NSTextField)?.stringValue } }
+        func spin(_ seconds: Double = 0.05) { RunLoop.current.run(until: Date().addingTimeInterval(seconds)) }
+        func calls(_ command: String) -> [[String]] { smokeShopCalls.filter { $0.first == command } }
+        func heart(_ key: String) -> NSButton? {
+            views(shopPageView!).compactMap { $0 as? NSButton }.first { $0.accessibilityIdentifier() == "wishlistHeart" && $0.identifier?.rawValue == key }
+        }
+        let defaults = UserDefaults.standard
+        let savedWishlist = smokeWishlist, savedStores = myStores, savedAsk = askTargetPrice
+        defer {
+            smokeWishlist = savedWishlist
+            smokeWishlistOffline = false
+            askTargetPrice = savedAsk
+            myStores = savedStores
+            defaults.set("original", forKey: shopCurrencyKey)
+            defaults.removeObject(forKey: shopFeeKey)
+            updateScopeHint()
+            rerenderShop()
+        }
+        // Money: Decimal math through EUR, HUF has no minor units, the fee applies only to conversions, free stays Free.
+        let rates = decodeDeals(ExchangeRates.self, Data(smokeRatesJSON.utf8))!
+        let price = ShopMoney.decimal(11.99)
+        precondition(ShopMoney.convert(price, from: "USD", to: "HUF", rates: rates) == 3869)
+        precondition(ShopMoney.convert(price, from: "USD", to: "HUF", rates: rates, feePercent: 1) == 3907)
+        precondition(ShopMoney.convert(price, from: "USD", to: "EUR", rates: rates) == ShopMoney.decimal(10.65))
+        precondition(ShopMoney.convert(price, from: "USD", to: "USD", rates: rates, feePercent: 1) == price)
+        precondition(ShopMoney.convert(price, from: "USD", to: "XXX", rates: rates) == nil &&
+                     ShopMoney.convert(price, from: "USD", to: "HUF", rates: rates, feePercent: 25) == nil)
+        precondition(ShopMoney.plain(price, "USD") == "11.99 USD" && ShopMoney.plain(3869, "HUF") == "3869 HUF")
+        precondition(shopPrice(0, "USD").text == "Free")
+        // PC stores only: no console or phone platforms anywhere in the filters.
+        let platforms = giveawayPlatformPopup.itemTitles.joined(separator: " ")
+        for banned in ["PlayStation", "Xbox", "Switch", "Android", "iOS"] { precondition(!platforms.contains(banned), "No \(banned) giveaways") }
+        // My Stores / All Stores is saved and sent as --mine.
+        selectShopTab(1)
+        spin()
+        precondition(!shopScopeBar.isHidden)
+        shopScope.selectedSegment = 0
+        shopScopeChanged()
+        precondition(defaults.string(forKey: shopScopeKey) == "mine" && dealsArguments().contains("--mine"))
+        shopScope.selectedSegment = 1
+        shopScopeChanged()
+        precondition(defaults.string(forKey: shopScopeKey) == "all" && !dealsArguments().contains("--mine"))
+        spin()
+        myStores = []
+        updateScopeHint()
+        precondition(shopScope.selectedSegment == 1 && !shopScope.isEnabled(forSegment: 0) && shopScopeHint.stringValue.hasPrefix("No store apps"))
+        myStores = [ShopStoreRef(key: "steam", name: "Steam")]
+        shopScope.selectedSegment = 0
+        shopScopeChanged()
+        precondition(shopScope.isEnabled(forSegment: 0) && shopScopeHint.stringValue.contains("Steam"))
+        // Home: wishlist hits, featured deals, price drops and free games, for the saved scope.
+        smokeWishlist = [["key": "cs:612", "title": "Portal 2", "game_id": "612", "steam_app_id": "620", "app_store_id": NSNull(),
+                          "added": 1_700_000_000, "target_price": 2.5,
+                          "best": ["price": 1.99, "normal_price": 9.99, "savings": 80, "store": "Steam", "currency": "USD", "checked": 1_700_000_000],
+                          "on_sale": true, "target_hit": true, "sale_text": "On sale at Steam \u{2212}80%"]]
+        checkWishlist(refresh: false)
+        spin()
+        precondition(wishlist?.items.count == 1 && calls("wishlist").last!.contains("--check"))
+        shopHome = nil
+        homeLoadedScope = nil
+        selectShopTab(0)
+        spin()
+        precondition(shopScopeBar.isHidden == false && !homePane.isHidden && dealsPane.isHidden)
+        precondition(calls("shop-home").last! == ["shop-home", "--scope", "mine"])
+        let home = labels(homeList).map { $0.replacingOccurrences(of: "\u{00A0}", with: " ") }
+        for title in ["Wishlist deals", "Featured deals", "Price drops", "Free now", "Drop Game", "Free Adventure", "On sale at Steam \u{2212}80%"] {
+            precondition(home.contains { $0 == title || $0.contains(title) }, "Home shows \(title)")
+        }
+        // Hearts: saved items are filled; adding sends only the allowed keys; removing clears it.
+        precondition(heart("cs:612")?.image?.name() == nil && heart("cs:612")?.accessibilityLabel() == "Remove Portal 2 from wishlist")
+        precondition(heart("cs:700")?.accessibilityLabel() == "Add Drop Game to wishlist" && heart("cs:700")!.isEnabled)
+        heart("cs:700")!.performClick(nil)
+        spin()
+        let add = calls("wishlist").last!
+        precondition(add[1] == "--add")
+        let payload = try! JSONSerialization.jsonObject(with: Data(add[2].utf8)) as! [String: String]
+        precondition(payload == ["title": "Drop Game", "game_id": "700", "steam_app_id": "700"])
+        precondition(wishlist?.items.count == 2 && heart("cs:700")?.accessibilityLabel() == "Remove Drop Game from wishlist")
+        heart("cs:700")!.performClick(nil)
+        spin()
+        precondition(calls("wishlist").last! == ["wishlist", "--remove", "cs:700"] && wishlist?.items.count == 1)
+        // Drive unplugged: the cached wishlist is read-only, with a note.
+        smokeWishlistOffline = true
+        checkWishlist(refresh: false)
+        spin()
+        precondition(wishlist?.offline == true && heart("cs:700")?.isEnabled == false)
+        selectShopTab(4)
+        precondition(wishlistStatus.stringValue.contains("isn't connected") &&
+                     views(wishlistList).compactMap { $0 as? NSButton }.filter { $0.accessibilityIdentifier() == "wishlistRemove" }.allSatisfy { !$0.isEnabled })
+        smokeWishlistOffline = false
+        checkWishlist(refresh: false)
+        spin()
+        // Wishlist rows: target price and removal go through the backend file.
+        let rows = views(wishlistList).filter { $0.accessibilityIdentifier() == "wishlistRow" }
+        precondition(rows.count == 1 && labels(wishlistList).contains { $0.replacingOccurrences(of: "\u{00A0}", with: " ").contains("Target reached") })
+        askTargetPrice = { _, _ in .some(5) }
+        views(wishlistList).compactMap { $0 as? NSButton }.first { $0.accessibilityIdentifier() == "wishlistTarget" }!.performClick(nil)
+        spin()
+        precondition(calls("wishlist").last! == ["wishlist", "--target", "cs:612", "--price", "5.00"])
+        askTargetPrice = { _, _ in .none }
+        let targets = calls("wishlist").count
+        views(wishlistList).compactMap { $0 as? NSButton }.first { $0.accessibilityIdentifier() == "wishlistTarget" }!.performClick(nil)
+        precondition(calls("wishlist").count == targets, "Cancelling the target changes nothing")
+        // Search: too short does nothing; typing is debounced; identical searches are combined.
+        selectShopTab(3)
+        let searches = calls("shop-search").count
+        shopSearchField.stringValue = "h"
+        shopSearchSubmitted()
+        precondition(calls("shop-search").count == searches)
+        shopSearchField.stringValue = "hollow knight"
+        shopSearchTyped()
+        shopSearchTyped()
+        spin(0.3)
+        precondition(calls("shop-search").count == searches, "Search waits for a pause in typing")
+        spin(1.0)
+        precondition(calls("shop-search").count == searches + 1)
+        precondition(calls("shop-search").last!.starts(with: ["shop-search", "--query", "hollow knight", "--country"]))
+        shopSearchSubmitted()
+        spin()
+        precondition(calls("shop-search").count == searches + 1, "An identical search reuses the loaded results")
+        func offers() -> [String] {
+            views(searchList).filter { $0.accessibilityIdentifier() == "shopOffer" }.compactMap { $0.accessibilityLabel() }
+        }
+        func order() -> [String] {
+            offers().map { $0.replacingOccurrences(of: "Open Hollow Knight at ", with: "").components(separatedBy: ",")[0] }
+        }
+        // Original prices: USD stores by price, then the App Store group in its own currency.
+        precondition(order() == ["GOG", "Steam", "Mac App Store"], "\(order())")
+        precondition(offers().filter { $0.hasSuffix(", cheapest") }.count == 1 && offers()[0].hasSuffix(", cheapest"))
+        precondition(labels(searchList).contains("Mac App Store \u{00B7} prices in HUF") && labels(searchList).contains("Hollow Pocket"))
+        precondition(views(searchList).filter { $0.accessibilityIdentifier() == "shopAppStoreRow" }.count == 1)
+        // Converted to USD, then HUF: every store sorts by the converted price, marked with ≈ and the original.
+        defaults.set("USD", forKey: shopCurrencyKey)
+        loadRates(refresh: false)
+        spin()
+        precondition(exchangeRates == rates && !shopCurrencyNote.isHidden && shopCurrencyNote.stringValue.contains("Frankfurter"),
+                     "rates \(String(describing: exchangeRates)) loading \(ratesLoading) note \(shopCurrencyNote.stringValue)")
+        rerenderShop()
+        precondition(order() == ["GOG", "Mac App Store", "Steam"], "\(order())")
+        precondition(offers()[1].contains("\u{2248}") && offers()[1].contains("(3990 HUF)") && !offers()[0].contains("\u{2248}"))
+        precondition(shopPrice(3990, "HUF").value == ShopMoney.decimal(12.37))
+        defaults.set("HUF", forKey: shopCurrencyKey)
+        rerenderShop()
+        precondition(order() == ["GOG", "Mac App Store", "Steam"], "\(order())")
+        precondition(offers()[0].contains("\u{2248}") && offers()[0].contains("(9.99 USD)") && !offers()[1].contains("\u{2248}"))
+        precondition(shopPrice(9.99, "USD").value == 3223 && shopPrice(3990, "HUF").value == 3990)
+        let tips = views(searchList).compactMap { $0 as? NSTextField }.compactMap(\.toolTip)
+        precondition(tips.contains { $0.hasSuffix("(9.99 USD)") }, "Converted prices show the original in the tooltip")
+        defaults.set(1.0, forKey: shopFeeKey)
+        precondition(shopPrice(11.99, "USD").value == 3907 && shopPrice(3990, "HUF").value == 3990, "The fee applies only to conversions")
+        defaults.removeObject(forKey: shopFeeKey)
+        // Rows open the default browser: CheapShark redirects and apps.apple.com only.
+        let before = opened().count
+        let shopRows = views(searchList).compactMap { $0 as? ClickableRowView }
+        shopRows.forEach { $0.activate() }
+        let hosts = Set(opened().dropFirst(before).compactMap(\.host))
+        precondition(opened().count - before == shopRows.count && hosts == ["www.cheapshark.com", "apps.apple.com"], "\(hosts)")
+        // Every tab fits the narrowest window.
+        let savedFrame = window.frame
+        window.setContentSize(window.contentMinSize)
+        for tab in 0..<5 {
+            selectShopTab(tab)
+            spin()
+            window.contentView!.layoutSubtreeIfNeeded()
+            let page = shopPageView!
+            for row in views(page).compactMap({ $0 as? ClickableRowView }) where !row.isHiddenOrHasHiddenAncestor {
+                let frame = row.convert(row.bounds, to: page)
+                precondition(frame.minX >= -0.5 && frame.maxX <= page.bounds.width + 0.5, "Shop rows stay inside the page on tab \(tab)")
+            }
+            precondition(shopTab.frame.maxX <= page.bounds.width + 0.5, "The Shop tabs fit the narrowest window")
+        }
+        window.setFrame(savedFrame, display: false)
+    }
+
+    private func smokeTestDealReminders(opened: () -> [URL]) {
+        func views(_ root: NSView) -> [NSView] { [root] + root.subviews.flatMap(views) }
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "Europe/Budapest")!
+        func local(_ y: Int, _ m: Int, _ d: Int, _ h: Int, _ min: Int = 0) -> Date {
+            calendar.date(from: DateComponents(year: y, month: m, day: d, hour: h, minute: min))!
+        }
+        // Parsing: GamerPower times are read as UTC; date-only means the end of that UTC day; N/A has no badge.
+        let utc = DealExpiry.parseGamerPowerEnd("2026-10-24 23:59:59")!
+        precondition(utc.timeIntervalSince1970 == 1_792_886_399)
+        precondition(DealExpiry.parseGamerPowerEnd("2026-10-24")! == utc)
+        precondition(DealExpiry.parseGamerPowerEnd("N/A") == nil && DealExpiry.parseGamerPowerEnd("2026-13-01") == nil &&
+                     DealExpiry.parseGamerPowerEnd(nil) == nil)
+        // Expiry text by local calendar day; urgent within two days; nothing once ended.
+        let now = local(2026, 6, 10, 12)
+        func label(_ end: Date) -> String? { DealExpiry.label(until: end, now: now, calendar: calendar).map { $0.text + ($0.urgent ? "!" : "") } }
+        precondition(label(local(2026, 6, 10, 20)) == "Ends today!" && label(local(2026, 6, 11, 1)) == "Ends tomorrow!" &&
+                     label(local(2026, 6, 12, 9)) == "2 days left!" && label(local(2026, 6, 13, 20)) == "3 days left" &&
+                     label(local(2026, 6, 10, 11)) == nil)
+        // Reminder: 09:00 the day before; else 09:00 today if ahead; else a few minutes from now; never after the end.
+        func remind(_ end: Date, _ at: Date) -> (Date, Bool)? {
+            DealExpiry.reminderDate(for: end, now: at, calendar: calendar).map { ($0.date, $0.adjusted) }
+        }
+        precondition(remind(local(2026, 6, 13, 20), now)! == (local(2026, 6, 12, 9), false))
+        precondition(remind(local(2026, 6, 11, 20), local(2026, 6, 10, 8))! == (local(2026, 6, 10, 9), false))
+        precondition(remind(local(2026, 6, 11, 20), now)! == (local(2026, 6, 10, 12, 5), true))
+        precondition(remind(local(2026, 6, 10, 20), local(2026, 6, 10, 8))! == (local(2026, 6, 10, 9), true))
+        precondition(remind(local(2026, 6, 10, 12, 3), now) == nil && remind(local(2026, 6, 9, 12), now) == nil)
+        // Across daylight-saving changes the alarm stays at 09:00 local time.
+        for end in [local(2026, 3, 30, 12), local(2026, 10, 26, 12)] {
+            let due = remind(end, local(2026, 3, 1, 12))!.0
+            precondition(calendar.component(.hour, from: due) == 9 && calendar.component(.minute, from: due) == 0 &&
+                         calendar.dateComponents([.day], from: due, to: end).day == 1)
+        }
+        // Badge flow with a mock Reminders store: nothing touches the user's real Reminders.
+        final class MockReminders: DealReminderStore {
+            var access = ReminderAccess.denied
+            var grant = true
+            var requests = 0
+            var items: [String: (title: String, notes: String, url: URL?, due: Date)] = [:]
+            func requestAccess(_ done: @escaping (Bool) -> Void) { requests += 1; access = grant ? .granted : .denied; done(grant) }
+            func add(title: String, notes: String, url: URL?, due: Date) throws -> String {
+                let id = "mock-\(items.count + 1)"
+                items[id] = (title, notes, url, due)
+                return id
+            }
+            func exists(_ identifier: String) -> Bool { items[identifier] != nil }
+            func remove(_ identifier: String) throws { items[identifier] = nil }
+        }
+        let mock = MockReminders()
+        let savedStore = reminderStore, savedReminders = dealReminders, savedConfirm = confirmReminderRemoval
+        var confirm = false
+        reminderStore = mock
+        confirmReminderRemoval = { _ in confirm }
+        dealReminders = [:]
+        defer {
+            reminderStore = savedStore
+            confirmReminderRemoval = savedConfirm
+            dealReminders = savedReminders
+            dealsReminderBar.isHidden = true
+        }
+        renderDeals()
+        func badge() -> NSButton { views(dealsList).compactMap { $0 as? NSButton }.first { $0.accessibilityIdentifier() == "dealReminder" }! }
+        precondition(badge().title.hasSuffix("days left") && badge().accessibilityLabel()!.hasPrefix("Remind me the day before this deal ends"))
+        let row = views(dealsList).compactMap { $0 as? ClickableRowView }.first!
+        dealsList.window?.layoutIfNeeded()
+        row.layoutSubtreeIfNeeded()
+        let point = badge().convert(NSPoint(x: badge().bounds.midX, y: badge().bounds.midY), to: row.superview)
+        precondition(row.hitTest(point) === badge(), "The reminder badge is its own control inside the clickable row")
+        let opens = opened().count
+        badge().performClick(nil)
+        precondition(opened().count == opens, "Clicking the badge never opens the deal")
+        precondition(!dealsReminderBar.isHidden && !dealsReminderSettings.isHidden && mock.items.isEmpty, "Denied access explains and offers Settings")
+        dealsReminderSettings.performClick(nil)
+        precondition(opened().last?.absoluteString.hasPrefix("x-apple.systempreferences:com.apple.preference.security?Privacy_Reminders") == true)
+        mock.access = .notDetermined
+        badge().performClick(nil)
+        precondition(mock.requests == 1 && mock.items.count == 1 && badge().title == "Reminder set")
+        let item = mock.items["mock-1"]!
+        precondition(item.title == "Free Adventure deal ends \u{2014} Epic Games Store" && item.url?.host == "www.gamerpower.com" &&
+                     item.notes.contains("usually $19.99") && item.notes.contains("read as UTC") && item.notes.contains("free-adventure"))
+        precondition(dealReminders == ["giveaway:1": "mock-1"] && dealsReminderSettings.isHidden)
+        // No duplicates: a second add for the same giveaway does nothing; a second click offers removal.
+        addDealReminder(giveaways[0], end: DealExpiry.parseGamerPowerEnd(giveaways[0].endDate)!, button: badge())
+        badge().performClick(nil)
+        precondition(mock.items.count == 1 && badge().title == "Reminder set", "Cancelled removal keeps the reminder")
+        confirm = true
+        badge().performClick(nil)
+        precondition(mock.items.isEmpty && dealReminders.isEmpty && badge().title.hasSuffix("days left"))
+        // A reminder deleted in Reminders resets the badge on the next render.
+        badge().performClick(nil)
+        precondition(mock.requests == 1 && dealReminders.count == 1)
+        mock.items.removeAll()
+        renderDeals()
+        precondition(dealReminders.isEmpty && badge().title.hasSuffix("days left"))
     }
 
     private func assertSmokePageScrolls() {
@@ -7538,7 +13362,140 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
     }
 }
 
+/// `--controller-sheet <dir>` writes Retina (2x) PNG sheets, then exits. Nothing else runs.
+/// - `controller-fills-<style>-<light|dark>.png`: every controller type × key colors, plus the full palette on DualSense.
+/// - `controller-styles-<light|dark>.png`: outline (A) and double wall (B) side by side, at row and preview sizes.
+/// They render the same `ControllerArtView` used in the app.
+func renderControllerSheets(to folder: URL) -> Bool {
+    let kinds = Array(ControllerArtwork.kinds.dropFirst())
+    func label(_ text: String, _ frame: NSRect, size: CGFloat = 10, bold: Bool = false) -> NSTextField {
+        let field = NSTextField(labelWithString: text)
+        field.font = bold ? .boldSystemFont(ofSize: size) : .systemFont(ofSize: size)
+        field.textColor = bold ? .labelColor : .secondaryLabelColor
+        field.alignment = frame.width < 100 ? .center : .left
+        field.lineBreakMode = .byTruncatingTail
+        field.frame = frame
+        return field
+    }
+    func art(_ kind: String, _ color: NSColor?, alpha: CGFloat, style: ControllerOutlineStyle,
+             size: NSSize = NSSize(width: 52, height: 38), inset: CGFloat = 2, at origin: NSPoint) -> NSView {
+        let view = ControllerArtView(kind: kind)
+        view.style = style
+        view.contentTintColor = color ?? ControllerPalette.color(named: ControllerPalette.defaultName(forKind: kind))
+        view.alphaValue = alpha
+        let frame = ControllerIconFrame(imageView: view, size: size, inset: inset)
+        frame.frame = NSRect(origin: origin, size: size)
+        frame.layoutSubtreeIfNeeded()
+        return frame
+    }
+    func canvas(_ width: CGFloat, _ height: CGFloat, _ appearance: NSAppearance.Name) -> NSView {
+        let root = NSView(frame: NSRect(x: 0, y: 0, width: width, height: height))
+        root.appearance = NSAppearance(named: appearance)
+        root.wantsLayer = true
+        root.appearance!.performAsCurrentDrawingAppearance {
+            root.layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
+        }
+        return root
+    }
+    func write(_ root: NSView, _ file: String) -> Bool {
+        root.layoutSubtreeIfNeeded()
+        guard let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: Int(root.bounds.width * 2), pixelsHigh: Int(root.bounds.height * 2),
+                                         bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
+                                         colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0) else { return false }
+        rep.size = root.bounds.size
+        root.cacheDisplay(in: root.bounds, to: rep)
+        guard let data = rep.representation(using: .png, properties: [:]) else { return false }
+        return (try? data.write(to: folder.appendingPathComponent(file))) != nil
+    }
+    let styleNames: [ControllerOutlineStyle: String] = [.outline: "A · Outline", .doubleWall: "B · Double wall"]
+    let appearances: [(String, NSAppearance.Name)] = [("light", .aqua), ("dark", .darkAqua)]
+
+    let columns: [(String, NSColor?, CGFloat)] = [("Automatic", nil, 1)] +
+        ["Black", "White", "Classic Gray", "Gray Camouflage", "Mineral Camo", "Cosmic Red", "Neon Red", "Neon Orange",
+         "Galactic Purple", "Cobalt Blue", "Neon Blue", "Micro Green", "Neon Yellow"].map { ($0, ControllerPalette.color(named: $0), 1) } +
+        [("Disconnected", NSColor.systemGray, 0.55), ("Discovered", NSColor.tertiaryLabelColor, 1)]
+    let cell = NSSize(width: 64, height: 46), labelWidth: CGFloat = 150, header: CGFloat = 40
+    let palette = ControllerPalette.colors
+    let perRow = 12
+    let paletteRows = (palette.count + perRow - 1) / perRow
+    let width = labelWidth + CGFloat(columns.count) * cell.width + 16
+    let height = header + CGFloat(kinds.count) * cell.height + 40 + CGFloat(paletteRows) * (cell.height + 16) + 16
+    for style in ControllerOutlineStyle.allCases {
+        for (name, appearanceName) in appearances {
+            let root = canvas(width, height, appearanceName)
+            var y = height - header
+            root.addSubview(label("Couch Cube controller fills · \(styleNames[style]!) · \(name)",
+                                  NSRect(x: 12, y: height - 24, width: 500, height: 16), size: 13, bold: true))
+            for (index, column) in columns.enumerated() {
+                root.addSubview(label(column.0, NSRect(x: labelWidth + CGFloat(index) * cell.width, y: y + 4, width: cell.width, height: 14), size: 9))
+            }
+            for kind in kinds {
+                y -= cell.height
+                root.addSubview(label(kind, NSRect(x: 12, y: y + 14, width: labelWidth - 16, height: 14), size: 11))
+                for (index, column) in columns.enumerated() {
+                    root.addSubview(art(kind, column.1, alpha: column.2, style: style,
+                                        at: NSPoint(x: labelWidth + CGFloat(index) * cell.width + 6, y: y + 4)))
+                }
+            }
+            y -= 34
+            root.addSubview(label("Full palette · PS5 · DualSense", NSRect(x: 12, y: y + 8, width: 400, height: 16), size: 12, bold: true))
+            for (index, entry) in palette.enumerated() {
+                let column = index % perRow, row = index / perRow
+                let x = labelWidth + CGFloat(column) * cell.width, top = y - CGFloat(row + 1) * (cell.height + 16)
+                root.addSubview(art("PS5 · DualSense", entry.1, alpha: 1, style: style, at: NSPoint(x: x + 6, y: top + 16)))
+                root.addSubview(label(entry.0, NSRect(x: x, y: top, width: cell.width, height: 14), size: 8))
+            }
+            guard write(root, "controller-fills-\(style.rawValue)-\(name).png") else { return false }
+        }
+    }
+
+    // Side-by-side: per color, A and B at the list-row size, then A and B at the customize-preview size.
+    let compareColors = ["Black", "White", "Galactic Purple", "Gray Camouflage", "Mineral Camo", "Neon Red"]
+    let small = NSSize(width: 52, height: 38), large = NSSize(width: 88, height: 60)
+    let group = 2 * (small.width + 6) + 2 * (large.width + 6) + 18
+    let rowHeight = large.height + 8
+    let compareWidth = labelWidth + CGFloat(compareColors.count) * group + 16
+    let compareHeight = header + 34 + CGFloat(kinds.count) * rowHeight + 16
+    for (name, appearanceName) in appearances {
+        let root = canvas(compareWidth, compareHeight, appearanceName)
+        root.addSubview(label("Controller outline styles · A outline vs B double wall · row size, preview size · \(name)",
+                              NSRect(x: 12, y: compareHeight - 24, width: 800, height: 16), size: 13, bold: true))
+        var y = compareHeight - header
+        for (index, color) in compareColors.enumerated() {
+            let x = labelWidth + CGFloat(index) * group
+            root.addSubview(label(color, NSRect(x: x, y: y + 4, width: group - 18, height: 14), size: 10, bold: true))
+            let subs = [("A", small.width), ("B", small.width), ("A", large.width), ("B", large.width)]
+            var sx = x
+            for (tag, w) in subs {
+                root.addSubview(label(tag, NSRect(x: sx, y: y - 12, width: w, height: 12), size: 9))
+                sx += w + 6
+            }
+        }
+        y -= 22
+        for kind in kinds {
+            y -= rowHeight
+            root.addSubview(label(kind, NSRect(x: 12, y: y + rowHeight / 2 - 7, width: labelWidth - 16, height: 14), size: 11))
+            for (index, color) in compareColors.enumerated() {
+                var x = labelWidth + CGFloat(index) * group
+                for (style, size, inset) in [(ControllerOutlineStyle.outline, small, CGFloat(2)), (.doubleWall, small, 2),
+                                             (.outline, large, 4), (.doubleWall, large, 4)] {
+                    root.addSubview(art(kind, ControllerPalette.color(named: color), alpha: 1, style: style, size: size, inset: inset,
+                                        at: NSPoint(x: x, y: y + (rowHeight - size.height) / 2)))
+                    x += size.width + 6
+                }
+            }
+        }
+        guard write(root, "controller-styles-\(name).png") else { return false }
+    }
+    return true
+}
+
 let application = NSApplication.shared
+if let index = CommandLine.arguments.firstIndex(of: "--controller-sheet"), CommandLine.arguments.indices.contains(index + 1) {
+    let folder = URL(fileURLWithPath: CommandLine.arguments[index + 1], isDirectory: true)
+    try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+    exit(renderControllerSheets(to: folder) ? 0 : 1)
+}
 application.setActivationPolicy(.regular)
 let controller = SetupController()
 application.delegate = controller

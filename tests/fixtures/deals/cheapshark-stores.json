@@ -1,0 +1,42 @@
+[
+ {
+  "storeID": "1",
+  "storeName": "Steam",
+  "isActive": 1,
+  "images": {
+   "banner": "/img/stores/banners/0.png",
+   "logo": "/img/stores/logos/0.png",
+   "icon": "/img/stores/icons/0.png"
+  }
+ },
+ {
+  "storeID": "2",
+  "storeName": "GamersGate",
+  "isActive": 0,
+  "images": {
+   "banner": "/img/stores/banners/1.png",
+   "logo": "/img/stores/logos/1.png",
+   "icon": "/img/stores/icons/1.png"
+  }
+ },
+ {
+  "storeID": "7",
+  "storeName": "GOG",
+  "isActive": 1,
+  "images": {
+   "banner": "/img/stores/banners/6.png",
+   "logo": "/img/stores/logos/6.png",
+   "icon": "/img/stores/icons/6.png"
+  }
+ },
+ {
+  "storeID": "11",
+  "storeName": "Humble Store",
+  "isActive": 1,
+  "images": {
+   "banner": "/img/stores/banners/10.png",
+   "logo": "/img/stores/logos/10.png",
+   "icon": "/img/stores/icons/10.png"
+  }
+ }
+]

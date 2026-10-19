@@ -1,0 +1,66 @@
+{
+ "100": {
+  "info": {
+   "title": "Hollow Knight",
+   "steamAppID": "367520",
+   "thumb": "https://example.com/a.jpg"
+  },
+  "cheapestPriceEver": {
+   "price": "4.99",
+   "date": 1
+  },
+  "deals": [
+   {
+    "storeID": "1",
+    "dealID": "STEAMDEAL0001",
+    "price": "14.99",
+    "retailPrice": "14.99",
+    "savings": "0.000"
+   },
+   {
+    "storeID": "7",
+    "dealID": "GOGDEAL000001",
+    "price": "9.99",
+    "retailPrice": "14.99",
+    "savings": "33.355"
+   },
+   {
+    "storeID": "11",
+    "dealID": "HUMBLEDEAL001",
+    "price": "9.99",
+    "retailPrice": "14.99",
+    "savings": "33.355"
+   },
+   {
+    "storeID": "999",
+    "dealID": "UNKNOWNSTORE1",
+    "price": "0.10",
+    "retailPrice": "14.99",
+    "savings": "99"
+   }
+  ]
+ },
+ "200": {
+  "info": {
+   "title": "Hollow Knight Fan Pack",
+   "steamAppID": null,
+   "thumb": "https://example.com/b.jpg"
+  },
+  "deals": [
+   {
+    "storeID": "2",
+    "dealID": "EPICDEAL00001",
+    "price": "4.99",
+    "retailPrice": "4.99",
+    "savings": "0"
+   }
+  ]
+ },
+ "300": {
+  "info": {
+   "title": "Hollow Expired",
+   "steamAppID": null
+  },
+  "deals": []
+ }
+}
