@@ -570,6 +570,29 @@ class AppManagementTests(unittest.TestCase):
                 manager.install_packages(["crossover"])
             run.assert_not_called()
 
+    def test_steamac_is_a_separate_manual_app_from_its_official_release(self):
+        self.assertEqual(manager.PACKAGES["steamac"], "FX Steam Launcher.app")
+        self.assertEqual(manager.MANUAL_APPS["steamac"], "https://github.com/fxgl/steamac/releases/tag/v1.9.1")
+        keys = list(manager.PACKAGES)
+        self.assertEqual(keys[keys.index("steam") + 1], "steamac")
+        with tempfile.TemporaryDirectory() as temporary:
+            home = Path(temporary)
+            (home / "Applications/Steam.app/Contents").mkdir(parents=True)
+            with (home / "Applications/Steam.app/Contents/Info.plist").open("wb") as file:
+                manager.plistlib.dump({"CFBundleShortVersionString": "1"}, file)
+            packages = {"steam": "Steam.app", "steamac": "FX Steam Launcher.app"}
+            with patch.object(manager, "find_brew", side_effect=manager.SetupError("missing")), \
+                    patch.object(manager.Path, "home", return_value=home), \
+                    patch.object(manager, "SYSTEM_APPLICATIONS", home / "none"), \
+                    patch.object(manager, "PACKAGES", packages):
+                apps = {app["id"]: app for app in manager.app_status()}
+            self.assertTrue(apps["steamac"]["manual"])
+            self.assertFalse(apps["steamac"]["installed"], "Steam.app must not count as FX Steam Launcher")
+        with patch.object(manager, "run") as run:
+            with self.assertRaisesRegex(manager.SetupError, "manual"):
+                manager.install_packages(["steamac"])
+            run.assert_not_called()
+
     def test_official_mac_launchers_are_known_and_battle_net_uses_official_installer(self):
         for package, name in {"gog-galaxy": "GOG Galaxy.app", "ea": "EA app.app",
                               "epic-games": "Epic Games Launcher.app", "battle-net": "Battle.net.app",

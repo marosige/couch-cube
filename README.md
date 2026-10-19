@@ -96,14 +96,45 @@ The supplied EmulationStation banner is resampled 4x with Lanczos interpolation
 and shown without cropping its logo against a matching blue background.
 The header preserves the icon's Mac mini geometry, without controller overlays.
 The portable edition adds a connected SSD on the cabinet to the left of the Mac mini.
-The entire Controllers tile opens controller settings, without a separate Manage
-button or connected-controller count.
+The Controllers tile is an interactive mini version of the Controllers page. Its
+header has two buttons: **+** (add a controller) and the list button, which opens
+the Controllers page; the rest of the tile is not a navigation target.
 Clickable Home and storage-choice tiles show a subtle highlight, outline and
 pointing-hand cursor on hover; disabled tiles do not advertise an available action.
-There is no Needs attention section on Home. Red or yellow
-markers on the relevant sidebar destinations identify required actions or warnings.
+There is no Needs attention section on Home. Sidebar destinations show numbered
+dots instead, one per severity: a red dot counts required tasks and a yellow dot
+counts recommended ones, so a page with both shows two dots with their own numbers.
+Hover a dot for the task list grouped by severity. Dots update in place: titles
+and icons keep their position whether a row shows none, one or two dots.
+**App Settings → Guided setup** (on by default) keeps the sidebar simple: only one
+page is marked at a time, in order Library storage, App Store, Console Mode, Retro
+consoles, Controllers, Game library, App Settings. That page's dots include all its
+tasks, setup and maintenance alike (red and yellow counts can both show); the next page is marked once it is done. Every
+page stays freely reachable, and warnings inside pages are unchanged. Turn Guided
+setup off to see every page's dots at once. Guided markers appear only after the
+startup checks finish, and the shown step stays put until its tasks are done; later
+results never make the marker jump to another page.
 Play is unavailable until storage and the selected TV menu are ready.
-Controllers handles pairing guidance, names, colors and input testing.
+Controllers lists every known controller in one interactive list, with the same
+rows as Home: a drag handle to reorder, colored artwork when connected, connection
+icons (Bluetooth rune or cable) and a battery icon when macOS reports a level.
+Battery is gray above 30%, orange at 30% and below (readable in light mode), red at 10% and below, and green
+only while the controller reports charging; unknown battery or transport is not shown.
+Each row's **…** menu offers Customize, Move Up/Down, Connect/Disconnect (Bluetooth),
+Same Controller As / Separate USB Connection, and Forget Device (Bluetooth) or
+Remove from List. Forget uses macOS's Bluetooth device removal and checks the result;
+if macOS refuses, it says so and opens Bluetooth Settings. Controllers in pairing mode
+appear at the bottom with a **Connect** button while the page is open (classic
+Bluetooth inquiry; Xbox and other Bluetooth LE pads may only appear in Bluetooth
+Settings). The header's sort button switches between **Your Order** and **Connected
+First**; Connected First groups connected controllers above the rest without changing
+your saved order, and dragging works within each group. Header icons open Bluetooth
+and Game Controller settings. Missing Bluetooth permission or Bluetooth turned off
+shows an alert on the page and a Controllers task in the sidebar.
+One profile can cover both Bluetooth and USB: the USB connection is joined to the
+Bluetooth entry automatically only when the controller reports the same Bluetooth
+address as its USB serial. Otherwise use **Same Controller As** to join them
+yourself; two controllers of the same model are never merged by name alone.
 Settings → Library storage opens the local/SSD choices directly, with the active
 library, available libraries, disconnected state and first-library guidance.
 There is no separate Setup overview or intermediate Choose storage screen.
@@ -128,7 +159,10 @@ guidance. Library storage sets up and switches the drive; App Settings groups ap
 app location, installer copy, uninstall and gaming cleanup.
 Nothing is installed or erased until you confirm it. Storage is checked on launch,
 explicit refresh, volume changes and returning Home, not whenever the app gains focus.
-Home keeps its last results during background refreshes.
+Home keeps its last results during background refreshes. App Store and Retro
+consoles also load in the background at launch, and refresh silently every time
+their tab opens: rows stay in place, older results never overwrite newer ones, and
+pending checks are not counted as solved.
 Once an app, console or library status has a result, refreshing keeps its last
 status color instead of replacing it with a blue pulsing loading indicator.
 Loading indications are reserved for the first check of unknown state.
@@ -142,12 +176,11 @@ The sidebar's floating background is managed entirely by macOS. The current
 page title appears in the native toolbar alongside Back and Forward.
 Sidebar and page content begin directly below the native toolbar, without an
 extra search-bar-sized top spacer.
-Home remembers up to four recent controllers across app launches, without a
-total connected count. An entirely empty tile says “Connect via USB or Bluetooth”.
-Connected devices show their connection type alongside their status (for example,
-“Connected · Bluetooth” or “Connected · USB”), including during input activity.
-Disconnected devices remain gray; new connections evict
-disconnected slots first. The four-row controller tile uses original, logo-free
+Home shows the first four controllers of the Controllers list, in the same order
+and sort mode (Your Order or Connected First); removed controllers disappear from
+both, and a “N more in Controllers” note appears when the list is longer. An entirely empty tile says “Connect via USB or Bluetooth”.
+Connected devices show “Connected” with a Bluetooth or cable icon, unchanged during
+input activity. Disconnected devices remain gray. The four-row controller tile uses original, logo-free
 line drawings for Xbox, PlayStation, Nintendo, 8BitDo and generic controllers.
 PS4 / DualShock 4, PS5 / DualSense (including Edge), Switch Pro Controller,
 Joy-Con and Steam Controller have separate outlines. 8BitDo SN30 Pro, Micro,
@@ -157,8 +190,10 @@ Generic PlayStation and Nintendo choices remain available. If the device reports
 only a generic name, select the model manually rather than guessing its identity.
 If a device reports a generic name in its connection mode, choose its model
 manually with the controller's pencil button.
-Using a controller pulses its outline and shows “Receiving input”, without button
-or axis details; Reduce Motion uses the text indication without pulsing.
+Using a controller only flashes its controller icon (VoiceOver reads “Receiving
+input”), without button or axis details. Short statuses such as “Not connected”
+always fit; long controller names truncate first. The status text stays “Connected”, so rows
+never resize or shift; Reduce Motion skips the flashing.
 The pencil in Controllers lets you set its name, connected color and artwork.
 The color picker lists real retail controller colors in color-family sections
 (Black & White, Gray & Silver, Camo, Red & Orange, Pink, Purple & Indigo, Blue &
@@ -184,10 +219,20 @@ and CrossOver together. Existing CrossOver installations in `/Applications` or
 `~/Applications` are detected and can be opened directly. Otherwise Install opens
 CodeWeavers' official site; use your existing license or its trial. Games and
 bottles are configured in CrossOver, and compatibility is not guaranteed.
+PC games also lists **FX Steam Launcher** ([fxgl/steamac](https://github.com/fxgl/steamac),
+v1.9.1) directly below Steam. It is a separate app that runs Valve's SteamOS in a
+lightweight VM for Windows Steam games; it needs Apple silicon and macOS 15 or newer
+(some DirectX 12 titles need macOS 26). Couch Cube detects `FX Steam Launcher.app`
+on its own (Steam.app does not count) and Install opens the official notarized
+release page; it is not installed automatically.
 Named sections and row separators organize apps and console families.
 Compact switches sit on the right. Status dots always have text: green means
 ready/connected, yellow means setup or connection is needed, and red marks a
 library problem. Console switches alone indicate whether a system is enabled.
+Console switches respond instantly and can be flipped one after another without
+waiting: the list is updated in place, and the latest choices are saved in the
+background shortly after you stop. If saving fails, the switches return to the
+last saved selection and the error is shown.
 Enabled consoles also show BIOS filename-check results. Their info page lists
 each expected filename, destination and Found/Not found state in the selected
 storage's `BIOS/retroarch` folder. PS1 accepts any listed alternative; Sega CD
@@ -202,12 +247,12 @@ yellow with an explicit **Update available** label when a known managed update i
 available, both in the console list and its details. BIOS never changes the emulator
 dot: its own indicator is green when present, red when required files are missing,
 yellow for optional BIOS with a fallback, and gray for manually checked firmware.
-Every console row has an App Store icon next to the emulator status; it opens App
+Every console row has a gray App Store icon before the info button; it opens App
 Store, scrolls to that emulator and briefly highlights it. Switching on a console
 whose emulator is missing asks whether to install it.
-The info button keeps details short: emulator status, the App Store icon and, when
-BIOS files are missing, the destination folder (click to open), the filenames
-(click one to copy it) and **Copy search**. Copying never downloads or moves a BIOS file.
+The info button keeps details short: emulator status with **Show in App Store** and,
+when BIOS files are missing, the destination folder (click to open), the filenames
+(click one to copy it) and a search line with a **Copy** button. Copying never downloads or moves a BIOS file.
 Nintendo shares one rounded card with Home consoles and Handhelds sections;
 console icons use filled hardware silhouettes in each system's best-known retail
 colors: gray/charcoal NES, purple-accented SNES, charcoal N64, indigo GameCube and
@@ -253,6 +298,16 @@ PlayStation and SEGA each have their own card.
    stay in place unless you use Steam's **Move** action. Couch Cube does not
    edit Steam's library database; these settings have no supported public
    automation interface.
+
+**Game library** puts games first: **Your games** summarizes Steam games and ready
+retro consoles, with **+** (add a game) and a folder button. **Steam** lists games
+per library with a **Play** button for installed ones, and an empty state that opens
+Steam. **Retro games** links to the game folders and Retro consoles. **Where your
+games live** shows the same icon and name as Library Settings — **This Mac** or
+**External SSD**, marked **Active** for the active library — with storage health
+and library updates; its **…** menu has Check
+Library and Change Storage. App Store categories collapse with the chevron in their
+header; collapsed categories still show installed apps, and the choice is remembered.
 
 **Steam integration:** Game library shows installed Steam game counts
 on local and external volumes. Game library lists names, manifest-reported install/
@@ -302,8 +357,8 @@ The list refreshes automatically on Home and Controllers. Bluetooth access is re
 Bluetooth LE pairings are only exposed in macOS Settings; the page says so.
 No private pairing APIs or Bluetooth-database edits are used.
 
-Each device shows one status line, such as
-**Connected · Bluetooth · Receiving input**. The activity indication clears
+Each device shows one short status line, such as **Connected** with Bluetooth/USB and
+battery icons; input activity is shown only by the flashing icon described above. The activity indication clears
 shortly after input stops; button and axis details are not displayed.
 Monitoring covers only gamepad/joystick devices, uses no exclusive capture and
 stops when leaving Home and Controllers. Input-access failures are shown explicitly.

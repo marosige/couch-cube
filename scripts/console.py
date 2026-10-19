@@ -35,6 +35,7 @@ SSD_FOLDERS = [
 ]
 PACKAGES = {
     "steam": "Steam.app",
+    "steamac": "FX Steam Launcher.app",
     "gog-galaxy": "GOG Galaxy.app",
     "ea": "EA app.app",
     "epic-games": "Epic Games Launcher.app",
@@ -51,6 +52,8 @@ PACKAGES = {
     "switch": "Ryujinx.app",
 }
 MANUAL_APPS = {
+    # Notarized DMG (Developer ID: FX GAMES FZ LLC); no Homebrew cask, so the official release page is opened.
+    "steamac": "https://github.com/fxgl/steamac/releases/tag/v1.9.1",
     "crossover": "https://www.codeweavers.com/crossover",
     "battle-net": "https://download.battle.net/",
     "rpcs3": "https://rpcs3.net/download",
@@ -925,7 +928,7 @@ def app_status(check_updates=False):
             outdated = {item["name"]: item.get("current_version", "") for item in info.get("casks", [])}
     result = []
     for key, name in PACKAGES.items():
-        paths = [base / name for base in [Path("/Applications"), Path.home() / "Applications"]]
+        paths = [base / name for base in [SYSTEM_APPLICATIONS, Path.home() / "Applications"]]
         path = next((path for path in paths if path.is_dir()), None)
         version = ""
         if path:
