@@ -55,6 +55,10 @@ opens your **default browser**: store deals use CheapShark's `cheapshark.com/red
 (their terms require it, Steam deals included), giveaways open on gamerpower.com, Mac App
 Store results open apps.apple.com (which hands off to the App Store app). Any other host or
 scheme is refused. There is no in-app browser and no store-app deep linking.
+The header is kept small: the tabs, a large search field, a compact **My Stores / All Stores**
+switch and Refresh. Home shows a few games per section with a **See all ›** link. Rate source,
+attribution and store-filter details sit in small print at the bottom or in tooltips. Each price
+column shows the sale price with the old price struck through directly beneath it.
 
 - **Sources.** [CheapShark](https://www.cheapshark.com) store deals and per-store prices (USD),
   [GamerPower](https://www.gamerpower.com) giveaways, and Apple's keyless
@@ -70,8 +74,10 @@ scheme is refused. There is no in-app browser and no store-app deep linking.
   none installed, All Stores is used and a hint explains why.
 - **Home** shows Wishlist deals, Featured deals, Price drops and Free now, picked locally from
   discount, ratings, recency and your wishlist. Nothing about you is sent anywhere.
-- **Deals rows** use compact badges (Steam rating, Metacritic, deal rating, Installed). Installed
-  means a deal's Steam app ID matches a game installed in a Steam library on this Mac.
+- **Deals rows** show the store and an Installed badge on the left; Installed means a deal's Steam
+  app ID matches a game installed in a Steam library on this Mac. On the right, every row of a
+  list shares fixed columns: Steam rating, Metacritic and deal rating (each in its own column,
+  left empty when a game lacks it), then the wishlist heart, the price and the discount.
 - **Expiry and Reminders.** Only GamerPower provides end dates (`end_date`, read as UTC because
   the API doesn't state a time zone; "N/A" means no badge). CheapShark has none, so store deals
   never show one. The badge (“3 days left”, “Ends tomorrow”, orange within two days) is its own
@@ -80,7 +86,8 @@ scheme is refused. There is no in-app browser and no store-app deep linking.
   first use; if denied, a note links to Privacy & Security › Reminders. A second click offers
   removal, and a reminder you delete in Reminders resets the badge.
 - **Search** runs on Return or after a short pause, combines identical searches and caches
-  replies. Each game gets a section with one row per store, cheapest first. CheapShark prices are
+  replies. A game sold in one store is an ordinary row; a game in several stores gets a row with
+  its lowest price and, indented under it, one row per store, cheapest first and marked Lowest. CheapShark prices are
   USD and App Store prices use your storefront's currency, labelled; without a Shop currency the
   App Store rows are grouped after the USD stores instead of being mixed into the sort.
 - **Wishlist** is Couch Cube's own, saved on the active Couch Cube drive in
@@ -88,7 +95,9 @@ scheme is refused. There is no in-app browser and no store-app deep linking.
   App Store ID, date added, optional target price in USD, last known best price with its currency).
   It moves with the drive and works offline. Writes are atomic (temp file + rename, coordinated);
   when the drive is unplugged or read-only the last copy is shown read-only with a note, and lists
-  from different drives are merged when you switch. Add or remove with the heart on any row.
+  from different drives are merged when you switch. Before a drive is set up, the wishlist is
+  saved on this Mac (`~/Library/Application Support/Couch Cube/Wishlist`) and moves onto the drive
+  when you set one up. Add or remove with the heart on any row; the heart never opens the store.
   Prices are checked in batches only when you open Cube Shop or press Refresh, never in the
   background, and hits (“On sale at <store> −X%”, target reached) appear on Home. There are no
   notifications or e-mail alerts.
@@ -96,7 +105,8 @@ scheme is refused. There is no in-app browser and no store-app deep linking.
   (including 429 Retry-After) and connection failures keep the last results with a message.
 
 **Shop currency** (App Settings › Cube Shop) converts prices for display only. Choose Original
-prices or a currency (default: your Mac's locale currency) and an optional card/FX fee %
+prices (the default, whatever your Mac's region) or a currency to show Cube Shop prices converted to it,
+and an optional card/FX fee %
 (0–20, e.g. a weekend markup). Rates are the [ECB reference rates via Frankfurter](https://frankfurter.dev)
 (`api.frankfurter.dev/v1`, keyless; Revolut has no public keyless rate API). They are fetched when
 Cube Shop opens and cached for 12 hours in `~/Library/Caches/Couch Cube`; offline, the last rates are

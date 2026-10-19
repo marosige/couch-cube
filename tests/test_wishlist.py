@@ -117,3 +117,59 @@ class WishlistTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+console_spec = importlib.util.spec_from_file_location("wishlist_console", ROOT / "scripts/console.py")
+console = importlib.util.module_from_spec(console_spec)
+console_spec.loader.exec_module(console)
+
+
+class LocalWishlistTests(unittest.TestCase):
+    """A Mac with no Couch Cube drive set up keeps an editable wishlist, which moves onto the drive later."""
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.base = Path(self.temp.name)
+        for patcher in [patch.dict(os.environ, {"HOME": str(self.base / "home")}),
+                        patch.object(console, "HOST_CONFIG", self.base / "home/setup.json")]:
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
+    def test_no_drive_set_up_saves_on_this_mac(self):
+        added = console.wishlist_change("add", item={"title": "Hollow Knight", "game_id": "100", "steam_app_id": "367520"})
+        self.assertFalse(added["read_only"] or added["offline"])
+        self.assertEqual(added["note"], console.LOCAL_WISHLIST_NOTE)
+        local = self.base / "home/Library/Application Support/Couch Cube/Wishlist/wishlist.json"
+        self.assertEqual([item["title"] for item in json.loads(local.read_text())["items"]], ["Hollow Knight"])
+        status = console.wishlist_status()
+        self.assertEqual([item["key"] for item in status["items"]], ["cs:100"])
+        self.assertFalse(status["read_only"])
+        removed = console.wishlist_change("remove", key="cs:100")
+        self.assertEqual(removed["items"], [])
+
+    def test_set_up_drive_takes_over_the_local_items(self):
+        console.wishlist_change("add", item={"title": "Celeste", "game_id": "200"})
+        library = self.base / "Drive/Couch Cube"
+        library.mkdir(parents=True)
+
+        class Storage:
+            root = library
+
+            def target(self, relative):
+                return library / relative
+
+        console.HOST_CONFIG.write_text("{}")
+        with patch.object(console, "configured_storage", return_value=Storage()):
+            status = console.wishlist_status()
+        self.assertEqual(status["merged"], 1)
+        self.assertNotEqual(status["note"], console.LOCAL_WISHLIST_NOTE)
+        self.assertEqual([item["title"] for item in json.loads((library / "Wishlist/wishlist.json").read_text())["items"]], ["Celeste"])
+
+    def test_disconnected_drive_stays_read_only(self):
+        console.HOST_CONFIG.parent.mkdir(parents=True, exist_ok=True)
+        console.HOST_CONFIG.write_text("{}")
+        with patch.object(console, "configured_storage", side_effect=console.SetupError("gone")):
+            self.assertEqual(console.wishlist_location(), (None, None))
+            with self.assertRaises(console.SetupError):
+                console.wishlist_change("add", item={"title": "Celeste"})

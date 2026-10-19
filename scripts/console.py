@@ -487,8 +487,16 @@ def exchange_rates(refresh=False):
 
 
 def wishlist_location():
-    """(path, library) on the active Couch Cube drive, or (None, None) when no drive is connected."""
+    """(path, library) on the active Couch Cube drive, on this Mac when no drive was ever set up here,
+    or (None, None) when the set-up drive isn't connected (the mirror is then shown read-only)."""
     tools = wishlist_tools()
+    if not HOST_CONFIG.exists():
+        library = tools.local_library()
+        try:
+            (library / tools.RELATIVE).parent.mkdir(parents=True, exist_ok=True)
+        except OSError:
+            return None, None
+        return library / tools.RELATIVE, str(library)
     try:
         storage = configured_storage()
         return storage.target(tools.RELATIVE), str(storage.root)
@@ -496,11 +504,20 @@ def wishlist_location():
         return None, None
 
 
+LOCAL_WISHLIST_NOTE = "Saved on this Mac. It moves to your Couch Cube drive when you set one up."
+
+
+def local_wishlist_note(tools, reply, library):
+    if library is not None and library == str(tools.local_library()) and not reply.get("note"):
+        reply["note"] = LOCAL_WISHLIST_NOTE
+    return reply
+
+
 def wishlist_status():
     tools = wishlist_tools()
     path, library = wishlist_location()
     try:
-        return tools.status(path, library)
+        return local_wishlist_note(tools, tools.status(path, library), library)
     except tools.WishlistError as exc:
         return {**tools.report(tools.empty()), "library": library, "read_only": True, "offline": path is None,
                 "merged": 0, "note": str(exc)}
@@ -521,7 +538,7 @@ def wishlist_change(action, item=None, key=None, price=None):
     except tools.WishlistError as exc:
         raise SetupError(str(exc)) from None
     tools.mirror(library, data)
-    return tools.report(data, library=library, read_only=False, offline=False, merged=0, note=None)
+    return local_wishlist_note(tools, tools.report(data, library=library, read_only=False, offline=False, merged=0, note=None), library)
 
 
 def wishlist_check(country="US", refresh=False):

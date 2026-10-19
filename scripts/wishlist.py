@@ -3,7 +3,9 @@
 The file travels with the drive and needs no network to view, add or remove items. Writes are atomic (temporary
 file in the same folder, fsync, rename) and serialised with an advisory lock beside the file. A copy of the last
 file read is mirrored on this Mac so the wishlist stays viewable, read-only, while the drive is unplugged; when a
-different drive becomes active, items only known from the mirror are merged into that drive's file.
+different drive becomes active, items only known from the mirror are merged into that drive's file. A Mac with no
+Couch Cube drive set up yet keeps the same file under ~/Library/Application Support/Couch Cube; its items move onto
+the drive (through the mirror merge) once one is set up.
 """
 
 import contextlib
@@ -33,6 +35,11 @@ class ReadOnly(WishlistError):
 
 def mirror_path():
     return Path.home() / "Library/Application Support/Couch Cube/wishlist-mirror.json"
+
+
+def local_library():
+    """Where the wishlist lives on a Mac that has no Couch Cube drive set up yet; it moves onto the drive later."""
+    return Path.home() / "Library/Application Support/Couch Cube"
 
 
 def empty():
