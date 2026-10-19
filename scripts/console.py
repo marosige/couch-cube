@@ -523,7 +523,7 @@ def wishlist_status():
                 "merged": 0, "note": str(exc)}
 
 
-def wishlist_change(action, item=None, key=None, price=None):
+def wishlist_change(action, item=None, key=None, price=None, currency="USD"):
     tools = wishlist_tools()
     path, library = wishlist_location()
     if path is None:
@@ -534,7 +534,7 @@ def wishlist_change(action, item=None, key=None, price=None):
         elif action == "remove":
             data = tools.remove(path, key)
         else:
-            data = tools.set_target(path, key, price)
+            data = tools.set_target(path, key, price, currency)
     except tools.WishlistError as exc:
         raise SetupError(str(exc)) from None
     tools.mirror(library, data)
@@ -2431,6 +2431,9 @@ def main():
     shop_search_parser.add_argument("--query", required=True)
     shop_search_parser.add_argument("--country", default="US")
     shop_search_parser.add_argument("--refresh", action="store_true")
+    platforms_parser = sub.add_parser("shop-platforms")
+    platforms_parser.add_argument("--steam", default="", help="comma-separated Steam app IDs")
+    platforms_parser.add_argument("--refresh", action="store_true")
     rates_parser = sub.add_parser("rates")
     rates_parser.add_argument("--refresh", action="store_true")
     wish = sub.add_parser("wishlist")
@@ -2440,6 +2443,7 @@ def main():
     wish_action.add_argument("--target", metavar="KEY")
     wish_action.add_argument("--check", action="store_true")
     wish.add_argument("--price", type=float)
+    wish.add_argument("--currency", default="USD", help="currency of --price (ISO 4217 code)")
     wish.add_argument("--country", default="US")
     wish.add_argument("--refresh", action="store_true")
     sub.add_parser("windows-downloads")
@@ -2561,6 +2565,9 @@ def main():
             print(json_text(exchange_rates(args.refresh)))
         elif args.command == "shop-home":
             print(json_text(shop_home(args.scope, args.refresh)))
+        elif args.command == "shop-platforms":
+            ids = [value for value in args.steam.split(",") if value][:100]
+            print(json_text(shop_tools().steam_platforms(ids, args.refresh)))
         elif args.command == "shop-search":
             print(json_text(shop_search(args.query, args.country, args.refresh)))
         elif args.command == "wishlist":
@@ -2573,7 +2580,7 @@ def main():
             elif args.remove:
                 print(json_text(wishlist_change("remove", key=args.remove)))
             elif args.target:
-                print(json_text(wishlist_change("target", key=args.target, price=args.price)))
+                print(json_text(wishlist_change("target", key=args.target, price=args.price, currency=args.currency.upper())))
             elif args.check:
                 print(json_text(wishlist_check(args.country, args.refresh)))
             else:

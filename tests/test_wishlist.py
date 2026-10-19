@@ -114,6 +114,62 @@ class WishlistTests(unittest.TestCase):
         self.assertTrue(app["on_sale"])
         self.assertFalse(app["target_hit"])
 
+    RATES = {"base": "EUR", "date": "2026-10-16", "rates": {"EUR": "1", "USD": "1.0", "HUF": "400"}}
+
+    def test_target_in_huf_round_trip(self):
+        path, _ = self.drive("A")
+        wishlist.add(path, {"title": "Hollow Knight", "game_id": "100"})
+        wishlist.set_target(path, "cs:100", 4000, "HUF")
+        raw = json.loads(path.read_text())["items"][0]
+        self.assertEqual((raw["target_price"], raw["target_currency"]), (4000, "HUF"))
+        self.assertEqual(wishlist.read(path)["items"][0]["target_currency"], "HUF")
+        wishlist.set_target(path, "cs:100", None, "HUF")
+        raw = json.loads(path.read_text())["items"][0]
+        self.assertEqual((raw["target_price"], raw["target_currency"]), (None, None), "Clearing drops the currency too")
+        with self.assertRaises(wishlist.WishlistError):
+            wishlist.set_target(path, "cs:100", 5, "dollars")
+
+    def test_old_targets_are_us_dollars(self):
+        item = wishlist.normalize_item({"title": "Old", "game_id": "1", "target_price": 5})
+        self.assertEqual(item["target_currency"], "USD")
+        self.assertIsNone(wishlist.normalize_item({"title": "None", "game_id": "2"})["target_currency"])
+
+    def test_converted_target_comparison(self):
+        def item(price, currency, target, target_currency):
+            return wishlist.normalize_item({"title": "G", "game_id": "1", "target_price": target, "target_currency": target_currency,
+                                            "best": {"price": price, "currency": currency}})
+        # 9.99 USD = 3996 HUF at 400 HUF/USD.
+        self.assertTrue(wishlist.target_reached(item(9.99, "USD", 4000, "HUF"), self.RATES))
+        self.assertTrue(wishlist.target_reached(item(9.99, "USD", 3996, "HUF"), self.RATES), "Exactly at the target counts")
+        # 9.99 USD at 400.03 is 3996.2997 HUF: it would round to 3996, but the unrounded value is above a 3996 target.
+        fractional = {"rates": {"EUR": "1", "USD": "1.0", "HUF": "400.03"}}
+        self.assertFalse(wishlist.target_reached(item(9.99, "USD", 3996, "HUF"), fractional), "No premature rounding")
+        self.assertFalse(wishlist.target_reached(item(9.99, "USD", 3000, "HUF"), self.RATES))
+        self.assertFalse(wishlist.target_reached(item(9.99, "USD", 4000, "HUF"), self.RATES, fee_percent=1), "The card fee counts")
+        self.assertTrue(wishlist.target_reached(item(3990, "HUF", 3990, "HUF"), None), "Same currency needs no rates")
+
+    def test_missing_rates_make_the_target_unknown_not_missed(self):
+        converted = wishlist.normalize_item({"title": "G", "game_id": "1", "target_price": 4000, "target_currency": "HUF",
+                                             "best": {"price": 1, "currency": "USD"}})
+        self.assertIsNone(wishlist.target_reached(converted, None))
+        self.assertIsNone(wishlist.target_reached(converted, {"rates": {"EUR": "1", "USD": "1.1"}}), "HUF rate missing")
+        self.assertIsNone(wishlist.annotate(converted)["target_hit"])
+        self.assertTrue(wishlist.annotate(converted, self.RATES)["target_hit"])
+
+    def test_artwork_is_a_link_not_image_data(self):
+        path, _ = self.drive("A")
+        wishlist.add(path, {"title": "Hollow Knight", "game_id": "100", "thumb": "https://cdn.example/hk.jpg"})
+        wishlist.add(path, {"title": "Bad Art", "game_id": "101", "thumb": "data:image/png;base64,AAAA"})
+        raw = json.loads(path.read_text())["items"]
+        self.assertEqual(raw[0]["thumb"], "https://cdn.example/hk.jpg")
+        self.assertIsNone(raw[1]["thumb"], "Only https links are kept; no image data in the file")
+        data = wishlist.read(path)
+        wishlist.apply_prices(data, {"games": {"101": {"thumb": "https://cdn.example/new.jpg",
+                                                         "offers": [{"price": 1, "store": "Steam"}]}}})
+        self.assertEqual(data["items"][1]["thumb"], "https://cdn.example/new.jpg", "Price checks fill in missing art")
+        self.assertEqual(data["items"][0]["thumb"], "https://cdn.example/hk.jpg", "Art without a new link is kept")
+        self.assertNotIn("≈", json.dumps(data), "No converted values are stored")
+
 
 if __name__ == "__main__":
     unittest.main()
@@ -173,3 +229,50 @@ class LocalWishlistTests(unittest.TestCase):
             self.assertEqual(console.wishlist_location(), (None, None))
             with self.assertRaises(console.SetupError):
                 console.wishlist_change("add", item={"title": "Celeste"})
+
+
+class PriceInsightTests(unittest.TestCase):
+    """CheapShark only knows the all-time low (USD, every store it tracks): record or percent above, never rarity."""
+
+    RECORD = {"price": "2.28", "date": 1759177295}
+
+    def test_history_parsing(self):
+        self.assertEqual(wishlist.price_history(self.RECORD), {"low": 2.28, "currency": "USD", "date": "2025-09-29"})
+        self.assertEqual(wishlist.price_history({"price": "0", "date": 1759177295})["low"], 0.0)
+        for bad in (None, "2.28", {}, {"price": "abc", "date": 1}, {"price": "-1", "date": 1}, {"price": "NaN", "date": 1},
+                    {"price": "2.28"}, {"price": "2.28", "date": True}, {"price": "2.28", "date": "1759177295"},
+                    {"price": "2.28", "date": 0}, {"price": "2.28", "date": 10 ** 20}):
+            self.assertIsNone(wishlist.price_history(bad), bad)
+
+    def test_matching_and_below_record(self):
+        history = wishlist.price_history(self.RECORD)
+        for price in (2.28, "2.28", 1.99):
+            insight = wishlist.price_insight(price, "USD", history)
+            self.assertEqual((insight["kind"], insight["percent"], insight["low"], insight["date"]), ("record", None, 2.28, "2025-09-29"))
+
+    def test_above_record_rounds_half_up_with_a_minimum(self):
+        history = {"low": 2.00, "currency": "USD", "date": "2025-09-29"}
+        self.assertEqual(wishlist.price_insight(3.01, "USD", history)["percent"], 51)  # 50.5% → 51
+        self.assertEqual(wishlist.price_insight(4.00, "USD", history)["percent"], 100)
+        self.assertEqual(wishlist.price_insight(2.001, "USD", history)["percent"], 1, "A hair above is never shown as 0%")
+        self.assertEqual(wishlist.price_insight(0.1 + 0.2 + 1.7, "USD", history)["kind"], "record", "Decimal, no float drift")
+        free = wishlist.price_insight(9.99, "USD", {"low": 0.0, "currency": "USD", "date": "2025-09-29"})
+        self.assertEqual((free["kind"], free["percent"]), ("above", None))
+
+    def test_no_claim_without_comparable_data(self):
+        history = wishlist.price_history(self.RECORD)
+        self.assertIsNone(wishlist.price_insight(990, "HUF", history), "Never compares across currencies")
+        self.assertIsNone(wishlist.price_insight(9.99, "USD", None))
+        self.assertIsNone(wishlist.price_insight(None, "USD", history))
+        self.assertIsNone(wishlist.price_insight("abc", "USD", history))
+        self.assertIsNone(wishlist.price_insight(9.99, None, history))
+
+    def test_annotate_and_app_store(self):
+        item = {"title": "Portal 2", "best": {"price": 1.99, "currency": "USD", "savings": 80, "store": "Steam",
+                                              "history": {"low": 1.99, "currency": "USD", "date": "2025-09-29"}}}
+        self.assertEqual(wishlist.annotate(item)["insight"]["kind"], "record")
+        self.assertIsNone(wishlist.annotate({"title": "X", "best": {"price": 1990, "currency": "HUF", "store": "Mac App Store",
+                                                                    "history": None}})["insight"])
+        self.assertIsNone(wishlist.annotate({"title": "Y"})["insight"])
+        for value in wishlist.annotate(item).values():
+            self.assertNotIn("average", json.dumps(value).lower())

@@ -157,6 +157,73 @@ class ShopTests(unittest.TestCase):
         self.assertIn("439924718", prices["apps"])
         self.assertEqual(prices["errors"], [])
 
+    def test_all_time_low_from_games_lookup(self):
+        games, _ = shop.games_by_ids(["100", "200"], opener=Opener(), now=1000)
+        self.assertEqual(games["100"]["history"], {"low": 4.99, "currency": "USD", "date": "1970-01-01"})
+        self.assertEqual((games["100"]["insight"]["kind"], games["100"]["insight"]["percent"]), ("above", 100),
+                         "Best offer 9.99 vs record 4.99")
+        self.assertIsNone(games["200"]["history"])
+        self.assertIsNone(games["200"]["insight"], "No record, no claim")
+
+
+
+class SteamPlatformTests(unittest.TestCase):
+    """Mac / Windows-only badges come only from Steam's own platform flags; anything else stays unknown."""
+
+    GAMES = {"620": {"windows": True, "mac": True, "linux": True},   # both builds
+             "1091500": {"windows": True, "mac": False, "linux": False},  # Windows only
+             "300": {"windows": False, "mac": True, "linux": False}}  # Mac only
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        patcher = patch.object(shop.deals, "cache_dir", return_value=Path(self.temp.name))
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.addCleanup(self.temp.cleanup)
+        self.requests = []
+
+    def opener(self, request, timeout):
+        url = request.full_url
+        self.requests.append(url)
+        parts = urllib.parse.urlsplit(url)
+        assert parts.netloc == "store.steampowered.com" and parts.path == "/api/appdetails", url
+        query = urllib.parse.parse_qs(parts.query)
+        app_id = query["appids"][0]
+        assert "," not in app_id and query["filters"] == ["platforms"], "One game per request, platforms only"
+        if app_id in self.GAMES:
+            body = {app_id: {"success": True, "data": {"platforms": self.GAMES[app_id]}}}
+        elif app_id == "404":
+            body = {app_id: {"success": False}}
+        else:
+            body = {app_id: {"success": True, "data": {}}}
+        return Response(json.dumps(body).encode(), url)
+
+    def test_statuses(self):
+        report = shop.steam_platforms(["620", "1091500", "300", "404", "777", "abc", "0", "620"], opener=self.opener, now=100)
+        statuses = {key: value["status"] for key, value in report["platforms"].items()}
+        self.assertEqual(statuses, {"620": "mac", "1091500": "windows", "300": "mac", "404": None, "777": None})
+        self.assertEqual(report["platforms"]["620"]["windows"], True, "Both builds: Mac, with the Windows build noted")
+        self.assertEqual(len(self.requests), 5, "Invalid and repeated IDs aren't looked up")
+
+    def test_no_false_windows_only(self):
+        self.assertIsNone(shop.platform_status({"windows": True}), "A missing mac flag isn't evidence of Windows only")
+        self.assertIsNone(shop.platform_status({}))
+        self.assertIsNone(shop.platform_status(None))
+        self.assertIsNone(shop.platform_status({"windows": False, "mac": False}))
+        self.assertEqual(shop.platform_status({"windows": True, "mac": False}), "windows")
+        self.assertEqual(shop.platform_status({"windows": True, "mac": True}), "mac")
+
+    def test_cached_for_a_week_and_capped(self):
+        ids = [str(value) for value in range(1, 31)]
+        first = shop.steam_platforms(ids, opener=self.opener, now=100, limit=12)
+        self.assertEqual(len(self.requests), 12, "Only a few new games are looked up per call")
+        self.assertEqual(len(first["pending"]), 18)
+        shop.steam_platforms(ids[:12], opener=self.opener, now=100 + 6 * 24 * 3600)
+        self.assertEqual(len(self.requests), 12, "Looked-up games come from the week-long cache")
+        second = shop.steam_platforms(ids, opener=self.opener, now=200, limit=12)
+        self.assertEqual(len(self.requests), 24)
+        self.assertEqual(len(second["platforms"]), 24)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -1912,7 +1912,12 @@ enum DealExpiry {
 
     static func label(until end: Date, now: Date, calendar: Calendar = .current) -> (text: String, urgent: Bool)? {
         guard let days = daysLeft(until: end, now: now, calendar: calendar) else { return nil }
-        let text = days == 0 ? "Ends today" : days == 1 ? "Ends tomorrow" : "\(days) days left"
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_GB")
+        formatter.calendar = calendar
+        formatter.timeZone = calendar.timeZone
+        formatter.dateFormat = calendar.component(.year, from: end) == calendar.component(.year, from: now) ? "d MMMM" : "d MMMM yyyy"
+        let text = "Offer ends " + (days == 0 ? "today" : days == 1 ? "tomorrow" : formatter.string(from: end))
         return (text, days <= 2)
     }
 
@@ -2072,6 +2077,39 @@ struct AppStoreGame: Decodable, Equatable {
     }
 }
 
+/// How today's best PC store price compares with CheapShark's recorded all-time low (USD, every store it tracks).
+/// Only the minimum is known, so "record" or "percent above" is all it can say; never rarity or an average.
+struct PriceInsight: Decodable, Equatable {
+    let kind: String
+    let percent: Int?
+    let low: Double
+    let currency: String
+    let date: String?
+
+    var text: String {
+        if kind == "record" { return "All-time low" }
+        return percent.map { "\($0)% above all-time low" } ?? "Was free before"
+    }
+
+    var detail: String {
+        let low = self.low == 0 ? "free" : String(format: "%.2f %@", self.low, currency)
+        var dateText = ""
+        if let date, let day = ISO8601DateFormatter.dayOnly.date(from: date) {
+            dateText = " on " + DateFormatter.localizedString(from: day, dateStyle: .medium, timeStyle: .none)
+        }
+        return "Lowest price CheapShark has recorded across the PC stores it tracks: \(low)\(dateText). "
+            + "Only the record low is known, not how often a game sells at a price."
+    }
+}
+
+extension ISO8601DateFormatter {
+    static let dayOnly: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withFullDate]
+        return formatter
+    }()
+}
+
 struct ShopGame: Decodable, Equatable {
     let id: String
     let title: String
@@ -2079,6 +2117,7 @@ struct ShopGame: Decodable, Equatable {
     let thumb: String?
     let offers: [ShopOffer]
     let appStoreOffer: AppStoreGame?
+    var insight: PriceInsight? = nil
 }
 
 struct AppStoreGroup: Decodable, Equatable {
@@ -2092,6 +2131,95 @@ struct ShopSearchReply: Decodable {
     let games: [ShopGame]
     let appStore: AppStoreGroup
     let errors: [String]
+}
+
+/// Steam's own platform flags for one game ("mac", "windows" = Windows only, nil = unknown).
+struct SteamPlatforms: Decodable, Equatable {
+    let mac: Bool?
+    let windows: Bool?
+    let status: String?
+}
+
+struct PlatformsReply: Decodable {
+    let platforms: [String: SteamPlatforms]
+    let pending: [String]
+    let error: String?
+}
+
+/// What Cube Shop can say about running a game on this Mac. Only verified facts: no badge when unknown.
+enum GameCompatibility: Equatable {
+    case mac
+    case windowsOnly
+}
+
+/// Steam-style "Sort by" orders shared by every Cube Shop list. Raw values are saved per list.
+enum ShopSort: String, CaseIterable {
+    case relevance, name, priceAsc = "price", priceDesc = "price-desc", discount, rating, added, endsSoon = "ends"
+
+    var title: String {
+        switch self {
+        case .relevance: return "Relevance"
+        case .name: return "Name A\u{2013}Z"
+        case .priceAsc: return "Lowest Price"
+        case .priceDesc: return "Highest Price"
+        case .discount: return "Biggest Discount"
+        case .rating: return "Best Rating"
+        case .added: return "Date Added"
+        case .endsSoon: return "Ends Soon"
+        }
+    }
+}
+
+/// What a row can be sorted by; nil fields always sort last.
+struct ShopSortFields {
+    var title: String
+    var price: Double? = nil
+    var currency: String? = nil
+    var discount: Double? = nil
+    var rating: Double? = nil
+    var added: Double? = nil
+    var ends: Double? = nil
+}
+
+/// A stable sort: ties keep their original order, and missing values go last in either direction.
+/// Prices compare converted (`convert` returns the amount in the Shop currency) or, without a Shop currency,
+/// grouped by currency so dollars and forints never mix.
+func shopSorted<T>(_ items: [T], by sort: ShopSort, convert: (Double, String) -> Double? = { _, _ in nil },
+                   fields: (T) -> ShopSortFields) -> [T] {
+    guard sort != .relevance else { return items }
+    let keyed = items.enumerated().map { (index: $0.offset, item: $0.element, fields: fields($0.element)) }
+    func order<V: Comparable>(_ a: V?, _ b: V?, descending: Bool) -> Bool? {
+        switch (a, b) {
+        case let (a?, b?): return a == b ? nil : (descending ? a > b : a < b)
+        case (_?, nil): return true
+        case (nil, _?): return false
+        default: return nil
+        }
+    }
+    func priceKey(_ f: ShopSortFields) -> (group: String, amount: Double)? {
+        guard let price = f.price else { return nil }
+        let code = f.currency ?? "USD"
+        if let converted = convert(price, code) { return ("", converted) }
+        return (code, price)
+    }
+    return keyed.sorted { a, b in
+        let result: Bool?
+        switch sort {
+        case .relevance: result = nil
+        case .name:
+            let c = a.fields.title.localizedStandardCompare(b.fields.title)
+            result = c == .orderedSame ? nil : c == .orderedAscending
+        case .priceAsc, .priceDesc:
+            let x = priceKey(a.fields), y = priceKey(b.fields)
+            if let x, let y, x.group != y.group { result = x.group < y.group }
+            else { result = order(x?.amount, y?.amount, descending: sort == .priceDesc) }
+        case .discount: result = order(a.fields.discount, b.fields.discount, descending: true)
+        case .rating: result = order(a.fields.rating, b.fields.rating, descending: true)
+        case .added: result = order(a.fields.added, b.fields.added, descending: true)
+        case .endsSoon: result = order(a.fields.ends, b.fields.ends, descending: false)
+        }
+        return result ?? (a.index < b.index)
+    }.map(\.item)
 }
 
 struct WishlistBest: Decodable, Equatable {
@@ -2112,10 +2240,16 @@ struct WishlistItem: Decodable, Equatable {
     let appStoreId: String?
     let added: Double?
     let targetPrice: Double?
+    /// The currency the target was entered in (files from before this was saved used US dollars).
+    let targetCurrency: String?
+    /// An https artwork link; the image itself lives in the artwork cache, never in the wishlist file.
+    let thumb: String?
     let best: WishlistBest?
     let onSale: Bool
-    let targetHit: Bool
+    /// The backend's comparison without exchange rates (nil when the currencies differ); the app compares itself.
+    let targetHit: Bool?
     let saleText: String?
+    var insight: PriceInsight? = nil
 }
 
 struct WishlistReply: Decodable, Equatable {
@@ -2163,7 +2297,8 @@ enum ShopMoney {
         return output
     }
 
-    static func convert(_ amount: Decimal, from source: String, to target: String, rates: ExchangeRates?, feePercent: Decimal = 0) -> Decimal? {
+    static func convert(_ amount: Decimal, from source: String, to target: String, rates: ExchangeRates?, feePercent: Decimal = 0,
+                        round: Bool = true) -> Decimal? {
         guard let table = rates?.rates,
               let from = table[source].flatMap({ Decimal(string: $0, locale: posix) }), from > 0,
               let to = table[target].flatMap({ Decimal(string: $0, locale: posix) }), to > 0,
@@ -2171,7 +2306,7 @@ enum ShopMoney {
         if amount == 0 { return 0 }
         var result = amount / from * to
         if source != target { result *= 1 + feePercent / 100 }
-        return rounded(result, places: minorUnits(target))
+        return round ? rounded(result, places: minorUnits(target)) : result
     }
 
     static func format(_ amount: Decimal, _ code: String, locale: Locale = .current) -> String {
@@ -2194,6 +2329,19 @@ enum ShopMoney {
         formatter.maximumFractionDigits = minorUnits(code)
         return (formatter.string(from: amount as NSDecimalNumber) ?? "\(amount)") + " " + code
     }
+}
+
+/// Reads a typed target price: spaces and currency signs are ignored; in currencies without decimals (HUF...) "." and ","
+/// group thousands, otherwise "," is a decimal comma. nil for empty or invalid input.
+func parseTargetPrice(_ raw: String, _ code: String) -> Double? {
+    var text = raw.filter { $0.isNumber || $0 == "." || $0 == "," }
+    if ShopMoney.minorUnits(code) == 0 {
+        text = text.filter(\.isNumber)
+    } else {
+        text = text.replacingOccurrences(of: ",", with: ".")
+    }
+    guard let value = Double(text), value >= 0, value < 100_000_000 else { return nil }
+    return value
 }
 
 /// A price ready for display: converted ("≈ 4 120 Ft") when a Shop currency is set, with the original kept for tooltips.
@@ -2222,12 +2370,29 @@ let dealImageSession: URLSession = {
 }()
 let dealImageCache = NSCache<NSURL, NSImage>()
 
-/// A whole list row that acts as one link: hover highlight, pointing-hand cursor, pressed state,
-/// Return/Space when focused and a VoiceOver link. Dragging away cancels; nested buttons keep their own action.
 /// A control inside a ClickableRowView. Like the row, it takes the first click in an inactive window,
 /// so clicking a heart in a background window toggles it instead of being swallowed while the row would open.
 final class RowControlButton: NSButton {
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+}
+
+/// A whole list row that acts as one link: hover highlight, pointing-hand cursor, pressed state,
+/// Return/Space when focused and a VoiceOver link. Dragging away cancels; nested buttons keep their own action.
+
+/// Cube Shop's My Stores / All Stores choice: a quiet pop-up that answers to the segmented-control calls the Shop already makes.
+final class ScopePopUp: NSPopUpButton {
+    convenience init(labels: [String]) {
+        self.init(frame: .zero, pullsDown: false)
+        autoenablesItems = false
+        labels.forEach { addItem(withTitle: $0) }
+    }
+    var selectedSegment: Int {
+        get { indexOfSelectedItem }
+        set { selectItem(at: newValue) }
+    }
+    func setEnabled(_ enabled: Bool, forSegment segment: Int) { item(at: segment)?.isEnabled = enabled }
+    func isEnabled(forSegment segment: Int) -> Bool { item(at: segment)?.isEnabled ?? false }
+    func setToolTip(_ toolTip: String?, forSegment segment: Int) { item(at: segment)?.toolTip = toolTip }
 }
 
 final class ClickableRowView: NSView {
@@ -2409,7 +2574,7 @@ let smokeShopHomeJSON = """
   "installed":true,"thumb":null,"url":"https://www.cheapshark.com/redirect?dealID=abc"}],
  "drops":[{"id":"ghi","title":"Drop Game","sale_price":4.99,"normal_price":19.99,"savings":75,"store_id":"1","store":"Steam",
   "deal_rating":8.1,"steam_rating":null,"steam_rating_percent":null,"metacritic":null,"steam_app_id":"700","game_id":"700",
-  "installed":false,"thumb":null,"url":"https://www.cheapshark.com/redirect?dealID=ghi"}],
+  "installed":false,"thumb":"https://cdn.example.com/drop.jpg","url":"https://www.cheapshark.com/redirect?dealID=ghi"}],
  "free":[{"id":"1","title":"Free Adventure","worth":"$19.99","type":"Game","platforms":["PC","Epic Games Store"],
   "end_date":"2030-01-01","users":10,"thumb":null,"url":"https://www.gamerpower.com/open/free-adventure"}],
  "errors":[]}
@@ -2420,10 +2585,11 @@ let smokeShopSearchJSON = """
    "offers":[{"store_id":"7","store":"GOG","price":9.99,"normal_price":14.99,"savings":33,"currency":"USD","url":"https://www.cheapshark.com/redirect?dealID=g1","cheapest":true},
              {"store_id":"1","store":"Steam","price":14.99,"normal_price":14.99,"savings":0,"currency":"USD","url":"https://www.cheapshark.com/redirect?dealID=s1","cheapest":false}],
    "app_store_offer":{"id":"555","title":"Hollow Knight","price":3990,"currency":"HUF","formatted":"3 990 Ft","seller":"Team Cherry","thumb":null,
-     "url":"https://apps.apple.com/hu/app/hollow-knight/id555","store":"App Store"}},
+     "url":"https://apps.apple.com/hu/app/hollow-knight/id555","store":"App Store"},
+   "insight":{"kind":"above","percent":25,"low":7.99,"currency":"USD","date":"2025-09-29"}},
   {"id":"200","title":"Hollow Knight: Silksong — Collector's Soundtrack Edition","steam_app_id":null,"thumb":null,
    "offers":[{"store_id":"1","store":"Steam","price":19.99,"normal_price":24.99,"savings":20,"currency":"USD","url":"https://www.cheapshark.com/redirect?dealID=ss","cheapest":true}],
-   "app_store_offer":null}],
+   "app_store_offer":null,"insight":{"kind":"record","percent":null,"low":19.99,"currency":"USD","date":"2025-09-29"}}],
  "app_store":{"country":"HU","currency":"HUF","apps":[{"id":"777","title":"Hollow Pocket","price":1990,"currency":"HUF","formatted":"1 990 Ft",
    "seller":"Smoke Studio","thumb":null,"url":"https://apps.apple.com/hu/app/hollow-pocket/id777","store":"App Store"}]}}
 """
@@ -2783,26 +2949,38 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
     // Cube Shop: Home, Deals, Free Games, Search and the drive-saved Wishlist, with optional display-currency conversion.
     private let shopTabKey = "shopTab", shopScopeKey = "shopScope", shopCurrencyKey = "shopCurrency", shopFeeKey = "shopFeePercent"
     let shopTab = NSSegmentedControl(labels: ["Home", "Deals", "Free Games", "Search", "Wishlist"], trackingMode: .selectOne, target: nil, action: nil)
-    let shopScope = NSSegmentedControl(labels: ["My Stores", "All Stores"], trackingMode: .selectOne, target: nil, action: nil)
+    /// The visible navigation; Search isn't a tab but the results of the search field above it.
+    let shopNav = NSSegmentedControl(labels: ["Home", "Deals", "Free Games", "Wishlist"], trackingMode: .selectOne, target: nil, action: nil)
+    private static let shopNavTabs = [0, 1, 2, 4]
+    private var shopReturnTab = 0
+    let shopScope = ScopePopUp(labels: ["My Stores", "All Stores"])
     private let shopScopeHint = NSTextField(wrappingLabelWithString: "")
     private let shopScopeBar = NSStackView()
     private let shopCurrencyNote = NSTextField(wrappingLabelWithString: "")
     private let dealsPane = NSStackView(), homePane = NSStackView(), searchPane = NSStackView(), wishlistPane = NSStackView()
     private let homeStatus = NSTextField(wrappingLabelWithString: ""), homeList = NSStackView()
     private let shopSearchField = NSSearchField()
-    private let homeSearchField = NSSearchField(), homeSearchList = NSStackView()
     private var shopScrollOffsets: [Int: CGFloat] = [:], shopShownTab: Int?
     private let searchStatus = NSTextField(wrappingLabelWithString: ""), searchList = NSStackView()
     private let wishlistStatus = NSTextField(wrappingLabelWithString: ""), wishlistList = NSStackView()
+    private let searchSortPopup = NSPopUpButton(), wishlistSortPopup = NSPopUpButton()
+    private let searchSortKey = "shopSort.search", wishlistSortKey = "shopSort.wishlist"
     private var shopPageView: NSView?
     private(set) var shopHome: ShopHomeReply?
     private var homeLoadingKey: String?, homeLoadedScope: String?, homeError: String?
     private(set) var searchReply: ShopSearchReply?
+    /// Steam platform status per app ID, looked up a few at a time after lists render.
+    private(set) var steamPlatformStatus: [String: String] = [:]
+    private var platformsRequested: Set<String> = []
+    private var platformLookupScheduled = false
+    private var platformLookupRounds = 0
     private var searchLoadingQuery: String?, searchLoadedQuery: String?, searchError: String?
     private var searchTimer: Timer?
     private(set) var wishlist: WishlistReply?
     private var wishlistLoading = false, wishlistCheckedAt: Date?
     private var wishlistPayloads: [String: (title: String, payload: [String: String])] = [:]
+    /// The currency a store row's price is in, for a target set before the game is on the wishlist (with Original prices).
+    private var shopTargetCurrencies: [String: String] = [:]
     private(set) var exchangeRates: ExchangeRates?
     private var ratesLoading = false, ratesFailed = false, ratesLoadedAt: Date?
     private var myStores: [ShopStoreRef]?
@@ -2824,22 +3002,26 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
     var smokeShopCalls: [[String]] = []
     var smokeWishlist: [[String: Any]] = []
     var smokeWishlistOffline = false
-    /// Asks for a wishlist target price in USD: .none = cancelled, .some(nil) = clear the target.
-    lazy var askTargetPrice: (String, Double?) -> Double?? = { title, current in
+    /// Asks for a wishlist target price in the given currency: .none = cancelled, .some(nil) = clear the target.
+    lazy var askTargetPrice: (String, Double?, String) -> Double?? = { title, current, code in
         let alert = NSAlert()
         alert.messageText = "Target price for \u{201C}\(title)\u{201D}"
-        alert.informativeText = "Cube Shop marks the game when a store sells it at or below this price. Enter US dollars (the currency CheapShark uses), or leave it empty to clear the target."
+        alert.informativeText = "Cube Shop marks the game when its best price is at or below this, converted at today's ECB rate. Leave it empty to clear the target."
+        let places = ShopMoney.minorUnits(code)
         let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 120, height: 24))
-        field.placeholderString = "e.g. 9.99"
-        if let current { field.stringValue = String(format: "%.2f", current) }
-        alert.accessoryView = field
+        field.placeholderString = places == 0 ? "e.g. 4000" : "e.g. 9.99"
+        field.setAccessibilityLabel("Target price in \(code)")
+        if let current { field.stringValue = String(format: "%.\(places)f", current) }
+        let unit = NSTextField(labelWithString: code)
+        unit.textColor = .secondaryLabelColor
+        let box = NSStackView(views: [field, unit])
+        box.spacing = 6
+        box.frame = NSRect(x: 0, y: 0, width: 170, height: 24)
+        alert.accessoryView = box
         alert.addButton(withTitle: "Save")
         alert.addButton(withTitle: "Cancel")
         guard alert.runModal() == .alertFirstButtonReturn else { return .none }
-        let text = field.stringValue.replacingOccurrences(of: ",", with: ".").trimmingCharacters(in: .whitespaces)
-        if text.isEmpty { return .some(nil) }
-        guard let value = Double(text.replacingOccurrences(of: "$", with: "")), value >= 0, value < 10_000 else { return .none }
-        return .some(value)
+        return .some(parseTargetPrice(field.stringValue, code))
     }
     private let backToolbarItem = NSToolbarItem(itemIdentifier: NSToolbarItem.Identifier("Back"))
     private let forwardToolbarItem = NSToolbarItem(itemIdentifier: NSToolbarItem.Identifier("Forward"))
@@ -3670,7 +3852,7 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
             DispatchQueue.main.async {
                 self.updateTask = nil
                 guard process.terminationStatus == 0 else {
-                    self.updateStatus.stringValue = String(decoding: data, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
+                    self.updateStatus.stringValue = self.friendlyBackendError(String(decoding: data, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines))
                     return
                 }
                 do {
@@ -7096,9 +7278,10 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
             button.setAccessibilityLabel(label)
             button.setContentHuggingPriority(.required, for: .horizontal)
         }
-        popup(dealsStorePopup, [("All Stores", "")], label: "Store", selected: nil)
-        popup(dealsSortPopup, [("Best Deals", "rating"), ("Biggest Discount", "savings"), ("Lowest Price", "price"),
-                               ("Newest", "recent"), ("Best Reviews", "reviews"), ("Title", "title")],
+        popup(dealsStorePopup, [("Any Store", "")], label: "Store", selected: nil)
+        // CheapShark sorts Deals across pages, so these stay server-side; the labels match the other lists' Sort by.
+        popup(dealsSortPopup, [("Best Deals", "rating"), ("Biggest Discount", "savings"), ("Lowest Price", "price"), ("Highest Price", "price-desc"),
+                               ("Newest", "recent"), ("Best Reviews", "reviews"), ("Name A\u{2013}Z", "title")],
               label: "Sort deals", selected: UserDefaults.standard.string(forKey: dealsSortKey))
         // PC stores and launchers only: console and phone giveaways are never requested or shown.
         popup(giveawayPlatformPopup, [("All PC Stores", ""), ("PC", "pc"), ("Steam", "steam"), ("Epic Games Store", "epic-games-store"),
@@ -7107,7 +7290,9 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
               label: "Platform", selected: nil)
         popup(giveawayTypePopup, [("All Types", ""), ("Full Games", "game"), ("In-Game Loot", "loot"), ("Beta Access", "beta")],
               label: "Giveaway type", selected: nil)
-        popup(giveawaySortPopup, [("Newest", "date"), ("Highest Value", "value"), ("Most Popular", "popularity")],
+        // GamerPower sorts by date, value and popularity; Ends Soon and Name sort the fetched list here.
+        popup(giveawaySortPopup, [("Newest", "date"), ("Ends Soon", "ends"), ("Highest Value", "value"), ("Most Popular", "popularity"),
+                                  ("Name A\u{2013}Z", "name")],
               label: "Sort giveaways", selected: UserDefaults.standard.string(forKey: giveawaySortKey))
         dealsFilters.orientation = .horizontal
         dealsFilters.spacing = 8
@@ -7129,9 +7314,8 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
         dealsRetry.action = #selector(retryDeals)
         dealsRetry.controlSize = .small
         dealsRetry.isHidden = true
-        let status = row([dealsStatus, dealsRetry])
-        status.alignment = .firstBaseline
         dealsStatus.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        dealsStatus.lineBreakMode = .byTruncatingTail
         dealsList.orientation = .vertical
         dealsList.alignment = .leading
         dealsList.spacing = 0
@@ -7149,7 +7333,7 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
         dealsReminderBar.spacing = 8
         dealsReminderBar.setViews([dealsReminderNote, dealsReminderSettings], in: .leading)
         dealsReminderBar.isHidden = true
-        configureShopPane(dealsPane, [dealsFilters, status, dealsList, dealsMore], full: [dealsList, status])
+        configureShopPane(dealsPane, [dealsFilters, dealsList, dealsMore], full: [dealsFilters, dealsList])
         dealsList.setAccessibilityIdentifier("dealsList")
         layoutDealsFilters()
         renderDeals()
@@ -7175,11 +7359,13 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
 
     private func layoutDealsFilters() {
         dealsFilters.arrangedSubviews.forEach { $0.removeFromSuperview() }
-        let views: [NSView] = dealsMode.selectedSegment == 0
-            ? [dealsSearch, dealsStorePopup, dealsSortPopup]
-            : [giveawayPlatformPopup, giveawayTypePopup, giveawaySortPopup, NSView()]
+        // Status on the left, the list's own filters and Sort by on the right; titles are found with the search field above.
+        let spacer = NSView()
+        spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        let views: [NSView] = [dealsStatus, dealsRetry, spacer] + (dealsMode.selectedSegment == 0
+            ? [dealsStorePopup, dealsSortPopup]
+            : [giveawayPlatformPopup, giveawayTypePopup, giveawaySortPopup])
         views.forEach { dealsFilters.addArrangedSubview($0) }
-        dealsSearch.setContentHuggingPriority(.defaultLow, for: .horizontal)
     }
 
     private func dealsArguments(page: Int = 0) -> [String] {
@@ -7191,7 +7377,8 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
             let search = dealsSearch.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
             if !search.isEmpty { arguments += ["--search", String(search.prefix(100))] }
         } else {
-            arguments = ["--source", "gamerpower", "--sort", value(giveawaySortPopup).isEmpty ? "date" : value(giveawaySortPopup)]
+            let sort = value(giveawaySortPopup)
+            arguments = ["--source", "gamerpower", "--sort", ["value", "popularity"].contains(sort) ? sort : "date"]
             if !value(giveawayPlatformPopup).isEmpty { arguments += ["--platform", value(giveawayPlatformPopup)] }
             if !value(giveawayTypePopup).isEmpty { arguments += ["--type", value(giveawayTypePopup)] }
         }
@@ -7272,7 +7459,7 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
     private func updateDealStores() {
         let selected = dealsStorePopup.selectedItem?.representedObject as? String ?? ""
         dealsStorePopup.removeAllItems()
-        dealsStorePopup.addItem(withTitle: "All Stores")
+        dealsStorePopup.addItem(withTitle: "Any Store")
         dealsStorePopup.lastItem?.representedObject = ""
         for store in dealsStores {
             dealsStorePopup.addItem(withTitle: store.name)
@@ -7284,6 +7471,7 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
     }
 
     private func renderDeals(_ warning: String? = nil, fetched: Double? = nil) {
+        schedulePlatformLookup()
         dealsList.arrangedSubviews.forEach { $0.removeFromSuperview() }
         let store = dealsMode.selectedSegment == 0
         let count = store ? storeDeals.count : giveaways.count
@@ -7292,7 +7480,7 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
         if store {
             for deal in storeDeals { addDealRow(storeDealRow(deal)) }
         } else {
-            for giveaway in giveaways { addDealRow(giveawayRow(giveaway)) }
+            for giveaway in sortedGiveaways() { addDealRow(giveawayRow(giveaway)) }
         }
         dealsMore.isHidden = !store || !storeDealsHasMore || storeDeals.isEmpty
         if let warning {
@@ -7329,7 +7517,9 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
 
     static let shopArtworkSize = NSSize(width: 80, height: 40)
     static let shopHeadingSize: CGFloat = 19
-    static let shopHeartWidth: CGFloat = 22, shopPriceWidth: CGFloat = 96, shopPercentWidth: CGFloat = 50, shopMarkerWidth: CGFloat = 80, shopChildIndent: CGFloat = 40
+    /// Extra room above each Home section after the first (on top of the heading's own 14 pt), so sections read as blocks.
+    static let shopSectionGap: CGFloat = 14
+    static let shopHeartWidth: CGFloat = 22, shopPriceWidth: CGFloat = 96, shopPercentWidth: CGFloat = 78, shopOfferWidth: CGFloat = 180, shopMarkerWidth: CGFloat = 80, shopChildIndent: CGFloat = 40
 
     /// Game art in one shared frame: wide store art is cropped to fill it; square app icons are fitted.
     private func dealArtwork(_ source: String?, width: CGFloat = SetupController.shopArtworkSize.width,
@@ -7350,8 +7540,10 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
     }
 
     private func dealRow(artwork: NSView, title: String, detail: NSAttributedString, detailTip: String, trailing: [NSView],
-                         accessibility: String, compact: Bool = false, indent: CGFloat = 0, open: @escaping () -> Void) -> NSView {
+                         accessibility: String, compact: Bool = false, indent: CGFloat = 0, actions: [NSView] = [],
+                         open: @escaping () -> Void) -> NSView {
         let name = NSTextField(labelWithString: title)
+        name.isHidden = title.isEmpty
         name.font = .systemFont(ofSize: 13, weight: .medium)
         name.lineBreakMode = .byTruncatingTail
         name.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
@@ -7368,6 +7560,17 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
         texts.orientation = .vertical
         texts.alignment = .leading
         texts.spacing = 3
+        if !actions.isEmpty {
+            // Title and platform on top, then a clear gap, then the row's own controls (target, wishlist, reminder).
+            let bar = NSStackView(views: actions)
+            bar.orientation = .horizontal
+            bar.alignment = .centerY
+            bar.spacing = 8
+            bar.setAccessibilityIdentifier("shopRowActions")
+            for view in actions { view.setContentCompressionResistancePriority(.required, for: .horizontal) }
+            if let above = [info, name].first(where: { !$0.isHidden }) { texts.setCustomSpacing(compact ? 4 : 10, after: above) }
+            texts.addArrangedSubview(bar)
+        }
         texts.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         // The text column takes the slack, so the price columns always end at the row's edge.
         texts.setHuggingPriority(NSLayoutConstraint.Priority(1), for: .horizontal)
@@ -7398,6 +7601,95 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
     }
 
     /// Compact inline badges: a mini symbol plus a short colored value, kept together with no-break spaces.
+    /// Bundled launcher icon for a store name (CheapShark names), nil when Couch Cube has none.
+    static func storeIconID(_ store: String) -> String? {
+        let name = store.lowercased()
+        if name.hasPrefix("steam") { return "steam" }
+        if name.hasPrefix("epic") { return "epic-games" }
+        if name.hasPrefix("gog") { return "gog-galaxy" }
+        if name == "origin" || name.hasPrefix("ea ") || name == "ea" { return "ea" }
+        if name.hasPrefix("battle.net") || name.hasPrefix("blizzard") { return "battle-net" }
+        return nil
+    }
+
+    static let storeIconCache = NSCache<NSString, NSImage>()
+
+    /// A small store logo: the bundled launcher icon, the Apple logo for the Mac App Store, otherwise a cart symbol.
+    static func storeIcon(_ store: String, size: CGFloat) -> (image: NSImage, template: Bool) {
+        if let id = storeIconID(store) {
+            if let cached = storeIconCache.object(forKey: id as NSString) { return (cached, false) }
+            if let image = Bundle.main.resourceURL.flatMap({ NSImage(contentsOf: $0.appendingPathComponent("AppIcons/\(id).png")) }) {
+                storeIconCache.setObject(image, forKey: id as NSString)
+                return (image, false)
+            }
+        }
+        let symbol = store.lowercased().contains("app store") ? "apple.logo" : "cart"
+        let image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)?
+            .withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: size * 0.8, weight: .medium)) ?? NSImage()
+        return (image, true)
+    }
+
+    /// The store under the price, by its full name: gray with its logo, or on a sale a green tag with the discount
+    /// ("Steam −75%"). A game row covering several stores shows just the best discount.
+    private func storeTag(_ store: String?, savings: Int? = nil) -> NSView {
+        let text = [store, savings.map { "\u{2212}\($0)%" }].compactMap { $0 }.joined(separator: " ")
+        let label = NSTextField(labelWithString: text)
+        label.font = .systemFont(ofSize: 11, weight: .medium)
+        label.textColor = savings != nil ? .systemGreen : .secondaryLabelColor
+        label.lineBreakMode = .byTruncatingMiddle
+        label.alignment = .right
+        label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        label.setContentHuggingPriority(.required, for: .horizontal)
+        label.setAccessibilityElement(false)
+        let icon: NSView
+        if savings != nil {
+            let image = NSImageView(image: NSImage(systemSymbolName: "tag.fill", accessibilityDescription: nil)?
+                .withSymbolConfiguration(.init(pointSize: 10, weight: .medium)) ?? NSImage())
+            image.contentTintColor = .systemGreen
+            image.setAccessibilityIdentifier("shopSaleTag")
+            icon = image
+        } else {
+            icon = storeIconView(store ?? "", size: 12)
+        }
+        let tag = NSStackView(views: [icon, label])
+        tag.orientation = .horizontal
+        tag.alignment = .centerY
+        tag.spacing = 3
+        let spoken = [store, savings.map { "\($0)% off" }].compactMap { $0 }.joined(separator: ", ")
+        tag.toolTip = spoken
+        tag.setAccessibilityIdentifier("shopStoreTag")
+        tag.setAccessibilityElement(true)
+        tag.setAccessibilityRole(.staticText)
+        tag.setAccessibilityLabel(spoken)
+        return tag
+    }
+
+    /// The all-time-low note: a small third line under the price, green only at the record.
+    private func insightLabel(_ insight: PriceInsight?) -> NSView? {
+        guard let insight else { return nil }
+        let label = NSTextField(labelWithString: insight.text)
+        label.font = .systemFont(ofSize: 10, weight: insight.kind == "record" ? .semibold : .regular)
+        label.textColor = insight.kind == "record" ? .systemGreen : .tertiaryLabelColor
+        label.toolTip = insight.detail
+        label.setAccessibilityLabel(insight.text + ". " + insight.detail)
+        label.setAccessibilityIdentifier("shopPriceInsight")
+        return label
+    }
+
+    private func storeIconView(_ store: String, size: CGFloat = 16) -> NSView {
+        let icon = Self.storeIcon(store, size: size)
+        let view = NSImageView(image: icon.image)
+        view.imageScaling = .scaleProportionallyUpOrDown
+        if icon.template { view.contentTintColor = .secondaryLabelColor }
+        view.setAccessibilityIdentifier("shopStoreIcon")
+        view.setAccessibilityLabel(store)
+        view.toolTip = store
+        view.widthAnchor.constraint(equalToConstant: size).isActive = true
+        view.heightAnchor.constraint(equalToConstant: size).isActive = true
+        return view
+    }
+
+    /// Badge symbols are SF Symbol names; "store:<name>" puts that store's small logo in front of the text instead.
     private func dealBadges(_ parts: [(symbol: String?, text: String, color: NSColor)]) -> NSAttributedString {
         let font = NSFont.systemFont(ofSize: 11, weight: .medium)
         let result = NSMutableAttributedString()
@@ -7405,7 +7697,17 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
             if index > 0 {
                 result.append(NSAttributedString(string: "  \u{00B7}  ", attributes: [.font: font, .foregroundColor: NSColor.tertiaryLabelColor]))
             }
-            if let symbol = part.symbol,
+            if let symbol = part.symbol, symbol.hasPrefix("store:") {
+                let icon = Self.storeIcon(String(symbol.dropFirst(6)), size: 12)
+                let attachment = NSTextAttachment()
+                attachment.image = icon.template ? icon.image.withSymbolConfiguration(
+                    NSImage.SymbolConfiguration(pointSize: 9, weight: .semibold).applying(NSImage.SymbolConfiguration(paletteColors: [part.color]))) ?? icon.image
+                    : icon.image
+                attachment.bounds = icon.template ? NSRect(x: 0, y: -1, width: attachment.image!.size.width, height: attachment.image!.size.height)
+                    : NSRect(x: 0, y: -2, width: 12, height: 12)
+                result.append(NSAttributedString(attachment: attachment))
+                result.append(NSAttributedString(string: "\u{00A0}", attributes: [.font: font]))
+            } else if let symbol = part.symbol,
                let image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)?
                 .withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: 9, weight: .semibold)
                     .applying(NSImage.SymbolConfiguration(paletteColors: [part.color]))) {
@@ -7486,7 +7788,7 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
     /// so every row of a list reserves the same slots. Missing values leave their cell blank.
     private func priceCluster(heart: NSView?, price: ShopPrice?, priceText: String? = nil, was: String? = nil,
                               savings: Int? = nil, highlight: Bool = false, marker: String?? = nil, ratings: ShopRatings? = nil,
-                              ratingOverlay: NSView? = nil) -> NSView {
+                              ratingOverlay: NSView? = nil, store: String? = nil, footer: NSView? = nil) -> NSView {
         func column(_ views: [NSView], width: CGFloat, id: String) -> NSStackView {
             let stack = NSStackView(views: views)
             stack.orientation = .vertical
@@ -7536,44 +7838,59 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
                 columns += cells
             }
         }
-        let heartColumn = column(heart.map { [$0] } ?? [], width: Self.shopHeartWidth, id: "shopHeartColumn")
-        heartColumn.alignment = .centerX
-        columns.append(heartColumn)
+        if let heart {
+            let heartColumn = column([heart], width: Self.shopHeartWidth, id: "shopHeartColumn")
+            heartColumn.alignment = .centerX
+            columns.append(heartColumn)
+        }
         // Search rows add a "Lowest" column beside the price; nil-in-optional keeps the column empty for alignment.
         if let marker {
             let badge = marker.map { dealBadge($0, color: .systemGreen) }
             badge?.setAccessibilityIdentifier("shopLowest")
             columns.append(column(badge.map { [$0] } ?? [], width: Self.shopMarkerWidth, id: "shopMarkerColumn"))
         }
-        var prices: [NSView] = []
-        if let price {
-            prices.append(priceLabel(price, highlight: highlight))
-        } else if let priceText {
-            prices.append(priceLabel(ShopPrice(text: priceText, original: priceText, converted: false, value: nil), highlight: highlight))
+        // Two right-aligned lines: the price, with the usual price struck through beside it on a sale; beneath it the
+        // store in gray, or a green tag with the store and the discount on a sale. A real end date or the all-time-low
+        // note goes on a small third line.
+        var top: [NSView] = []
+        if let shown = price ?? priceText.map({ ShopPrice(text: $0, original: $0, converted: false, value: nil) }) {
+            top.append(priceLabel(shown, highlight: highlight))
         }
         if let was {
-            let right = NSMutableParagraphStyle()
-            right.alignment = .right
-            right.lineBreakMode = .byTruncatingHead
             let label = NSTextField(labelWithAttributedString: NSAttributedString(string: was, attributes: [
                 .font: NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .regular),
                 .foregroundColor: NSColor.secondaryLabelColor,
-                .paragraphStyle: right,
                 .strikethroughStyle: NSUnderlineStyle.single.rawValue]))
-            label.alignment = .right
             label.setAccessibilityIdentifier("shopWasPrice")
-            prices.append(label)
+            top.append(label)
         }
-        for label in prices.compactMap({ $0 as? NSTextField }) {
+        for case let label as NSTextField in top {
             label.lineBreakMode = .byTruncatingHead
-            label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-            // Full column width with right-aligned text: the usual price sits exactly under the sale price.
-            label.widthAnchor.constraint(equalToConstant: Self.shopPriceWidth).isActive = true
+            label.alignment = .right
+            label.setContentCompressionResistancePriority(.defaultHigh, for: .horizontal)
+            label.setContentHuggingPriority(.required, for: .horizontal)
         }
-        columns.append(column(prices, width: Self.shopPriceWidth, id: "shopPriceColumn"))
-        let percent = savings.flatMap { $0 > 0 ? dealBadge("\u{2212}\($0)%", color: .systemBlue) : nil }
-        percent?.setAccessibilityIdentifier("shopPercent")
-        columns.append(column(percent.map { [$0] } ?? [], width: Self.shopPercentWidth, id: "shopPercentColumn"))
+        let topLine = NSStackView(views: top)
+        topLine.orientation = .horizontal
+        topLine.alignment = .firstBaseline
+        topLine.spacing = 6
+        topLine.setAccessibilityIdentifier("shopPriceLine")
+        let sale = savings.flatMap { $0 > 0 ? $0 : nil }
+        let storeLine: NSView? = store != nil || sale != nil ? storeTag(store, savings: sale) : nil
+        func slot(_ view: NSView?, height: CGFloat?) -> NSView {
+            // A full-width line with its content pinned to the right edge.
+            let line = NSStackView()
+            line.orientation = .horizontal
+            if let view { line.addView(view, in: .trailing) }
+            if let height { line.heightAnchor.constraint(equalToConstant: height).isActive = true }
+            return line
+        }
+        var lines = [slot(topLine, height: 17), slot(storeLine, height: 15)]
+        if let footer { lines.append(slot(footer, height: nil)) }
+        let block = column(lines, width: Self.shopOfferWidth, id: "shopPriceColumn")
+        for line in lines { line.widthAnchor.constraint(equalTo: block.widthAnchor).isActive = true }
+        block.spacing = 2
+        columns.append(block)
         let cluster = NSStackView(views: columns)
         cluster.orientation = .horizontal
         cluster.alignment = .centerY
@@ -7584,8 +7901,10 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
     }
 
     private func storeDealRow(_ deal: StoreDeal) -> NSView {
-        var badges: [(symbol: String?, text: String, color: NSColor)] = [(nil, deal.store ?? "Store", .secondaryLabelColor)]
+        var badges: [(symbol: String?, text: String, color: NSColor)] = []
         var tips = [deal.store ?? "Store"]
+        let compat = compatibilityBadge(compatibility(steamAppId: deal.steamAppId))
+        if let compat { badges.append(compat.badge); tips.append(compat.tip) }
         if let percent = deal.steamRatingPercent {
             tips.append("Steam reviews: " + (deal.steamRating.map { "\($0) (\(percent)%)" } ?? "\(percent)%"))
         }
@@ -7596,17 +7915,18 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
                                   metacritic: deal.metacritic, deal: deal.dealRating)
         let salePrice = shopPrice(deal.salePrice, "USD")
         let heart = wishlistHeart(key: deal.gameId.map { "cs:" + $0 } ?? "title:" + deal.title.lowercased(), title: deal.title,
-                                  payload: ["title": deal.title, "game_id": deal.gameId ?? "", "steam_app_id": deal.steamAppId ?? ""])
-        let trailing = [priceCluster(heart: heart, price: salePrice,
+                                  payload: ["title": deal.title, "game_id": deal.gameId ?? "", "steam_app_id": deal.steamAppId ?? "", "thumb": deal.thumb ?? ""])
+        let trailing = [priceCluster(heart: nil, price: salePrice,
                                      was: deal.normalPrice.flatMap { $0 > deal.salePrice ? shopPrice($0, "USD").text : nil },
-                                     savings: deal.savings, ratings: ratings)]
+                                     savings: deal.savings, ratings: ratings, store: deal.store)]
         if salePrice.converted { tips.append("Price: \(salePrice.spoken)") }
         var spoken = "\(deal.title), \(salePrice.spoken)"
         if let normal = deal.normalPrice, normal > deal.salePrice { spoken += ", was \(shopPrice(normal, "USD").spoken), \(deal.savings)% off" }
         spoken += (deal.installed ? ", installed" : "") + ". " + tips.dropFirst().joined(separator: ". ")
         return dealRow(artwork: dealArtwork(deal.thumb), title: deal.title,
                        detail: dealBadges(badges), detailTip: tips.joined(separator: "\n"), trailing: trailing,
-                       accessibility: "Open \(deal.title) deal at \(deal.store ?? "store"), " + spoken) { [weak self] in
+                       accessibility: "Open \(deal.title) deal at \(deal.store ?? "store"), " + spoken,
+                       actions: [shopTargetButton(key: heart.identifier!.rawValue, title: deal.title, currency: "USD"), heart]) { [weak self] in
             self?.openShopLink(deal.url, hosts: cheapSharkHosts)
         }
     }
@@ -7616,11 +7936,9 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
         var badges: [(symbol: String?, text: String, color: NSColor)] = []
         var tips: [String] = []
         if let type = giveaway.type { badges.append((nil, type, .secondaryLabelColor)); tips.append(type) }
-        if !giveaway.platforms.isEmpty {
-            badges.append(("gamecontroller.fill", giveaway.platforms.prefix(3).joined(separator: ", ")
-                           + (giveaway.platforms.count > 3 ? " +\(giveaway.platforms.count - 3)" : ""), .secondaryLabelColor))
-            tips.append("Platforms: " + giveaway.platforms.joined(separator: ", "))
-        }
+        if !giveaway.platforms.isEmpty { tips.append("Platforms: " + giveaway.platforms.joined(separator: ", ")) }
+        // The store giving it away goes under the price, like every other row; plain "PC" says nothing about the store.
+        let giver = giveaway.platforms.first { !["pc", "drm-free"].contains($0.lowercased()) }
         var trailing: [NSView] = []
         var reminder: NSButton?
         if let end = DealExpiry.parseGamerPowerEnd(giveaway.endDate), end > dealsNow() {
@@ -7636,15 +7954,15 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
         }
         // GamerPower lists the usual value in US dollars ("$19.99").
         let worthPrice = giveaway.worth.flatMap { Double($0.replacingOccurrences(of: "$", with: "")) }.map { shopPrice($0, "USD") }
-        let heart = wishlistHeart(key: "title:" + giveaway.title.lowercased(), title: giveaway.title, payload: ["title": giveaway.title])
-        if !ratingColumns, let reminder { trailing.append(reminder) }
-        trailing.append(priceCluster(heart: heart, price: nil, priceText: "Free", was: worthPrice?.text ?? giveaway.worth, highlight: true,
-                                     ratings: ratingColumns ? ShopRatings.none : nil, ratingOverlay: ratingColumns ? reminder : nil))
+        let heart = wishlistHeart(key: "title:" + giveaway.title.lowercased(), title: giveaway.title, payload: ["title": giveaway.title, "thumb": giveaway.thumb ?? ""])
+        trailing.append(priceCluster(heart: nil, price: nil, priceText: "Free", was: worthPrice?.text ?? giveaway.worth, highlight: true,
+                                     ratings: ratingColumns ? ShopRatings.none : nil, store: giver, footer: reminder))
         if let worthPrice, worthPrice.converted { tips.append("Usually \(worthPrice.spoken)") }
         return dealRow(artwork: dealArtwork(giveaway.thumb), title: giveaway.title,
                        detail: dealBadges(badges), detailTip: tips.joined(separator: "\n"), trailing: trailing,
                        accessibility: "Open \(giveaway.title) giveaway, free" + ((worthPrice?.spoken ?? giveaway.worth).map { ", usually \($0)" } ?? "")
-                        + (tips.isEmpty ? "" : ". " + tips.joined(separator: ". "))) { [weak self] in
+                        + (tips.isEmpty ? "" : ". " + tips.joined(separator: ". ")),
+                       actions: [heart]) { [weak self] in
             self?.openShopLink(giveaway.url, hosts: gamerPowerHosts)
         }
     }
@@ -7656,7 +7974,8 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
         button.setAccessibilityIdentifier("dealReminder")
         let set = dealReminders["giveaway:" + giveaway.id] != nil
         let expiry = DealExpiry.label(until: end, now: dealsNow())
-        let title = set ? "Reminder set" : expiry?.text ?? "Ended"
+        // The real end date stays visible either way; the icon says whether a reminder is set.
+        let title = expiry?.text ?? "Offer ended"
         let color: NSColor = set ? .systemGreen : expiry?.urgent == true ? .systemOrange : .secondaryLabelColor
         button.image = NSImage(systemSymbolName: set ? "checkmark.circle.fill" : "bell", accessibilityDescription: nil)
         button.contentTintColor = color
@@ -7766,7 +8085,7 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
     @objc private func dealsFiltersChanged() {
         if let sort = dealsSortPopup.selectedItem?.representedObject as? String { UserDefaults.standard.set(sort, forKey: dealsSortKey) }
         if let sort = giveawaySortPopup.selectedItem?.representedObject as? String { UserDefaults.standard.set(sort, forKey: giveawaySortKey) }
-        if dealsLoadedKey[dealsMode.selectedSegment] == dealsArguments().joined(separator: "\u{1F}") { return }
+        if dealsLoadedKey[dealsMode.selectedSegment] == dealsArguments().joined(separator: "\u{1F}") { renderDeals(); return }
         if dealsMode.selectedSegment == 0 { storeDealsPage = 0 }
         loadDeals(page: 0, refresh: false)
     }
@@ -7798,16 +8117,24 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
 
     private func cubeShopPage() -> NSView {
         let deals = dealsPage()
-        let saved = UserDefaults.standard.object(forKey: shopTabKey) as? Int
-        // The old Deals page remembered store deals vs. giveaways; carry that over as the Deals / Free Games tab.
-        shopTab.selectedSegment = saved.map { min(max($0, 0), 4) } ?? (UserDefaults.standard.integer(forKey: dealsModeKey) == 1 ? 2 : 1)
+        // Cube Shop always opens on Home; the other tabs keep their own state and scroll position once visited.
+        shopTab.selectedSegment = 0
         shopTab.target = self
         shopTab.action = #selector(shopTabChanged)
-        shopTab.setAccessibilityLabel("Cube Shop section")
-        shopTab.segmentDistribution = .fit
+        shopNav.selectedSegment = 0
+        shopNav.target = self
+        shopNav.action = #selector(shopNavChanged)
+        shopNav.setAccessibilityLabel("Cube Shop section")
+        shopNav.setAccessibilityIdentifier("shopNav")
+        shopNav.segmentDistribution = .fit
+        shopNav.segmentStyle = .automatic
         shopScope.target = self
         shopScope.action = #selector(shopScopeChanged)
         shopScope.controlSize = .small
+        shopScope.isBordered = false
+        shopScope.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
+        shopScope.setContentHuggingPriority(.required, for: .horizontal)
+        shopScope.setAccessibilityIdentifier("shopScope")
         shopScope.selectedSegment = shopScopeMine ? 0 : 1
         shopScope.setAccessibilityLabel("Show deals for")
         shopScope.setToolTip("Only the stores whose app or launcher is installed on this Mac", forSegment: 0)
@@ -7820,27 +8147,21 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
         shopScopeBar.setViews([shopScope], in: .leading)
         shopStatusLabel(shopCurrencyNote)
         shopCurrencyNote.setAccessibilityIdentifier("shopCurrencyNote")
-        let header = row([shopTab, NSView(), shopScopeBar, dealsProgress, dealsRefreshButton])
-        header.alignment = .centerY
+        // Store header: one calm search field for every store on top, then the sections, with the store scope and refresh tucked at the right.
+        shopSearchField.setAccessibilityIdentifier("shopSearchField")
+        let nav = row([shopNav, NSView(), shopScopeBar, dealsProgress, dealsRefreshButton])
+        nav.alignment = .centerY
+        nav.spacing = 8
+        let header = column([shopSearchField, nav])
+        header.spacing = 12
+        for view in [shopSearchField, nav] { view.widthAnchor.constraint(equalTo: header.widthAnchor).isActive = true }
         shopScopeHint.isHidden = true
         shopStatusLabel(homeStatus)
         shopList(homeList, id: "shopHomeList")
-        shopList(homeSearchList, id: "shopHomeSearchList")
-        homeSearchList.isHidden = true
-        homeSearchField.placeholderString = "Search every store"
-        homeSearchField.sendsWholeSearchString = true
-        homeSearchField.target = self
-        homeSearchField.action = #selector(homeSearchSubmitted)
-        homeSearchField.setAccessibilityLabel("Search every store")
-        homeSearchField.setAccessibilityIdentifier("homeSearchField")
-        for field in [homeSearchField, shopSearchField] {
-            field.controlSize = .large
-            field.font = .systemFont(ofSize: 15)
-        }
-        NotificationCenter.default.addObserver(self, selector: #selector(shopSearchTyped(_:)), name: NSControl.textDidChangeNotification, object: homeSearchField)
-        configureShopPane(homePane, [homeSearchField, homeSearchList, homeStatus, homeList],
-                          full: [homeSearchField, homeSearchList, homeStatus, homeList])
-        shopSearchField.placeholderString = "Search every store"
+        shopSearchField.controlSize = .large
+        shopSearchField.font = .systemFont(ofSize: 15)
+        configureShopPane(homePane, [homeStatus, homeList], full: [homeStatus, homeList])
+        shopSearchField.placeholderString = "Search games in every store"
         shopSearchField.sendsWholeSearchString = true
         shopSearchField.target = self
         shopSearchField.action = #selector(shopSearchSubmitted)
@@ -7848,11 +8169,16 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
         NotificationCenter.default.addObserver(self, selector: #selector(shopSearchTyped(_:)), name: NSControl.textDidChangeNotification, object: shopSearchField)
         shopStatusLabel(searchStatus)
         shopList(searchList, id: "shopSearchList")
-        configureShopPane(searchPane, [shopSearchField, searchStatus, searchList], full: [shopSearchField, searchStatus, searchList])
+        let searchHeader = sortHeader(searchStatus, searchSortPopup, [.relevance, .name, .priceAsc, .priceDesc, .discount],
+                                      key: searchSortKey, label: "Sort search results")
+        configureShopPane(searchPane, [searchHeader, searchList], full: [searchHeader, searchList])
         shopStatusLabel(wishlistStatus)
         wishlistStatus.setAccessibilityIdentifier("wishlistStatus")
         shopList(wishlistList, id: "wishlistList")
-        configureShopPane(wishlistPane, [wishlistStatus, wishlistList], full: [wishlistStatus, wishlistList])
+        let wishlistHeader = sortHeader(wishlistStatus, wishlistSortPopup, [.relevance, .added, .name, .priceAsc, .priceDesc, .discount],
+                                        key: wishlistSortKey, label: "Sort wishlist")
+        wishlistSortPopup.item(at: 0)?.title = "On Sale First"
+        configureShopPane(wishlistPane, [wishlistHeader, wishlistList], full: [wishlistHeader, wishlistList])
         let attribution = NSTextField(labelWithAttributedString: dealsAttribution())
         attribution.isSelectable = true
         attribution.allowsEditingTextAttributes = true
@@ -7862,7 +8188,7 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
         // Store-style page: one header row, the content, and the small print (scope, rates, sources) at the bottom.
         let page = column([header, dealsReminderBar, homePane, deals, searchPane, wishlistPane, shopScopeHint, shopCurrencyNote, attribution])
         page.spacing = 12
-        page.setCustomSpacing(16, after: header)
+        page.setCustomSpacing(20, after: header)
         for view in [header, shopScopeHint, shopCurrencyNote, homePane, deals, searchPane, wishlistPane, attribution] {
             view.widthAnchor.constraint(equalTo: page.widthAnchor).isActive = true
         }
@@ -7880,23 +8206,33 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
         searchPane.isHidden = tab != 3
         wishlistPane.isHidden = tab != 4
         shopScopeBar.isHidden = tab > 2
+        shopNav.selectedSegment = Self.shopNavTabs.firstIndex(of: tab) ?? -1
+        // The field shows a query only while its results are on screen.
+        if tab != 3 { shopSearchField.stringValue = "" }
+    }
+
+    @objc private func shopNavChanged() {
+        guard Self.shopNavTabs.indices.contains(shopNav.selectedSegment) else { return }
+        selectShopTab(Self.shopNavTabs[shopNav.selectedSegment])
     }
 
     private func openCubeShop() {
         dealsOpened = true
+        shopTab.selectedSegment = 0
         loadRates(refresh: false)
         if wishlistCheckedAt.map({ Date().timeIntervalSince($0) > 600 }) ?? true { checkWishlist(refresh: false) }
         shopTabChanged()
     }
 
     func selectShopTab(_ tab: Int) {
+        if tab != 3 { shopReturnTab = tab }
         shopTab.selectedSegment = tab
         shopTabChanged()
     }
 
     @objc private func shopTabChanged() {
         let tab = shopTab.selectedSegment
-        UserDefaults.standard.set(tab, forKey: shopTabKey)
+        if tab != 3 { shopReturnTab = tab }
         let scroll = shopPageView?.enclosingScrollView
         if let shown = shopShownTab, shown != tab, let scroll { shopScrollOffsets[shown] = scroll.contentView.bounds.origin.y }
         defer {
@@ -8172,6 +8508,7 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
     }
 
     private func renderHome() {
+        schedulePlatformLookup()
         homeList.arrangedSubviews.forEach { $0.removeFromSuperview() }
         guard let home = shopHome else {
             homeStatus.stringValue = homeError ?? (homeLoadingKey == nil ? "" : "Loading\u{2026}")
@@ -8186,12 +8523,13 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
             more.contentTintColor = .controlAccentColor
             more.setAccessibilityIdentifier("shopSeeAll")
             more.setAccessibilityLabel("\(label): \(title)")
+            if let previous = homeList.arrangedSubviews.last { homeList.setCustomSpacing(Self.shopSectionGap, after: previous) }
             addShopRow(sectionHeader(title, trailing: [more], size: Self.shopHeadingSize), to: homeList, separated: false)
             rows.forEach { addShopRow($0, to: homeList) }
         }
-        let hits = (wishlist?.items ?? []).filter { $0.onSale || $0.targetHit }
+        let hits = (wishlist?.items ?? []).filter { $0.onSale || targetReached($0) == true }
         // A few picks per section; "See all" leads to the full list.
-        section("Wishlist deals", hits.prefix(3).map { wishlistRow($0, ratingColumns: true, targetButton: false) }, more: 4, "See all")
+        section("Wishlist deals", hits.prefix(3).map { wishlistRow($0, ratingColumns: true) }, more: 4, "See all")
         section("Featured deals", home.featured.prefix(4).map(storeDealRow), more: 1, "See all")
         section("Price drops", home.drops.prefix(3).map(storeDealRow), more: 1, "See all")
         section("Free now", home.free.prefix(3).map { giveawayRow($0, ratingColumns: true) }, more: 2, "See all")
@@ -8209,33 +8547,27 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
 
     @objc private func shopSeeAll(_ sender: NSButton) { selectShopTab(sender.tag) }
 
-    @objc private func showSearchOverview() { selectShopTab(3) }
-
-    /// Home's search box drives the same search as the Search tab, so the two fields always match.
-    @objc private func homeSearchSubmitted() {
-        shopSearchField.stringValue = homeSearchField.stringValue
-        shopSearchSubmitted()
-    }
-
+    /// The one search field sits above every section; searching shows the results in place of the section, and clearing it goes back.
     @objc private func shopSearchTyped(_ note: Notification? = nil) {
-        if (note?.object as? NSSearchField) === homeSearchField {
-            shopSearchField.stringValue = homeSearchField.stringValue
-        } else {
-            homeSearchField.stringValue = shopSearchField.stringValue
-        }
         searchTimer?.invalidate()
-        searchTimer = Timer.scheduledTimer(withTimeInterval: 0.8, repeats: false) { [weak self] _ in self?.runSearch(refresh: false) }
+        searchTimer = Timer.scheduledTimer(withTimeInterval: 0.8, repeats: false) { [weak self] _ in self?.shopSearchSubmitted() }
     }
 
     @objc private func shopSearchSubmitted() {
-        homeSearchField.stringValue = shopSearchField.stringValue
         searchTimer?.invalidate()
         searchTimer = nil
+        let searching = shopSearchQuery.count >= 2
+        if searching, shopTab.selectedSegment != 3 { selectShopTab(3) }
         runSearch(refresh: false)
+        if !searching, shopTab.selectedSegment == 3 { selectShopTab(shopReturnTab) }
+    }
+
+    private var shopSearchQuery: String {
+        String(shopSearchField.stringValue.split(whereSeparator: \.isWhitespace).joined(separator: " ").prefix(60))
     }
 
     private func runSearch(refresh: Bool) {
-        let query = String(shopSearchField.stringValue.split(whereSeparator: \.isWhitespace).joined(separator: " ").prefix(60))
+        let query = shopSearchQuery
         guard query.count >= 2 else {
             guard searchReply != nil || searchLoadingQuery != nil || searchError != nil else { return }
             searchReply = nil
@@ -8254,7 +8586,6 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
         searchLoadingQuery = query
         setShopLoading("search", true)
         searchStatus.stringValue = "Searching every store for \u{201C}\(query)\u{201D}\u{2026}"
-        renderHomeSearch()
         shopRead(["shop-search", "--query", query, "--country", shopCountry] + (refresh ? ["--refresh"] : [])) { [weak self] code, data, errors in
             guard let self, self.searchLoadingQuery == query else { return }
             self.searchLoadingQuery = nil
@@ -8303,7 +8634,7 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
         return image
     }
 
-    private func offerRow(_ game: String, _ offer: ShopOffer, _ price: ShopPrice, cheapest: Bool, mixed: Bool = false) -> NSView {
+    private func offerRow(_ game: String, _ offer: ShopOffer, _ price: ShopPrice, cheapest: Bool, mixed: Bool = false, steamAppId: String? = nil) -> NSView {
         let appStore = offer.storeId == nil
         var badges: [(symbol: String?, text: String, color: NSColor)] = []
         var tips: [String] = []
@@ -8313,13 +8644,19 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
         // The price shows its own currency; the store row stays one line.
         tips.append("Price in \(offer.currency)")
         if price.converted { tips.append("Price: \(price.spoken)") }
-        let name = NSMutableAttributedString(attributedString: dealBadges(badges))
-        let view = dealRow(artwork: symbolArtwork(appStore ? "apple.logo" : "cart", size: 16), title: offer.store, detail: name,
+        let compat = compatibilityBadge(appStore ? .mac : offer.storeId == "1" ? compatibility(steamAppId: steamAppId) : nil)
+        if let compat { badges.append(compat.badge); tips.append(compat.tip) }
+        // The store itself (logo and short name) sits under the price; the left side keeps only Lowest and the platform.
+        let lowest = cheapest ? dealBadge(lowestMarker(offer, mixed: mixed), color: .systemGreen) : nil
+        lowest?.setAccessibilityIdentifier("shopLowest")
+        let spacer = NSView()
+        spacer.widthAnchor.constraint(equalToConstant: 0).isActive = true
+        let view = dealRow(artwork: spacer, title: "", detail: dealBadges(badges),
                            detailTip: tips.joined(separator: "\n"),
                            trailing: [priceCluster(heart: nil, price: price, was: was?.text, savings: offer.savings, highlight: cheapest,
-                                                   marker: .some(cheapest ? lowestMarker(offer, mixed: mixed) : nil))],
-                           accessibility: "Open \(game) at \(offer.store), \(price.spoken)" + (cheapest ? ", cheapest" : ""),
-                           compact: true, indent: Self.shopChildIndent) { [weak self] in
+                                                   store: offer.store)],
+                           accessibility: "Open \(game) at \(offer.store), \(price.spoken)" + (cheapest ? ", cheapest" : "") + (compat.map { ". " + $0.tip } ?? ""),
+                           compact: true, indent: Self.shopChildIndent, actions: lowest.map { [$0] } ?? []) { [weak self] in
             self?.openShopLink(offer.url, hosts: appStore ? appStoreHosts : cheapSharkHosts)
         }
         view.setAccessibilityIdentifier("shopOffer")
@@ -8338,7 +8675,7 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
         }
         addShopRow(searchGameRow(game, offers: offers, mixed: mixed), to: list, separated: !first)
         for item in offers {
-            let view = offerRow(game.title, item.offer, item.price, cheapest: item.cheapest, mixed: mixed)
+            let view = offerRow(game.title, item.offer, item.price, cheapest: item.cheapest, mixed: mixed, steamAppId: game.steamAppId)
             list.addArrangedSubview(view)
             view.widthAnchor.constraint(equalTo: list.widthAnchor).isActive = true
         }
@@ -8350,17 +8687,20 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
 
     private func searchGameRow(_ game: ShopGame, offers: [(offer: ShopOffer, price: ShopPrice, cheapest: Bool)], mixed: Bool) -> NSView {
         let heart = wishlistHeart(key: "cs:" + game.id, title: game.title,
-                                  payload: ["title": game.title, "game_id": game.id, "steam_app_id": game.steamAppId ?? ""])
+                                  payload: ["title": game.title, "game_id": game.id, "steam_app_id": game.steamAppId ?? "", "thumb": game.thumb ?? ""])
         let best = offers.first { $0.cheapest } ?? offers.first
         // The stores are listed right below, so the game row only says how many.
-        let badges: [(symbol: String?, text: String, color: NSColor)] = [(nil, "\(offers.count) stores", .secondaryLabelColor)]
+        var badges: [(symbol: String?, text: String, color: NSColor)] = [(nil, "\(offers.count) stores", .secondaryLabelColor)]
+        let compat = compatibilityBadge(compatibility(steamAppId: game.steamAppId, appStore: game.appStoreOffer != nil))
+        if let compat { badges.append(compat.badge) }
         let was = best.flatMap { item in item.offer.normalPrice.flatMap { $0 > item.offer.price ? shopPrice($0, item.offer.currency).text : nil } }
         let spoken = best.map { ", lowest price \($0.price.spoken) at \($0.offer.store)" + (($0.offer.savings ?? 0) > 0 ? ", \($0.offer.savings!)% off" : "") } ?? ""
         let view = dealRow(artwork: dealArtwork(game.thumb), title: game.title, detail: dealBadges(badges),
-                           detailTip: best.map { "Lowest price: \($0.price.spoken) at \($0.offer.store)" } ?? "",
-                           trailing: [priceCluster(heart: heart, price: best?.price, was: was, savings: best?.offer.savings, highlight: best != nil,
-                                                   marker: .some(nil))],
-                           accessibility: "Open \(game.title)\(spoken)") { [weak self] in
+                           detailTip: ([best.map { "Lowest price: \($0.price.spoken) at \($0.offer.store)" }, compat?.tip].compactMap { $0 }).joined(separator: "\n"),
+                           trailing: [priceCluster(heart: nil, price: best?.price, was: was, savings: best?.offer.savings, highlight: best != nil,
+                                                   footer: best?.offer.storeId != nil ? insightLabel(game.insight) : nil)],
+                           accessibility: "Open \(game.title)\(spoken)" + (compat.map { ". " + $0.tip } ?? ""),
+                           actions: [shopTargetButton(key: heart.identifier!.rawValue, title: game.title, currency: best?.offer.currency ?? "USD"), heart]) { [weak self] in
             guard let best else { return }
             self?.openShopLink(best.offer.url, hosts: best.offer.storeId == nil ? appStoreHosts : cheapSharkHosts)
         }
@@ -8371,15 +8711,20 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
     private func singleOfferRow(_ game: ShopGame, _ offer: ShopOffer, _ price: ShopPrice) -> NSView {
         let appStore = offer.storeId == nil
         let heart = wishlistHeart(key: "cs:" + game.id, title: game.title,
-                                  payload: ["title": game.title, "game_id": game.id, "steam_app_id": game.steamAppId ?? ""])
-        let badges: [(symbol: String?, text: String, color: NSColor)] = [(appStore ? "apple.logo" : nil, offer.store, .secondaryLabelColor)]
+                                  payload: ["title": game.title, "game_id": game.id, "steam_app_id": game.steamAppId ?? "", "thumb": game.thumb ?? ""])
+        var badges: [(symbol: String?, text: String, color: NSColor)] = []
+        let compat = compatibilityBadge(compatibility(steamAppId: game.steamAppId, appStore: appStore))
+        if let compat { badges.append(compat.badge) }
         let was = offer.normalPrice.flatMap { $0 > offer.price ? shopPrice($0, offer.currency) : nil }
         var spoken = "\(game.title) at \(offer.store), \(price.spoken)"
+        if let compat { spoken += ". " + compat.tip }
         if let was, let savings = offer.savings, savings > 0 { spoken += ", was \(was.spoken), \(savings)% off" }
         let view = dealRow(artwork: dealArtwork(game.thumb), title: game.title, detail: dealBadges(badges),
-                           detailTip: "Only at \(offer.store)" + (price.converted ? "\nPrice: \(price.spoken)" : ""),
-                           trailing: [priceCluster(heart: heart, price: price, was: was?.text, savings: offer.savings, marker: .some(nil))],
-                           accessibility: "Open \(spoken)") { [weak self] in
+                           detailTip: "Only at \(offer.store)" + (price.converted ? "\nPrice: \(price.spoken)" : "") + (compat.map { "\n" + $0.tip } ?? ""),
+                           trailing: [priceCluster(heart: nil, price: price, was: was?.text, savings: offer.savings, store: offer.store,
+                                                   footer: appStore ? nil : insightLabel(game.insight))],
+                           accessibility: "Open \(spoken)",
+                           actions: [shopTargetButton(key: heart.identifier!.rawValue, title: game.title, currency: offer.currency), heart]) { [weak self] in
             self?.openShopLink(offer.url, hosts: appStore ? appStoreHosts : cheapSharkHosts)
         }
         view.setAccessibilityIdentifier("shopSingleOffer")
@@ -8388,12 +8733,15 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
 
     private func appStoreRow(_ app: AppStoreGame) -> NSView {
         let price = shopPrice(app.price, app.currency)
-        let badges: [(symbol: String?, text: String, color: NSColor)] = [("apple.logo", "Mac App Store", .secondaryLabelColor)]
-        let heart = wishlistHeart(key: "app:" + app.id, title: app.title, payload: ["title": app.title, "app_store_id": app.id])
+        var badges: [(symbol: String?, text: String, color: NSColor)] = []
+        let compat = compatibilityBadge(.mac)!
+        badges.append(compat.badge)
+        let heart = wishlistHeart(key: "app:" + app.id, title: app.title, payload: ["title": app.title, "app_store_id": app.id, "thumb": app.thumb ?? ""])
         let view = dealRow(artwork: dealArtwork(app.thumb, fill: false), title: app.title, detail: dealBadges(badges),
                            detailTip: (app.seller.map { "By \($0)\n" } ?? "") + (price.converted ? "Price: \(price.spoken)" : "Mac App Store price in \(app.currency)"),
-                           trailing: [priceCluster(heart: heart, price: price, marker: .some(nil))],
-                           accessibility: "Open \(app.title) in the Mac App Store, \(price.spoken)", compact: true) { [weak self] in
+                           trailing: [priceCluster(heart: nil, price: price, store: "Mac App Store")],
+                           accessibility: "Open \(app.title) in the Mac App Store, \(price.spoken). \(compat.tip)",
+                           actions: [shopTargetButton(key: heart.identifier!.rawValue, title: app.title, currency: app.currency), heart]) { [weak self] in
             self?.openShopLink(app.url, hosts: appStoreHosts)
         }
         view.setAccessibilityIdentifier("shopAppStoreRow")
@@ -8401,49 +8749,96 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
     }
 
     /// Home's search section: the best few results in the shared row style, with a link to the full comparison.
-    private func renderHomeSearch() {
-        homeSearchList.arrangedSubviews.forEach { $0.removeFromSuperview() }
-        func note(_ text: String) {
-            let label = NSTextField(wrappingLabelWithString: text)
-            shopStatusLabel(label)
-            label.setAccessibilityIdentifier("homeSearchStatus")
-            addShopRow(label, to: homeSearchList, separated: false)
+    /// A status line with a compact "Sort by" popup at its trailing edge; the choice is remembered per list.
+    private func sortHeader(_ status: NSTextField, _ popup: NSPopUpButton, _ options: [ShopSort], key: String, label: String) -> NSStackView {
+        popup.removeAllItems()
+        for option in options {
+            popup.addItem(withTitle: option.title)
+            popup.lastItem?.representedObject = option.rawValue
         }
-        if let query = searchLoadingQuery {
-            note("Searching every store for \u{201C}\(query)\u{201D}\u{2026}")
-        } else if let reply = searchReply {
-            let found = reply.games.count + reply.appStore.apps.count
-            let all = NSButton(title: "Compare all prices \u{203A}", target: self, action: #selector(showSearchOverview))
-            all.bezelStyle = .inline
-            all.isBordered = false
-            all.contentTintColor = .controlAccentColor
-            all.setAccessibilityIdentifier("homeSearchAll")
-            all.setAccessibilityLabel("Compare every store's price for \u{201C}\(reply.query)\u{201D}")
-            addShopRow(sectionHeader("Results for \u{201C}\(reply.query)\u{201D}", trailing: found > 0 ? [all] : [], size: Self.shopHeadingSize),
-                       to: homeSearchList, separated: false)
-            for (index, game) in reply.games.prefix(4).enumerated() { addSearchGroup(game, to: homeSearchList, first: index == 0) }
-            for app in reply.appStore.apps.prefix(2) { addShopRow(appStoreRow(app), to: homeSearchList) }
-            if found == 0 { note("No PC store or Mac App Store games match \u{201C}\(reply.query)\u{201D}.") }
-            else if found > 6 { note("\(found - min(reply.games.count, 4) - min(reply.appStore.apps.count, 2)) more in Search.") }
-        } else if let searchError {
-            note(searchError)
+        let saved = UserDefaults.standard.string(forKey: key)
+        popup.selectItem(at: options.firstIndex { $0.rawValue == saved } ?? 0)
+        popup.controlSize = .small
+        popup.target = self
+        popup.action = #selector(shopSortChanged(_:))
+        popup.setAccessibilityLabel(label)
+        popup.setAccessibilityIdentifier("shopSortPopup")
+        popup.toolTip = "Sort by"
+        popup.setContentHuggingPriority(.required, for: .horizontal)
+        popup.setContentCompressionResistancePriority(.required, for: .horizontal)
+        status.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        status.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        let header = NSStackView(views: [status, popup])
+        header.orientation = .horizontal
+        header.alignment = .firstBaseline
+        header.spacing = 8
+        return header
+    }
+
+    private func selectedSort(_ popup: NSPopUpButton) -> ShopSort {
+        (popup.selectedItem?.representedObject as? String).flatMap(ShopSort.init(rawValue:)) ?? .relevance
+    }
+
+    @objc private func shopSortChanged(_ sender: NSPopUpButton) {
+        let sort = selectedSort(sender).rawValue
+        if sender === searchSortPopup { UserDefaults.standard.set(sort, forKey: searchSortKey); renderSearch() }
+        if sender === wishlistSortPopup { UserDefaults.standard.set(sort, forKey: wishlistSortKey); renderWishlist() }
+    }
+
+    /// Converts into the Shop currency for sorting (unrounded); nil with Original prices, so prices group by currency.
+    func sortConvert(_ price: Double, _ currency: String) -> Double? {
+        guard let target = shopCurrency else { return nil }
+        if currency == target { return price }
+        return ShopMoney.convert(ShopMoney.decimal(price), from: currency, to: target, rates: exchangeRates,
+                                 feePercent: shopFeePercent, round: false).map { NSDecimalNumber(decimal: $0).doubleValue }
+    }
+
+    /// A search game sorts by its cheapest store (converted when a Shop currency is set) and its biggest discount.
+    func searchSortFields(_ game: ShopGame) -> ShopSortFields {
+        let offers = game.offers + (game.appStoreOffer.map { [$0.offer] } ?? [])
+        let cheapest = offers.min { a, b in
+            let x = sortConvert(a.price, a.currency), y = sortConvert(b.price, b.currency)
+            if let x, let y { return x < y }
+            if x != nil || y != nil { return x != nil }
+            return a.currency == b.currency ? a.price < b.price : a.currency == (offers.first?.currency ?? "USD")
         }
-        homeSearchList.isHidden = homeSearchList.arrangedSubviews.isEmpty
+        return ShopSortFields(title: game.title, price: cheapest?.price, currency: cheapest?.currency,
+                              discount: offers.compactMap(\.savings).max().map(Double.init))
+    }
+
+    func wishlistSortFields(_ item: WishlistItem) -> ShopSortFields {
+        ShopSortFields(title: item.title, price: item.best?.price, currency: item.best?.currency,
+                       discount: item.best.map { Double($0.savings) }, added: item.added)
+    }
+
+    func sortedGiveaways() -> [Giveaway] {
+        let sort: ShopSort = (giveawaySortPopup.selectedItem?.representedObject as? String).flatMap {
+            ["ends": ShopSort.endsSoon, "name": .name][$0] } ?? .relevance
+        return shopSorted(giveaways, by: sort) { giveaway in
+            ShopSortFields(title: giveaway.title, ends: DealExpiry.parseGamerPowerEnd(giveaway.endDate)?.timeIntervalSince1970)
+        }
     }
 
     private func renderSearch() {
-        renderHomeSearch()
+        schedulePlatformLookup()
         searchList.arrangedSubviews.forEach { $0.removeFromSuperview() }
         guard let reply = searchReply else {
             searchStatus.stringValue = searchError ?? (searchLoadingQuery != nil ? searchStatus.stringValue :
                 "Search every PC store and the Mac App Store at once.")
             return
         }
-        for (index, game) in reply.games.enumerated() { addSearchGroup(game, to: searchList, first: index == 0) }
+        let sort = selectedSort(searchSortPopup)
+        let games = shopSorted(reply.games, by: sort, convert: sortConvert, fields: searchSortFields)
+        for (index, game) in games.enumerated() { addSearchGroup(game, to: searchList, first: index == 0) }
         if !reply.appStore.apps.isEmpty {
             let currency = reply.appStore.currency ?? reply.appStore.apps[0].currency
-            addShopRow(sectionHeader("Mac App Store \u{00B7} prices in \(currency)", size: 15), to: searchList, separated: false)
-            for app in reply.appStore.apps { addShopRow(appStoreRow(app), to: searchList) }
+            let heading = sectionHeader("Mac App Store", size: 15)
+            heading.toolTip = "Mac App Store prices for your region, in \(currency)"
+            addShopRow(heading, to: searchList, separated: false)
+            let apps = shopSorted(reply.appStore.apps, by: sort, convert: sortConvert) {
+                ShopSortFields(title: $0.title, price: $0.price, currency: $0.currency)
+            }
+            for app in apps { addShopRow(appStoreRow(app), to: searchList) }
         }
         let found = reply.games.count + reply.appStore.apps.count
         var line = found == 0 ? "No PC store or Mac App Store games match \u{201C}\(reply.query)\u{201D}." :
@@ -8456,6 +8851,82 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
 
     private func wishlistItem(key: String, title: String) -> WishlistItem? {
         wishlist?.items.first { $0.key == key || $0.title.caseInsensitiveCompare(title) == .orderedSame }
+    }
+
+    // MARK: Mac / Windows compatibility
+
+    /// Mac App Store games are Mac apps; otherwise only Steam's platform flags count. PC stores alone prove nothing.
+    func compatibility(steamAppId: String?, appStore: Bool = false) -> GameCompatibility? {
+        if appStore { return .mac }
+        switch steamAppId.flatMap({ steamPlatformStatus[$0] }) {
+        case "mac": return .mac
+        case "windows": return .windowsOnly
+        default: return nil
+        }
+    }
+
+    /// Installed apps that run Windows games (nil until the app list has been read).
+    private var compatibilityLayers: [String]? {
+        guard lastAppsData != nil else { return nil }
+        return ["crossover", "porting-kit", "steamac"].compactMap { id in appStates.first { $0.id == id && $0.installed }?.name }
+    }
+
+    /// A compact badge (logo + short label) and the full explanation for tooltips and VoiceOver.
+    /// System yellow is too pale for small text on a light background, so light mode uses a deeper amber.
+    static let windowsYellow = NSColor(name: nil) { appearance in
+        appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua ? .systemYellow : NSColor(srgbRed: 0.72, green: 0.53, blue: 0, alpha: 1)
+    }
+
+    func compatibilityBadge(_ value: GameCompatibility?) -> (badge: (symbol: String?, text: String, color: NSColor), tip: String)? {
+        switch value {
+        case .mac?:
+            return (("apple.logo", "Mac", .systemGreen), "Mac: has a macOS version")
+        case .windowsOnly?:
+            let layers = compatibilityLayers
+            let base = "Windows only: no macOS version on Steam. It needs a Windows compatibility app to run on a Mac, and may not work in every one"
+            // Same compact badge as Mac; the compatibility-app note lives in the tooltip and VoiceOver only.
+            let badge: (symbol: String?, text: String, color: NSColor) = ("square.grid.2x2.fill", "Windows", Self.windowsYellow)
+            if let layers, !layers.isEmpty {
+                return (badge, base + ". Installed here: \(layers.joined(separator: ", ")).")
+            }
+            return (badge, base + (layers == nil ? " (for example CrossOver)." : ". None is installed on this Mac yet (for example CrossOver)."))
+        case nil:
+            return nil
+        }
+    }
+
+    private func schedulePlatformLookup() {
+        guard !platformLookupScheduled else { return }
+        platformLookupScheduled = true
+        // A run-loop timer (not the main queue) so it also fires while a modal or nested run loop is spinning.
+        Timer.scheduledTimer(withTimeInterval: 0.2, repeats: false) { [weak self] _ in
+            self?.platformLookupScheduled = false
+            self?.lookUpPlatforms()
+        }
+    }
+
+    private func lookUpPlatforms() {
+        var ids = storeDeals.compactMap(\.steamAppId) + (shopHome.map { ($0.featured + $0.drops).compactMap(\.steamAppId) } ?? [])
+        ids += (searchReply?.games ?? []).compactMap(\.steamAppId) + (wishlist?.items ?? []).compactMap(\.steamAppId)
+        var seen = Set<String>()
+        let wanted = ids.filter { !platformsRequested.contains($0) && seen.insert($0).inserted }.prefix(40)
+        guard !wanted.isEmpty, platformLookupRounds < 20 else { return }
+        platformLookupRounds += 1
+        platformsRequested.formUnion(wanted)
+        shopRead(["shop-platforms", "--steam", wanted.joined(separator: ",")]) { [weak self] code, data, _ in
+            guard let self, code == 0, let reply = decodeDeals(PlatformsReply.self, data) else { return }
+            var changed = false
+            for (id, platforms) in reply.platforms {
+                let status = platforms.status ?? "unknown"
+                if self.steamPlatformStatus[id] != status { self.steamPlatformStatus[id] = status; changed = changed || status != "unknown" }
+            }
+            // Not looked up yet (Steam asks for a slow pace): try again on the next render, a little later.
+            self.platformsRequested.subtract(reply.pending)
+            if changed { self.rerenderShop() }
+            if !reply.pending.isEmpty && reply.error == nil {
+                Timer.scheduledTimer(withTimeInterval: 3, repeats: false) { [weak self] _ in self?.schedulePlatformLookup() }
+            }
+        }
     }
 
     private var wishlistEditable: Bool { wishlist.map { !$0.readOnly && !$0.offline } ?? false }
@@ -8488,7 +8959,62 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
     private func refreshHearts() {
         func views(_ root: NSView) -> [NSView] { [root] + root.subviews.flatMap(views) }
         guard let page = shopPageView else { return }
-        for heart in views(page).compactMap({ $0 as? NSButton }) where heart.accessibilityIdentifier() == "wishlistHeart" { configureHeart(heart) }
+        for button in views(page).compactMap({ $0 as? NSButton }) {
+            if button.accessibilityIdentifier() == "wishlistHeart" { configureHeart(button) }
+            if button.accessibilityIdentifier() == "shopTarget" { configureShopTarget(button) }
+        }
+    }
+
+    /// "Set Target…" on a store row: works whether or not the game is on the wishlist yet (setting one adds it).
+    private func shopTargetButton(key: String, title: String, currency: String) -> NSButton {
+        let button = RowControlButton(title: "", target: self, action: #selector(shopTargetClicked(_:)))
+        // Not the wishlist key itself, which identifies the heart.
+        button.identifier = NSUserInterfaceItemIdentifier("target:" + key)
+        button.controlSize = .small
+        button.bezelStyle = .inline
+        button.setAccessibilityIdentifier("shopTarget")
+        shopTargetCurrencies[key] = currency
+        configureShopTarget(button)
+        return button
+    }
+
+    private func shopTargetCode(key: String, title: String) -> String {
+        wishlistItem(key: key, title: title).map(targetCurrency(for:)) ?? shopCurrency ?? shopTargetCurrencies[key] ?? "USD"
+    }
+
+    private func configureShopTarget(_ button: NSButton) {
+        guard let key = button.identifier?.rawValue.replacingOccurrences(of: "target:", with: ""), let entry = wishlistPayloads[key] else { return }
+        let item = wishlistItem(key: key, title: entry.title)
+        let code = shopTargetCode(key: key, title: entry.title)
+        button.title = item?.targetPrice.map { "Target " + ShopMoney.format(ShopMoney.decimal($0), item?.targetCurrency ?? code) } ?? "Set Target\u{2026}"
+        button.isEnabled = true
+        button.toolTip = !wishlistEditable ? (wishlist?.note ?? "Connect your Couch Cube drive to change the wishlist. It's saved on the drive.")
+            : item == nil ? "Set a target price in \(code). This also adds the game to your wishlist." : "Change the target price (\(code))"
+        button.setAccessibilityLabel("Set a target price in \(code) for \(entry.title)")
+    }
+
+    @objc private func shopTargetClicked(_ sender: NSButton) {
+        guard let key = sender.identifier?.rawValue.replacingOccurrences(of: "target:", with: ""), let entry = wishlistPayloads[key] else { return }
+        guard wishlistEditable else {
+            showReminderNote(wishlist == nil ? "The wishlist is still loading. Try again in a moment."
+                             : wishlist?.note ?? "Connect your Couch Cube drive to change the wishlist. It's saved on the drive.")
+            return
+        }
+        if let item = wishlistItem(key: key, title: entry.title) { promptTarget(item); return }
+        let code = shopTargetCode(key: key, title: entry.title)
+        guard let choice = askTargetPrice(entry.title, nil, code), let price = choice,
+              let json = try? JSONSerialization.data(withJSONObject: entry.payload, options: [.sortedKeys]) else { return }
+        shopRead(["wishlist", "--add", String(decoding: json, as: UTF8.self)]) { [weak self] code_, data, errors in
+            guard let self else { return }
+            guard code_ == 0, let reply = decodeDeals(WishlistReply.self, data) else {
+                self.showReminderNote(self.dealsErrorText(String(decoding: data, as: UTF8.self) + errors), error: true)
+                return
+            }
+            self.applyWishlist(reply)
+            // The backend may file it under another key (e.g. by title), so look the new item up again.
+            guard let item = self.wishlistItem(key: key, title: entry.title) else { return }
+            self.changeWishlist(["--target", item.key, "--price", String(format: "%.\(ShopMoney.minorUnits(code))f", price), "--currency", code])
+        }
     }
 
     @objc private func wishlistHeartClicked(_ sender: NSButton) {
@@ -8547,13 +9073,13 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
     private func wishlistRow(_ item: WishlistItem, ratingColumns: Bool = false, targetButton: Bool = true) -> NSView {
         var badges: [(symbol: String?, text: String, color: NSColor)] = []
         var tips: [String] = []
-        if let sale = item.saleText { badges.append(("tag.fill", sale, .systemGreen)); tips.append(sale) }
+        // The sale (green tag, store, discount) shows under the price like every other row; the sentence stays in the tooltip.
+        if let sale = item.saleText { tips.append(sale) }
         var trailing: [NSView] = []
         var bestPrice: ShopPrice?
         if let best = item.best {
             let price = shopPrice(best.price, best.currency)
             bestPrice = price
-            if let store = best.store, item.saleText == nil { badges.append((nil, "Best at \(store)", .secondaryLabelColor)) }
             tips.append("Best price: \(price.spoken)" + (best.store.map { " at \($0)" } ?? ""))
             if let checked = best.checked {
                 let formatter = RelativeDateTimeFormatter()
@@ -8562,19 +9088,36 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
             }
         }
         if let target = item.targetPrice {
-            let price = shopPrice(target, "USD")
-            badges.append((item.targetHit ? "target" : nil, (item.targetHit ? "Target reached: " : "Target ") + price.text,
-                           item.targetHit ? .systemOrange : .secondaryLabelColor))
-            tips.append("Target price: \(price.spoken)")
+            // The target stays in the currency it was entered in; the best price is converted to it for the comparison.
+            let code = item.targetCurrency ?? "USD"
+            let amount = ShopMoney.format(ShopMoney.decimal(target), code)
+            switch targetReached(item) {
+            case true?:
+                badges.append(("target", "Target reached: " + amount, .systemOrange))
+                tips.append("Target price \(amount) reached")
+            case false?:
+                badges.append((nil, "Target " + amount, .secondaryLabelColor))
+                tips.append("Target price: \(amount)")
+            case nil:
+                badges.append((nil, "Target " + amount, .secondaryLabelColor))
+                tips.append(item.best == nil ? "Target price: \(amount). No current price yet."
+                            : "Target price: \(amount). Can't compare with \(item.best!.currency) prices until exchange rates load.")
+            }
         }
         if badges.isEmpty { badges.append((nil, item.best == nil ? "No price checked yet" : "Not on sale", .secondaryLabelColor)) }
+        if let compat = compatibilityBadge(compatibility(steamAppId: item.steamAppId, appStore: item.appStoreId != nil)) {
+            badges.append(compat.badge)
+            tips.append(compat.tip)
+        }
+        let targetCode = targetCurrency(for: item)
         let target = RowControlButton(title: item.targetPrice == nil ? "Set Target\u{2026}" : "Target\u{2026}", target: self, action: #selector(wishlistTargetClicked(_:)))
+        target.toolTip = "Set a target price in \(targetCode)"
         target.identifier = NSUserInterfaceItemIdentifier(item.key)
         target.controlSize = .small
         target.bezelStyle = .inline
         target.isEnabled = wishlistEditable
         target.setAccessibilityIdentifier("wishlistTarget")
-        target.setAccessibilityLabel("Set a target price for \(item.title)")
+        target.setAccessibilityLabel("Set a target price in \(targetCode) for \(item.title)")
         let remove = RowControlButton(title: "", target: self, action: #selector(wishlistRemoveClicked(_:)))
         remove.identifier = NSUserInterfaceItemIdentifier(item.key)
         remove.image = NSImage(systemSymbolName: "heart.fill", accessibilityDescription: nil)
@@ -8587,14 +9130,16 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
         remove.setAccessibilityLabel("Remove \(item.title) from wishlist")
         remove.widthAnchor.constraint(equalToConstant: Self.shopHeartWidth).isActive = true
         let was = item.best.flatMap { best in best.normalPrice.flatMap { $0 > best.price ? shopPrice($0, best.currency).text : nil } }
-        // Home's summary leaves the title room; targets are set on the Wishlist tab.
-        if targetButton { trailing.append(target) }
-        trailing += [priceCluster(heart: remove, price: bestPrice, priceText: bestPrice == nil ? "\u{2014}" : nil, was: was,
-                                          savings: item.onSale ? item.best?.savings : nil, highlight: item.onSale,
-                                          ratings: ratingColumns ? ShopRatings.none : nil)]
-        let view = dealRow(artwork: symbolArtwork(item.appStoreId != nil ? "apple.logo" : "gamecontroller", size: 28, width: Self.shopArtworkSize.width), title: item.title,
+        trailing += [priceCluster(heart: nil, price: bestPrice, priceText: bestPrice == nil ? "\u{2014}" : nil, was: was,
+                                  savings: item.onSale ? item.best?.savings : nil, highlight: item.onSale,
+                                  ratings: ratingColumns ? ShopRatings.none : nil, store: item.best?.store, footer: insightLabel(item.insight))]
+        let art: NSView = safeDealURL(item.thumb ?? "") == nil
+            ? symbolArtwork(item.appStoreId != nil ? "apple.logo" : "gamecontroller", size: 28, width: Self.shopArtworkSize.width)
+            : dealArtwork(item.thumb, fill: item.appStoreId == nil)
+        let view = dealRow(artwork: art, title: item.title,
                            detail: dealBadges(badges), detailTip: tips.joined(separator: "\n"), trailing: trailing,
-                           accessibility: "Search every store for \(item.title). " + tips.joined(separator: ". ")) { [weak self] in
+                           accessibility: "Search every store for \(item.title). " + tips.joined(separator: ". "),
+                           actions: (targetButton ? [target] : []) + [remove]) { [weak self] in
             self?.searchFor(item.title)
         }
         view.setAccessibilityIdentifier("wishlistRow")
@@ -8611,22 +9156,24 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
     }
 
     private func renderWishlist() {
+        schedulePlatformLookup()
         wishlistList.arrangedSubviews.forEach { $0.removeFromSuperview() }
         guard let wishlist else {
             wishlistStatus.stringValue = wishlistLoading ? "Loading your wishlist\u{2026}" : ""
             return
         }
-        let items = wishlist.items.sorted { a, b in
-            (a.onSale || a.targetHit) != (b.onSale || b.targetHit) ? (a.onSale || a.targetHit)
-                : a.title.localizedCaseInsensitiveCompare(b.title) == .orderedAscending
+        func hit(_ item: WishlistItem) -> Bool { item.onSale || targetReached(item) == true }
+        let byDefault = wishlist.items.sorted { a, b in
+            hit(a) != hit(b) ? hit(a) : a.title.localizedCaseInsensitiveCompare(b.title) == .orderedAscending
         }
+        let items = shopSorted(byDefault, by: selectedSort(wishlistSortPopup), convert: sortConvert, fields: wishlistSortFields)
         items.forEach { addShopRow(wishlistRow($0), to: wishlistList) }
         var lines: [String] = []
         if let note = wishlist.note, note != Self.localWishlistNote { lines.append(note) }
         if items.isEmpty {
             lines.append("Your wishlist is empty. Click \u{2661} on any deal, free game or search result to add it.")
         } else {
-            let hits = items.filter { $0.onSale || $0.targetHit }.count
+            let hits = items.filter(hit).count
             lines.append("\(items.count) game\(items.count == 1 ? "" : "s")" + (hits > 0 ? " \u{00B7} \(hits) on sale" : ""))
         }
         // Where it's saved goes in the tooltip; the status line stays short.
@@ -8636,10 +9183,33 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
         wishlistStatus.stringValue = lines.joined(separator: " ")
     }
 
+    /// Targets are entered in the Shop currency (e.g. HUF); with Original prices, in the currency already used or the game's own.
+    private func targetCurrency(for item: WishlistItem) -> String {
+        shopCurrency ?? item.targetCurrency ?? item.best?.currency ?? "USD"
+    }
+
+    /// Whether the best price is at or below the target: the price is converted into the target's currency (with the card
+    /// fee, unrounded, so a fraction above never counts). nil when there is no price yet or no exchange rate to compare with.
+    func targetReached(_ item: WishlistItem) -> Bool? {
+        guard let target = item.targetPrice, let best = item.best else { return nil }
+        let code = item.targetCurrency ?? "USD"
+        let price = ShopMoney.decimal(best.price)
+        let converted = best.currency == code ? price
+            : ShopMoney.convert(price, from: best.currency, to: code, rates: exchangeRates, feePercent: shopFeePercent, round: false)
+        return converted.map { $0 <= ShopMoney.decimal(target) }
+    }
+
     @objc private func wishlistTargetClicked(_ sender: NSButton) {
-        guard let key = sender.identifier?.rawValue, let item = wishlist?.items.first(where: { $0.key == key }), wishlistEditable,
-              let choice = askTargetPrice(item.title, item.targetPrice) else { return }
-        changeWishlist(["--target", key] + (choice.map { ["--price", String(format: "%.2f", $0)] } ?? []))
+        guard let key = sender.identifier?.rawValue, let item = wishlist?.items.first(where: { $0.key == key }), wishlistEditable else { return }
+        promptTarget(item)
+    }
+
+    private func promptTarget(_ item: WishlistItem) {
+        let key = item.key
+        let code = targetCurrency(for: item)
+        guard let choice = askTargetPrice(item.title, item.targetCurrency == code ? item.targetPrice : nil, code) else { return }
+        let places = ShopMoney.minorUnits(code)
+        changeWishlist(["--target", key] + (choice.map { ["--price", String(format: "%.\(places)f", $0), "--currency", code] } ?? []))
     }
 
     @objc private func wishlistRemoveClicked(_ sender: NSButton) {
@@ -8659,6 +9229,14 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
         switch arguments.first {
         case "rates": return (0, smokeRatesJSON)
         case "shop-search": return (0, smokeShopSearchJSON)
+        case "shop-platforms":
+            // Portal 2 and Hollow Knight have Mac builds; Drop Game is Windows only; anything else is unknown.
+            let known: [String: [String: Any]] = ["620": ["mac": true, "windows": true, "status": "mac"],
+                                                  "367520": ["mac": true, "windows": true, "status": "mac"],
+                                                  "700": ["mac": false, "windows": true, "status": "windows"]]
+            let ids = (value("--steam") ?? "").split(separator: ",").map(String.init)
+            return (0, json(["platforms": Dictionary(uniqueKeysWithValues: ids.map { ($0, known[$0] ?? ["status": NSNull()]) }),
+                             "pending": [String](), "error": NSNull()]))
         case "shop-home":
             var home = try! JSONSerialization.jsonObject(with: Data(smokeShopHomeJSON.utf8)) as! [String: Any]
             home["wishlist"] = report()
@@ -8671,12 +9249,15 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
                 let key = item["game_id"].map { "cs:" + $0 } ?? item["app_store_id"].map { "app:" + $0 } ?? "title:" + (item["title"] ?? "").lowercased()
                 smokeWishlist.append(["key": key, "title": item["title"] ?? "", "game_id": item["game_id"] ?? NSNull(),
                                       "steam_app_id": item["steam_app_id"] ?? NSNull(), "app_store_id": item["app_store_id"] ?? NSNull(),
-                                      "added": 1_700_000_000, "target_price": NSNull(), "best": NSNull(), "on_sale": false,
+                                      "added": 1_700_000_000, "target_price": NSNull(), "target_currency": NSNull(),
+                                      "thumb": item["thumb"] ?? NSNull(), "best": NSNull(), "on_sale": false,
                                       "target_hit": false, "sale_text": NSNull()])
             } else if let key = value("--remove") {
                 smokeWishlist.removeAll { $0["key"] as? String == key }
             } else if let key = value("--target"), let index = smokeWishlist.firstIndex(where: { $0["key"] as? String == key }) {
-                smokeWishlist[index]["target_price"] = value("--price").flatMap(Double.init) ?? NSNull()
+                let price = value("--price").flatMap(Double.init)
+                smokeWishlist[index]["target_price"] = price ?? NSNull()
+                smokeWishlist[index]["target_currency"] = price == nil ? NSNull() : (value("--currency") ?? "USD")
             }
             return (0, json(report()))
         default: return (1, "ERROR: unknown command")
@@ -9712,6 +10293,16 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
         return true
     }
 
+    static let appUpdatedMessage = "Couch Cube was updated while it was open. Please quit and reopen Couch Cube."
+
+    /// A rebuilt or replaced app can leave this running copy without its backend files; say so instead of showing Python's error.
+    func friendlyBackendError(_ text: String) -> String {
+        let runtime = Bundle.main.resourceURL!.appendingPathComponent("python/bin/python3").path
+        let missing = !FileManager.default.fileExists(atPath: backend.path) || !FileManager.default.fileExists(atPath: runtime)
+        let pythonCannotOpen = text.contains("can't open file") && text.contains("/Contents/Resources/scripts/")
+        return missing || pythonCannotOpen ? Self.appUpdatedMessage : text
+    }
+
     /// A background backend run that reports stdout line by line and can be canceled with terminate().
     private func runBackendStreaming(_ arguments: [String], line: @escaping (String) -> Void,
                                      completed: @escaping (Int32, String) -> Void) -> Process {
@@ -9730,7 +10321,7 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
         process.standardInput = FileHandle.nullDevice
         DispatchQueue.global(qos: .utility).async {
             do { try process.run() } catch {
-                DispatchQueue.main.async { completed(1, "ERROR: Cannot start bundled runtime: \(error.localizedDescription)") }
+                DispatchQueue.main.async { completed(1, self.friendlyBackendError("ERROR: Cannot start bundled runtime: \(error.localizedDescription)")) }
                 return
             }
             var errorData = Data()
@@ -9751,7 +10342,8 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
             process.waitUntilExit()
             group.wait()
             let code = process.terminationStatus
-            DispatchQueue.main.async { completed(code, String(decoding: errorData, as: UTF8.self)) }
+            let text = String(decoding: errorData, as: UTF8.self)
+            DispatchQueue.main.async { completed(code, code == 0 ? text : self.friendlyBackendError(text)) }
         }
         return process
     }
@@ -9772,7 +10364,7 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
         process.standardInput = FileHandle.nullDevice
         DispatchQueue.global(qos: .userInitiated).async {
             do { try process.run() } catch {
-                DispatchQueue.main.async { completed(1, Data(), "Cannot start bundled runtime: \(error.localizedDescription)") }
+                DispatchQueue.main.async { completed(1, Data(), self.friendlyBackendError("Cannot start bundled runtime: \(error.localizedDescription)")) }
                 return
             }
             var errorData = Data()
@@ -9783,7 +10375,8 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
             process.waitUntilExit()
             group.wait()
             let code = process.terminationStatus
-            DispatchQueue.main.async { completed(code, data, String(decoding: errorData, as: UTF8.self)) }
+            let text = String(decoding: errorData, as: UTF8.self)
+            DispatchQueue.main.async { completed(code, data, code == 0 ? text : self.friendlyBackendError(text)) }
         }
     }
 
@@ -10467,7 +11060,7 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
         } catch {
             task = nil
             if !readOnly { busy(false) }
-            lastError = "Cannot start bundled runtime: \(error.localizedDescription)"
+            lastError = friendlyBackendError("Cannot start bundled runtime: \(error.localizedDescription)")
             append(lastError + "\n")
             status.stringValue = lastError
             activityNeeded(lastError)
@@ -10506,6 +11099,10 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
             DispatchQueue.main.async {
                 self.task = nil
                 if !readOnly { self.busy(false) }
+                if process.terminationStatus != 0 {
+                    let friendly = self.friendlyBackendError(self.lastError)
+                    if friendly != self.lastError { self.lastError = friendly; self.append(friendly + "\n"); self.status.stringValue = friendly }
+                }
                 if process.terminationStatus != 0 && !capture { self.activityNeeded(self.lastError.isEmpty ? "The operation didn't finish." : self.lastError) }
                 completed(process.terminationStatus, result)
                 if self.consoleRefreshPending && self.task == nil && !self.smokeFinishing {
@@ -12996,6 +13593,16 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
         let defaults = UserDefaults.standard
         let shopKeys = [shopTabKey, shopScopeKey, shopCurrencyKey, shopFeeKey]
         let savedShop = shopKeys.map { defaults.object(forKey: $0) }
+        // Cube Shop always opens on Home, even after another tab was used; other tabs keep their state.
+        precondition(shopTab.selectedSegment == 0 && !homePane.isHidden, "Cube Shop opens on Home")
+        selectShopTab(4)
+        selectPage(0)
+        selectPage(13)
+        precondition(shopTab.selectedSegment == 0 && !homePane.isHidden && wishlistPane.isHidden && shopNav.selectedSegment == 0,
+                     "Reopening Cube Shop starts on Home again")
+        selectShopTab(4)
+        precondition(!wishlistPane.isHidden && shopNav.selectedSegment == 3)
+        selectShopTab(0)
         defaults.set("original", forKey: shopCurrencyKey)
         defaults.removeObject(forKey: shopFeeKey)
         rerenderShop()
@@ -13022,16 +13629,19 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
         selectShopTab(1)
         RunLoop.current.run(until: Date().addingTimeInterval(0.05))
         precondition(storeDeals.count == 4 && dealsStorePopup.numberOfItems == 3, "Store deals and store filter must render")
-        precondition(dealsFilters.arrangedSubviews.contains(dealsSearch) && dealsFilters.arrangedSubviews.contains(dealsSortPopup))
+        precondition(!dealsFilters.arrangedSubviews.contains(dealsSearch) && dealsSearch.superview == nil && dealsFilters.arrangedSubviews.contains(dealsStatus) && dealsFilters.arrangedSubviews.contains(dealsSortPopup) && dealsStorePopup.itemTitles.first == "Any Store", "Deals: status, store and Sort by on one line; no second search field")
         var text = labels(page)
-        precondition(text.contains("Portal 2") && text.contains("$1.99") && text.contains("$9.99") && text.contains("\u{2212}80%"))
+        precondition(text.contains("Portal 2") && text.contains("$1.99") && text.contains("$9.99") && text.contains { $0.hasSuffix("\u{2212}80%") })
         precondition(labels(dealsList).filter { $0.contains("Installed") }.count == 1, "Only the Steam-appID-matched deal is marked Installed")
         precondition(!dealsMore.isHidden, "More pages must offer Load More")
         let opens = views(dealsList).compactMap { $0 as? ClickableRowView }
         precondition(opens.count == 4, "Every deal row is one clickable row")
         precondition(opens.allSatisfy { $0.accessibilityRole() == .link && ($0.accessibilityLabel() ?? "").hasPrefix("Open ") })
-        precondition(views(dealsList).compactMap { $0 as? NSButton }.allSatisfy { $0.accessibilityIdentifier() == "wishlistHeart" },
-                     "Deal rows have no trailing buttons except the wishlist heart")
+        precondition(views(dealsList).compactMap { $0 as? NSButton }.allSatisfy { ["wishlistHeart", "shopTarget"].contains($0.accessibilityIdentifier()) },
+                     "Deal rows have no buttons except Set Target and the wishlist heart")
+        precondition(views(dealsList).filter { $0.accessibilityIdentifier() == "shopTarget" }.count == 4
+                     && views(dealsList).filter { $0.accessibilityIdentifier() == "shopStoreTag" }.count == 4,
+                     "Every deal row has Set Target and its store under the price")
         opens.forEach { $0.activate() }
         precondition(opened.map(\.absoluteString) == ["abc", "lng", "mc"].map { "https://www.cheapshark.com/redirect?dealID=" + $0 },
                      "Off-host deal links must never open")
@@ -13140,9 +13750,10 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
         precondition(shopScope.isEnabled(forSegment: 0) && shopScopeHint.stringValue.contains("Steam"))
         // Home: wishlist hits, featured deals, price drops and free games, for the saved scope.
         smokeWishlist = [["key": "cs:612", "title": "Portal 2", "game_id": "612", "steam_app_id": "620", "app_store_id": NSNull(),
-                          "added": 1_700_000_000, "target_price": 2.5,
+                          "added": 1_700_000_000, "target_price": 2.5, "thumb": "https://cdn.example.com/portal2.jpg",
                           "best": ["price": 1.99, "normal_price": 9.99, "savings": 80, "store": "Steam", "currency": "USD", "checked": 1_700_000_000],
-                          "on_sale": true, "target_hit": true, "sale_text": "On sale at Steam \u{2212}80%"]]
+                          "on_sale": true, "target_hit": true, "sale_text": "On sale at Steam \u{2212}80%",
+                          "insight": ["kind": "record", "percent": NSNull(), "low": 1.99, "currency": "USD", "date": "2025-09-29"]]]
         checkWishlist(refresh: false)
         spin()
         precondition(wishlist?.items.count == 1 && calls("wishlist").last!.contains("--check"))
@@ -13153,9 +13764,16 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
         precondition(shopScopeBar.isHidden == false && !homePane.isHidden && dealsPane.isHidden)
         precondition(calls("shop-home").last! == ["shop-home", "--scope", "mine"])
         let home = labels(homeList).map { $0.replacingOccurrences(of: "\u{00A0}", with: " ") }
-        for title in ["Wishlist deals", "Featured deals", "Price drops", "Free now", "Drop Game", "Free Adventure", "On sale at Steam \u{2212}80%"] {
+        for title in ["Wishlist deals", "Featured deals", "Price drops", "Free now", "Drop Game", "Free Adventure", "Steam \u{2212}80%"] {
             precondition(home.contains { $0 == title || $0.contains(title) }, "Home shows \(title)")
         }
+        precondition(!home.contains { $0.contains("On sale at") }, "The sale tag shows only the store and discount")
+        let saleRow = views(homeList).first { $0.accessibilityIdentifier() == "wishlistRow" }!
+        precondition(labels(saleRow).filter { $0.contains("\u{2212}80%") } == ["Steam \u{2212}80%"], "The sale shows once, under the price, not under the title too: \(labels(saleRow))")
+        precondition(views(saleRow).contains { ($0 as? NSTextField)?.stringValue == "All-time low" && $0.accessibilityIdentifier() == "shopPriceInsight" },
+                     "Wishlist rows note the all-time low too")
+        precondition(((saleRow.toolTip ?? "") + (saleRow.accessibilityLabel() ?? "")).contains("On sale at Steam \u{2212}80%"),
+                     "The full sentence stays in the tooltip and VoiceOver: \(saleRow.toolTip ?? "") / \(saleRow.accessibilityLabel() ?? "")")
         // Hearts: saved items are filled; adding sends only the allowed keys; removing clears it.
         precondition(heart("cs:612")?.image?.name() == nil && heart("cs:612")?.accessibilityLabel() == "Remove Portal 2 from wishlist")
         precondition(heart("cs:700")?.accessibilityLabel() == "Add Drop Game to wishlist" && heart("cs:700")!.isEnabled)
@@ -13164,7 +13782,8 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
         let add = calls("wishlist").last!
         precondition(add[1] == "--add")
         let payload = try! JSONSerialization.jsonObject(with: Data(add[2].utf8)) as! [String: String]
-        precondition(payload == ["title": "Drop Game", "game_id": "700", "steam_app_id": "700"])
+        precondition(payload == ["title": "Drop Game", "game_id": "700", "steam_app_id": "700", "thumb": "https://cdn.example.com/drop.jpg"],
+                     "The heart saves the art link (not the image) with the game")
         precondition(wishlist?.items.count == 2 && heart("cs:700")?.accessibilityLabel() == "Remove Drop Game from wishlist")
         heart("cs:700")!.performClick(nil)
         spin()
@@ -13187,11 +13806,54 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
         // Wishlist rows: target price and removal go through the backend file.
         let rows = views(wishlistList).filter { $0.accessibilityIdentifier() == "wishlistRow" }
         precondition(rows.count == 1 && labels(wishlistList).contains { $0.replacingOccurrences(of: "\u{00A0}", with: " ").contains("Target reached") })
-        askTargetPrice = { _, _ in .some(5) }
-        views(wishlistList).compactMap { $0 as? NSButton }.first { $0.accessibilityIdentifier() == "wishlistTarget" }!.performClick(nil)
+        // Each item shows its art (a cached link), its current best price and a target editor, even at the minimum width.
+        window.contentView!.layoutSubtreeIfNeeded()
+        let wishArt = views(rows[0]).compactMap { $0 as? RemoteImageView }
+        precondition(wishArt.count == 1 && wishArt[0].source?.absoluteString == "https://cdn.example.com/portal2.jpg", "Wishlist rows show the game's art")
+        precondition(labels(rows[0]).contains { $0.contains("1.99") }, "Wishlist rows show the current best price: \(labels(rows[0]))")
+        let targetButton = { views(self.wishlistList).compactMap { $0 as? NSButton }.first { $0.accessibilityIdentifier() == "wishlistTarget" }! }
+        for view in [wishArt[0], targetButton()] as [NSView] {
+            let frame = view.convert(view.bounds, to: rows[0])
+            precondition(frame.width > 0 && frame.minX >= 0 && frame.maxX <= rows[0].bounds.width + 0.5, "\(view) fits the wishlist row: \(frame)")
+        }
+        askTargetPrice = { _, _, code in precondition(code == "USD", "Original prices: the target stays in its currency"); return .some(5) }
+        targetButton().performClick(nil)
         spin()
-        precondition(calls("wishlist").last! == ["wishlist", "--target", "cs:612", "--price", "5.00"])
-        askTargetPrice = { _, _ in .none }
+        precondition(calls("wishlist").last! == ["wishlist", "--target", "cs:612", "--price", "5.00", "--currency", "USD"])
+        // With HUF as the Shop currency, targets are entered in forints and the USD price is converted to compare.
+        defaults.set("HUF", forKey: shopCurrencyKey)
+        exchangeRates = try! JSONDecoder().decode(ExchangeRates.self, from: Data(smokeRatesJSON.utf8))
+        renderWishlist()
+        precondition(targetButton().accessibilityLabel() == "Set a target price in HUF for Portal 2")
+        var askedCurrent: Double?? = .none
+        askTargetPrice = { _, current, code in precondition(code == "HUF"); askedCurrent = current; return .some(4000) }
+        targetButton().performClick(nil)
+        spin()
+        precondition(askedCurrent! == nil, "A USD target isn't shown as forints")
+        precondition(calls("wishlist").last! == ["wishlist", "--target", "cs:612", "--price", "4000", "--currency", "HUF"])
+        let saved = wishlist!.items[0]
+        precondition(saved.targetPrice == 4000 && saved.targetCurrency == "HUF" && targetReached(saved) == true,
+                     "1.99 USD is about 642 HUF, under a 4000 HUF target")
+        func plain(_ text: String) -> String { text.replacingOccurrences(of: "\u{00A0}", with: " ").replacingOccurrences(of: "\u{202F}", with: " ") }
+        precondition(labels(wishlistList).contains { plain($0).contains("Target reached: " + plain(ShopMoney.format(4000, "HUF"))) })
+        askTargetPrice = { _, current, _ in askedCurrent = current; return .some(500) }
+        targetButton().performClick(nil)
+        spin()
+        precondition(askedCurrent! == 4000 && targetReached(wishlist!.items[0]) == false, "642 HUF is above a 500 HUF target")
+        precondition(!labels(wishlistList).contains { $0.contains("Target reached") } && labels(wishlistList).contains { plain($0).contains("Target " + plain(ShopMoney.format(500, "HUF"))) })
+        let loadedRates = exchangeRates
+        exchangeRates = nil
+        renderWishlist()
+        precondition(targetReached(wishlist!.items[0]) == nil && targetButton().isEnabled, "No rates: still editable, comparison unknown")
+        precondition(views(wishlistList).contains { ($0.toolTip ?? "").contains("Can't compare with USD prices") }, "The row says why")
+        exchangeRates = loadedRates
+        askTargetPrice = { _, _, _ in .some(2.5) }
+        defaults.set("original", forKey: shopCurrencyKey)
+        targetButton().performClick(nil)
+        spin()
+        precondition(parseTargetPrice("4 000 Ft", "HUF") == 4000 && parseTargetPrice("4.000", "HUF") == 4000 &&
+                     parseTargetPrice("9,99", "EUR") == 9.99 && parseTargetPrice("$9.99", "USD") == 9.99 && parseTargetPrice("", "USD") == nil)
+        askTargetPrice = { _, _, _ in .none }
         let targets = calls("wishlist").count
         views(wishlistList).compactMap { $0 as? NSButton }.first { $0.accessibilityIdentifier() == "wishlistTarget" }!.performClick(nil)
         precondition(calls("wishlist").count == targets, "Cancelling the target changes nothing")
@@ -13221,7 +13883,8 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
         // Original prices: USD stores by price, then the App Store group in its own currency.
         precondition(order() == ["GOG", "Steam", "Mac App Store"], "\(order())")
         precondition(offers().filter { $0.hasSuffix(", cheapest") }.count == 1 && offers()[0].hasSuffix(", cheapest"))
-        precondition(labels(searchList).contains("Mac App Store \u{00B7} prices in HUF") && labels(searchList).contains("Hollow Pocket"))
+        precondition(labels(searchList).contains("Mac App Store") && labels(searchList).contains("Hollow Pocket") &&
+                     views(searchList).contains { $0.toolTip?.hasSuffix("in HUF") ?? false })
         precondition(views(searchList).filter { $0.accessibilityIdentifier() == "shopAppStoreRow" }.count == 1)
         // Converted to USD, then HUF: every store sorts by the converted price, marked with ≈ and the original.
         defaults.set("USD", forKey: shopCurrencyKey)
@@ -13263,8 +13926,12 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
         precondition(views(parent).contains { $0 is RemoteImageView && $0.accessibilityIdentifier() == "shopArtwork" }, "Search games show their art")
         precondition(children.allSatisfy { child in !views(child).contains { $0 is RemoteImageView } && !labels(child).contains("Hollow Knight") },
                      "Store rows don't repeat the art or title")
-        func art(_ row: NSView) -> NSRect { let a = views(row).first { $0.accessibilityIdentifier() == "shopArtwork" }!; return a.convert(a.bounds, to: searchList) }
-        precondition(children.allSatisfy { art($0).minX >= art(parent).minX + Self.shopChildIndent - 0.5 }, "Store rows are indented")
+        func art(_ row: NSView) -> NSRect { let a = views(row).first { ["shopArtwork", "shopStoreIcon"].contains($0.accessibilityIdentifier()) }!; return a.convert(a.bounds, to: searchList) }
+        func leftmost(_ row: NSView) -> CGFloat {
+            views(row).filter { ($0 is NSTextField || $0 is NSImageView) && $0.frame.width > 0 && !$0.isHiddenOrHasHiddenAncestor }
+                .map { $0.convert($0.bounds, to: searchList).minX }.min()!
+        }
+        precondition(children.allSatisfy { leftmost($0) >= art(parent).minX + Self.shopChildIndent - 0.5 }, "Store rows are indented")
         let lowest = children.map { child in views(child).compactMap { $0 as? NSTextField }.first { $0.accessibilityIdentifier() == "shopLowest" }?.stringValue }
         precondition(lowest.compactMap { $0 }.count == 1 && lowest[0]?.replacingOccurrences(of: "\u{00A0}", with: " ") == "Lowest USD",
                      "Only the cheapest store is marked, with its currency when prices are mixed: \(lowest)")
@@ -13282,10 +13949,13 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
                 NSEvent.mouseEvent(with: type, location: point, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
                                    windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1)!
             }
+            // A mouse-up left over from an earlier step would end this click's tracking at the wrong spot.
+            while NSApp.nextEvent(matching: [.leftMouseUp, .leftMouseDown, .leftMouseDragged], until: Date(), inMode: .default, dequeue: true) != nil {}
             NSApp.postEvent(event(.leftMouseUp), atStart: false)
             window.sendEvent(event(.leftMouseDown))
             // An enabled button's tracking loop takes the mouse-up; otherwise deliver it the way the app would.
-            if let up = NSApp.nextEvent(matching: .leftMouseUp, until: Date(), inMode: .default, dequeue: true) { window.sendEvent(up) }
+            // Under load the posted event can take a moment to reach the queue, so wait briefly for it.
+            if let up = NSApp.nextEvent(matching: .leftMouseUp, until: Date(timeIntervalSinceNow: 0.3), inMode: .default, dequeue: true) { window.sendEvent(up) }
             spin()
         }
         let openedBefore = opened().count
@@ -13294,35 +13964,188 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
         shopSearchSubmitted()
         precondition(searchHeart.window != nil, "Re-sending an identical search doesn't rebuild the rows under the pointer")
         click(searchHeart)
-        precondition(calls("wishlist").last!.prefix(2) == ["wishlist", "--add"], "\(calls("wishlist").last!)")
+        precondition(calls("wishlist").last!.prefix(2) == ["wishlist", "--add"],
+                     "\(calls("wishlist").last!) editable \(wishlistEditable) loaded \(wishlist != nil) payload \(wishlistPayloads["cs:100"] != nil) enabled \(searchHeart.isEnabled) key \(window.isKeyWindow) note \(wishlist?.note ?? "-")")
         let searchPayload = try! JSONSerialization.jsonObject(with: Data(calls("wishlist").last![2].utf8)) as! [String: String]
         precondition(searchPayload == ["title": "Hollow Knight", "game_id": "100", "steam_app_id": "367520"], "\(searchPayload)")
         precondition(searchHeart.accessibilityLabel() == "Remove Hollow Knight from wishlist" && opened().count == openedBefore,
                      "The heart fills at once and doesn't open the store")
         selectShopTab(4)
         precondition(labels(wishlistList).contains("Hollow Knight"), "The searched game is in the Wishlist")
-        // Home search drives the same results, grouped the same way, and its hearts reflect the wishlist.
+        // One search field above every section: searching from Home shows the results in its place; clearing it goes back to Home.
         selectShopTab(0)
-        homeSearchField.stringValue = "hollow knight"
-        homeSearchSubmitted()
+        precondition(!shopSearchField.isHiddenOrHasHiddenAncestor && shopNav.selectedSegment == 0, "The search field is on Home too")
+        precondition(!views(shopPageView!).contains { ($0 as? NSSearchField).map { $0 !== shopSearchField } ?? false },
+                     "The Shop has exactly one search field")
+        shopSearchField.stringValue = "hollow knight"
+        shopSearchSubmitted()
         spin()
-        precondition(shopSearchField.stringValue == "hollow knight" && !homeSearchList.isHidden && shopTab.selectedSegment == 0)
-        let homeGroup = views(homeSearchList)
-        precondition(homeGroup.contains { $0.accessibilityIdentifier() == "shopGameRow" } &&
-                     homeGroup.filter { $0.accessibilityIdentifier() == "shopOffer" }.count == 3 &&
-                     homeGroup.contains { $0.accessibilityIdentifier() == "shopAppStoreRow" })
-        let homeHeart = homeGroup.compactMap { $0 as? NSButton }.first { $0.identifier?.rawValue == "cs:100" }!
-        precondition(homeHeart.accessibilityLabel() == "Remove Hollow Knight from wishlist")
-        click(homeHeart)
+        precondition(shopTab.selectedSegment == 3 && !searchPane.isHidden && homePane.isHidden && shopNav.selectedSegment == -1 && shopScopeBar.isHidden,
+                     "Searching shows results, with no section selected: tab \(shopTab.selectedSegment) nav \(shopNav.selectedSegment)")
+        let resultHeart = views(searchList).compactMap { $0 as? NSButton }.first { $0.identifier?.rawValue == "cs:100" }!
+        precondition(resultHeart.accessibilityLabel() == "Remove Hollow Knight from wishlist")
+        click(resultHeart)
         precondition(calls("wishlist").last! == ["wishlist", "--remove", "cs:100"] && !(wishlist?.items.contains { $0.key == "cs:100" } ?? true))
-        precondition(homeHeart.accessibilityLabel() == "Add Hollow Knight to wishlist" && opened().count == openedBefore)
-        let compare = homeGroup.compactMap { $0 as? NSButton }.first { $0.accessibilityIdentifier() == "homeSearchAll" }!
-        compare.performClick(nil)
+        precondition(resultHeart.accessibilityLabel() == "Add Hollow Knight to wishlist" && opened().count == openedBefore)
+        shopSearchField.stringValue = ""
+        shopSearchSubmitted()
+        precondition(shopTab.selectedSegment == 0 && !homePane.isHidden && shopNav.selectedSegment == 0, "Clearing the search goes back to Home")
+        shopNav.selectedSegment = 1
+        shopNavChanged()
+        precondition(shopTab.selectedSegment == 1 && !dealsPane.isHidden, "The section control switches sections")
+        shopSearchField.stringValue = "hollow knight"
+        shopSearchSubmitted()
+        spin()
         precondition(shopTab.selectedSegment == 3)
+        // Mac / Windows badges: only Steam's platform flags or the Mac App Store count; unknown games get no claim.
+        for _ in 0..<40 where steamPlatformStatus["700"] == nil || steamPlatformStatus["367520"] == nil { spin(0.1) }
+        precondition(calls("shop-platforms").allSatisfy { $0.count == 3 && $0[2].split(separator: ",").count <= 40 })
+        precondition(compatibility(steamAppId: "620") == .mac && compatibility(steamAppId: "700") == .windowsOnly &&
+                     compatibility(steamAppId: nil) == nil && compatibility(steamAppId: "999") == nil && compatibility(steamAppId: nil, appStore: true) == .mac,
+                     "Platforms \(steamPlatformStatus) calls \(calls("shop-platforms")) requested \(platformsRequested)")
+        func rowText(_ list: NSStackView, _ id: String, _ title: String) -> String? {
+            views(list).first { $0.accessibilityIdentifier() == id && labels($0).contains(title) }
+                .map { labels($0).joined(separator: " | ").replacingOccurrences(of: "\u{00A0}", with: " ") }
+        }
+        selectShopTab(0)
+        window.contentView!.layoutSubtreeIfNeeded()
+        let homeRows = views(homeList).filter { $0 is ClickableRowView }
+        func homeRow(_ title: String) -> String { homeRows.first { labels($0).contains(title) }.map { labels($0).joined(separator: " | ").replacingOccurrences(of: "\u{00A0}", with: " ") } ?? "" }
+        precondition(homeRow("Drop Game").hasPrefix("Drop Game | ") && homeRow("Drop Game").contains("\u{FFFC} Windows |") &&
+                     !homeRow("Drop Game").contains("needs") && !homeRow("Drop Game").contains("only"), "Windows-only deal: \(homeRow("Drop Game"))")
+        precondition(homeRow("Portal 2").contains("Mac") && !homeRow("Portal 2").contains("Windows"), homeRow("Portal 2"))
+        precondition(!homeRow("Free Adventure").contains("Mac") && !homeRow("Free Adventure").contains("Windows"), "Giveaways make no claim")
+        let dropTip = homeRows.first { labels($0).contains("Drop Game") }!.accessibilityLabel() ?? ""
+        precondition(dropTip.contains("compatibility app"), "The Windows-only row explains it needs a compatibility app")
+        let storeTexts = views(homeList).compactMap { $0 as? NSTextField }.filter { $0.attributedStringValue.containsAttachments }
+        precondition(!storeTexts.isEmpty, "Store hints carry the store's mini icon")
+        selectShopTab(3)
+        window.contentView!.layoutSubtreeIfNeeded()
+        let hollow = rowText(searchList, "shopGameRow", "Hollow Knight") ?? ""
+        precondition(hollow.contains("Mac"), "Search parent: \(hollow)")
+        if let silksong = views(searchList).first(where: { $0 is ClickableRowView && labels($0).contains { $0.hasPrefix("Hollow Knight: Silksong") } }) {
+            let text = labels(silksong).map { $0.replacingOccurrences(of: "\u{00A0}", with: " ") }
+            precondition(!text.contains("Mac") && !text.contains { $0.hasPrefix("Windows") }, "No Steam ID, no claim: \(text)")
+        }
+        let offerViews = views(searchList).filter { $0.accessibilityIdentifier() == "shopOffer" }
+        precondition(!offerViews.isEmpty)
+        for offer in offerViews {
+            let icons = views(offer).filter { $0.accessibilityIdentifier() == "shopStoreIcon" }
+            let tags = views(offer).filter { $0.accessibilityIdentifier() == "shopStoreTag" }
+            let sale = views(offer).contains { $0.accessibilityIdentifier() == "shopSaleTag" }
+            let store = (tags.first?.accessibilityLabel() ?? "").components(separatedBy: ", ")[0]
+            let tagText = labels(tags.first ?? offer)
+            precondition(tags.count == 1 && (sale ? icons.isEmpty && tagText.count == 1 && tagText[0].hasPrefix(store + " \u{2212}") && tagText[0].hasSuffix("%")
+                                                  : icons.count == 1 && icons[0].accessibilityLabel() == store && icons[0].frame.width == 12 && tagText == [store])
+                         && labels(offer).filter { $0.hasPrefix(store) }.count == 1,
+                         "Every store price names its store in full, once: gray with its icon, or a green tag with the discount: \(store) \(labels(offer))")
+            let price = views(offer).first { $0.accessibilityIdentifier() == "shopPriceLine" }!
+            let tagFrame = tags[0].convert(tags[0].bounds, to: offer), priceFrame = price.convert(price.bounds, to: offer)
+            precondition(abs(tagFrame.maxX - priceFrame.maxX) < 0.5 && (offer.isFlipped ? tagFrame.minY >= priceFrame.maxY - 0.5 : tagFrame.maxY <= priceFrame.minY + 0.5),
+                         "The store line sits right under the price, right-aligned: \(tagFrame) \(priceFrame)")
+            let text = labels(offer).joined(separator: " ")
+            if !(store == "Steam" || store == "Mac App Store") {
+                precondition(!text.contains("Windows") && !text.contains("Mac\u{00A0}") && !text.hasSuffix("Mac"),
+                             "Other PC stores may ship other builds, so they make no claim: \(text)")
+            }
+        }
+        // The all-time low: only CheapShark's record minimum, as a small line under the price, with the record in the tooltip.
+        let insights = views(searchList).filter { $0.accessibilityIdentifier() == "shopPriceInsight" }.compactMap { $0 as? NSTextField }
+        precondition(insights.map(\.stringValue).sorted() == ["25% above all-time low", "All-time low"]
+                     && insights.allSatisfy { ($0.toolTip ?? "").contains("7.99 USD") || ($0.toolTip ?? "").contains("19.99 USD") }
+                     && insights.allSatisfy { !($0.toolTip ?? "").lowercased().contains("average") && ($0.toolTip ?? "").contains("2025") }
+                     && !views(searchList).filter { $0.accessibilityIdentifier() == "shopOffer" }.contains { views($0).contains { $0.accessibilityIdentifier() == "shopPriceInsight" } },
+                     "All-time-low notes on the game rows only: \(insights.map(\.stringValue))")
+        for insight in insights {
+            let column = insight.superview!.superview!
+            precondition(column.accessibilityIdentifier() == "shopPriceColumn" && column.subviews.last === insight.superview, "The note sits under the price and store")
+        }
+        precondition(PriceInsight(kind: "above", percent: nil, low: 0, currency: "USD", date: nil).text == "Was free before"
+                     && PriceInsight(kind: "above", percent: nil, low: 0, currency: "USD", date: nil).detail.contains("free"))
+        precondition(Self.storeIconID("Steam") == "steam" && Self.storeIconID("GOG") == "gog-galaxy" && Self.storeIconID("Epic Games Store") == "epic-games" &&
+                     Self.storeIconID("Origin") == "ea" && Self.storeIconID("Humble Store") == nil && !Self.storeIcon("Steam", size: 16).template &&
+                     Self.storeIcon("Humble Store", size: 16).template)
+        renderWishlist()
+        let wished = views(wishlistList).filter { $0.accessibilityIdentifier() == "wishlistRow" }
+        precondition(wished.allSatisfy { row in
+            let item = wishlist!.items.first { labels(row).contains($0.title) }
+            let text = labels(row).joined(separator: " ")
+            return compatibility(steamAppId: item?.steamAppId, appStore: item?.appStoreId != nil) == .mac ? text.contains("Mac") : true
+        })
+        // Sort by: one stable comparator for every list; missing values last, prices grouped by currency unless converted.
+        let sample = [ShopSortFields(title: "beta", price: 10, currency: "USD", discount: 20, rating: 80, added: 2, ends: 300),
+                      ShopSortFields(title: "Alpha", price: 3000, currency: "HUF", rating: 90, added: 3),
+                      ShopSortFields(title: "gamma", price: 5, currency: "USD", discount: 50, ends: 100),
+                      ShopSortFields(title: "delta", discount: 20, rating: 80, added: 1, ends: 200)]
+        func order(_ sort: ShopSort, _ convert: @escaping (Double, String) -> Double? = { _, _ in nil }) -> [String] {
+            shopSorted(sample, by: sort, convert: convert) { $0 }.map(\.title)
+        }
+        let toUSD: (Double, String) -> Double? = { price, code in code == "USD" ? price : code == "HUF" ? price / 375 : nil }
+        precondition(order(.relevance) == ["beta", "Alpha", "gamma", "delta"])
+        precondition(order(.name) == ["Alpha", "beta", "delta", "gamma"])
+        precondition(order(.priceAsc) == ["Alpha", "gamma", "beta", "delta"], "Original prices group by currency: \(order(.priceAsc))")
+        precondition(order(.priceAsc, toUSD) == ["gamma", "Alpha", "beta", "delta"], "\(order(.priceAsc, toUSD))")
+        precondition(order(.priceDesc, toUSD) == ["beta", "Alpha", "gamma", "delta"], "No price stays last: \(order(.priceDesc, toUSD))")
+        precondition(order(.discount) == ["gamma", "beta", "delta", "Alpha"], "Ties keep their order: \(order(.discount))")
+        precondition(order(.rating) == ["Alpha", "beta", "delta", "gamma"])
+        precondition(order(.added) == ["Alpha", "beta", "delta", "gamma"])
+        precondition(order(.endsSoon) == ["gamma", "delta", "beta", "Alpha"])
+        // Each list remembers its choice; Deals and Free Games map onto their existing popups.
+        func pick(_ popup: NSPopUpButton, _ value: String) {
+            popup.selectItem(at: popup.indexOfItem(withRepresentedObject: value))
+            popup.sendAction(popup.action, to: popup.target)
+            spin()
+        }
+        precondition(searchSortPopup.accessibilityIdentifier() == "shopSortPopup" && !searchSortPopup.itemTitles.contains("Best Rating"),
+                     "Search results have no ratings to sort by")
+        pick(wishlistSortPopup, "name")
+        precondition(UserDefaults.standard.string(forKey: wishlistSortKey) == "name")
+        let wishedTitles = views(wishlistList).filter { $0.accessibilityIdentifier() == "wishlistRow" }
+            .compactMap { row in wishlist!.items.first { labels(row).contains($0.title) }?.title }
+        precondition(wishedTitles == wishedTitles.sorted { $0.localizedStandardCompare($1) == .orderedAscending } && !wishedTitles.isEmpty)
+        pick(searchSortPopup, "price-desc")
+        precondition(UserDefaults.standard.string(forKey: searchSortKey) == "price-desc")
+        let parents = views(searchList).filter { $0.accessibilityIdentifier() == "shopGameRow" || $0.accessibilityIdentifier() == "shopSingleOffer" }
+        precondition(!parents.isEmpty)
+        let header = sortHeader(NSTextField(labelWithString: ""), NSPopUpButton(), [.relevance, .priceDesc], key: searchSortKey, label: "x")
+        precondition((header.arrangedSubviews[1] as! NSPopUpButton).titleOfSelectedItem == "Highest Price", "The saved choice comes back")
+        pick(searchSortPopup, "relevance")
+        pick(wishlistSortPopup, "relevance")
+        precondition(dealsSortPopup.indexOfItem(withRepresentedObject: "price-desc") >= 0 && giveawaySortPopup.indexOfItem(withRepresentedObject: "ends") >= 0)
+        let savedGiveawaySort = giveawaySortPopup.selectedItem?.representedObject as? String
+        giveawaySortPopup.selectItem(at: giveawaySortPopup.indexOfItem(withRepresentedObject: "ends"))
+        let savedMode = dealsMode.selectedSegment
+        dealsMode.selectedSegment = 1
+        precondition(dealsArguments().contains("date") && !dealsArguments().contains("ends"), "Ends Soon sorts here, not on GamerPower")
+        precondition(sortedGiveaways().count == giveaways.count)
+        dealsMode.selectedSegment = savedMode
+        giveawaySortPopup.selectItem(at: giveawaySortPopup.indexOfItem(withRepresentedObject: savedGiveawaySort ?? "date"))
+        UserDefaults.standard.removeObject(forKey: searchSortKey)
+        UserDefaults.standard.removeObject(forKey: wishlistSortKey)
+        // A bundle replaced mid-run reports a friendly reopen message instead of the raw python error.
+        precondition(friendlyBackendError("python3: can't open file '/x/CouchCube.app/Contents/Resources/scripts/console.py': [Errno 2] No such file or directory")
+                     == Self.appUpdatedMessage)
+        precondition(friendlyBackendError("Steam is not installed.") == "Steam is not installed.")
         // Store-style headings on Home; "See all" links open their tab.
         selectShopTab(0)
         let titles = views(homeList).compactMap { $0 as? NSTextField }.filter { $0.accessibilityIdentifier() == "shopSectionTitle" }
         precondition(!titles.isEmpty && titles.allSatisfy { $0.font!.pointSize == Self.shopHeadingSize }, "Home headings are large")
+        // Sections are separated by about twice the old gap; a heading stays close to its own rows.
+        window.contentView!.layoutSubtreeIfNeeded()
+        let headers = homeList.arrangedSubviews.filter { $0.accessibilityIdentifier() == "shopSection" }
+        precondition(headers.count >= 2)
+        for header in headers {
+            let index = homeList.arrangedSubviews.firstIndex(of: header)!
+            let below = homeList.arrangedSubviews[index + 1]
+            let tight = abs(header.frame.minY - below.frame.maxY) < 0.5 || abs(below.frame.minY - header.frame.maxY) < 0.5
+            precondition(tight && (header as! NSStackView).edgeInsets.bottom <= 4, "A heading sits right on its rows")
+            guard index > 0 else { continue }
+            let above = homeList.arrangedSubviews[index - 1]
+            let gap = abs(above.frame.minY - header.frame.maxY) < abs(header.frame.minY - above.frame.maxY)
+                ? above.frame.minY - header.frame.maxY : header.frame.minY - above.frame.maxY
+            precondition(gap >= Self.shopSectionGap - 0.5 && (header as! NSStackView).edgeInsets.top + gap >= 27.5,
+                         "Sections are clearly separated: \(gap)")
+        }
         let seeAll = views(homeList).compactMap { $0 as? NSButton }.filter { $0.accessibilityIdentifier() == "shopSeeAll" }
         precondition(seeAll.map(\.tag).contains(1) && seeAll.map(\.tag).contains(2))
         seeAll.first { $0.tag == 2 }!.performClick(nil)
@@ -13410,8 +14233,25 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
                      searchList.arrangedSubviews.filter { $0.accessibilityIdentifier() == "shopOffer" }.count == 3 &&
                      views(single!).contains { $0.accessibilityIdentifier() == "wishlistHeart" && $0.identifier?.rawValue == "cs:200" },
                      "A one-store game is an ordinary row with its own heart")
-        precondition(views(homeSearchList).contains { $0.accessibilityIdentifier() == "shopSingleOffer" }, "Home search too")
-        for list in [searchList, homeSearchList] {
+        // A real click on a one-store result's heart adds it, a second removes it, and neither opens the store.
+        func singleHeart() -> NSButton {
+            views(searchList).compactMap { $0 as? NSButton }.first { $0.accessibilityIdentifier() == "wishlistHeart" && $0.identifier?.rawValue == "cs:200" }!
+        }
+        selectShopTab(3)
+        spin()
+        window.contentView!.layoutSubtreeIfNeeded()
+        singleHeart().scrollToVisible(singleHeart().bounds)
+        let openedBeforeSingle = opened().count
+        let hadSingle = wishlist?.items.contains { $0.key == "cs:200" } ?? false
+        click(singleHeart())
+        spin()
+        precondition((wishlist?.items.contains { $0.key == "cs:200" } ?? false) != hadSingle && opened().count == openedBeforeSingle,
+                     "One-store heart toggles the wishlist without navigating")
+        click(singleHeart())
+        spin()
+        precondition((wishlist?.items.contains { $0.key == "cs:200" } ?? false) == hadSingle && opened().count == openedBeforeSingle &&
+                     calls("wishlist").suffix(2).map { $0[1] } == (hadSingle ? ["--remove", "--add"] : ["--add", "--remove"]))
+        for list in [searchList] {
             for parent in views(list).filter({ $0.accessibilityIdentifier() == "shopGameRow" }) {
                 precondition(!views(parent).contains { $0.accessibilityIdentifier() == "shopLowest" }, "No Lowest tag on the game row")
             }
@@ -13449,37 +14289,40 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
                 let frame = row.convert(row.bounds, to: page)
                 precondition(frame.minX >= -0.5 && frame.maxX <= page.bounds.width + 0.5, "Shop rows stay inside the page on tab \(tab)")
             }
-            precondition(shopTab.frame.maxX <= page.bounds.width + 0.5, "The Shop tabs fit the narrowest window")
-            // Right end of each row: heart, (lowest), price, discount, in fixed columns that line up row to row.
-            var priceX: [String: (shape: String, price: CGFloat, heart: CGFloat)] = [:]
+            precondition(shopNav.convert(shopNav.bounds, to: page).maxX <= (shopScopeBar.isHidden ? dealsRefreshButton : shopScope).convert(NSPoint.zero, to: page).x + 0.5, "The Shop sections and store scope fit the narrowest window")
+            // Right end of each row: price over usual price, discount over store, in fixed columns that line up row to row.
+            var priceX: [String: (shape: String, price: CGFloat)] = [:]
             for row in views(page).compactMap({ $0 as? ClickableRowView }) where !row.isHiddenOrHasHiddenAncestor {
                 guard let cluster = views(row).first(where: { $0.accessibilityIdentifier() == "shopPriceCluster" }) else { continue }
                 func frame(_ id: String) -> NSRect? { views(cluster).first { $0.accessibilityIdentifier() == id }.map { $0.convert($0.bounds, to: row) } }
-                let heartFrame = frame("shopHeartColumn")!, priceFrame = frame("shopPriceColumn")!, percentFrame = frame("shopPercentColumn")!
-                precondition(heartFrame.maxX <= (frame("shopMarkerColumn")?.minX ?? priceFrame.minX) + 0.5 &&
-                             priceFrame.maxX <= percentFrame.minX + 0.5, "Heart, price, discount in order on tab \(tab)")
-                precondition(abs(percentFrame.maxX - (row.bounds.maxX - 6)) < 1, "The columns end at the row's edge on tab \(tab): \(percentFrame.maxX) vs \(row.bounds.maxX) \(row.accessibilityIdentifier()) \(row.accessibilityLabel() ?? "") cluster \(cluster.convert(cluster.bounds, to: row)) line \(row.subviews.map(\.frame)) heart \(heartFrame) marker \(String(describing: frame("shopMarkerColumn"))) price \(priceFrame) pct \(percentFrame)")
-                precondition(views(row).contains { $0.accessibilityIdentifier() == "shopArtwork" }, "Every shop row has art on tab \(tab)")
+                precondition(frame("shopHeartColumn") == nil && frame("shopMarkerColumn") == nil, "Hearts and tags sit by the title, not in the price grid")
+                let priceFrame = frame("shopPriceColumn")!
+                precondition(frame("shopPercentColumn") == nil, "The discount sits with the store, not in its own column")
+                precondition(abs(priceFrame.maxX - (row.bounds.maxX - 6)) < 1, "The price block ends at the row's edge on tab \(tab): \(priceFrame) \(row.bounds)")
+                if let line = frame("shopPriceLine"), let tag = frame("shopStoreTag") {
+                    precondition(abs(line.maxX - priceFrame.maxX) < 0.5 && abs(tag.maxX - priceFrame.maxX) < 0.5
+                                 && (row.isFlipped ? tag.minY >= line.maxY - 0.5 : tag.maxY <= line.minY + 0.5)
+                                 && tag.minX >= priceFrame.minX - 0.5 && line.width < priceFrame.width && tag.width < priceFrame.width,
+                                 "Price on top, store under it, both right-aligned and inside the block on tab \(tab): \(line) \(tag) \(priceFrame)")
+                }
+                precondition(views(row).contains { ["shopArtwork", "shopStoreIcon", "shopSaleTag"].contains($0.accessibilityIdentifier()) }, "Every shop row has art or its store icon on tab \(tab)")
                 // Every row of a list reserves the same columns, so heart, price and discount sit at one x each.
                 let list = "\(ObjectIdentifier(row.superview!))"
-                let shape = (frame("shopMarkerColumn") == nil ? "" : "marker") + (frame("shopRatingSteam") == nil ? "" : "+ratings")
+                let shape = frame("shopRatingSteam") == nil ? "" : "ratings"
                 let x = priceFrame.minX + row.convert(NSPoint.zero, to: page).x
-                let heartX = heartFrame.minX + row.convert(NSPoint.zero, to: page).x
                 if let other = priceX[list] {
-                    precondition(other.shape == shape && abs(other.price - x) < 0.5 && abs(other.heart - heartX) < 0.5,
-                                 "Columns line up on tab \(tab): \(other) vs \((shape, x, heartX)) \(row.accessibilityLabel() ?? "")")
-                } else { priceX[list] = (shape, x, heartX) }
+                    precondition(other.shape == shape && abs(other.price - x) < 0.5,
+                                 "Columns line up on tab \(tab): \(other) vs \((shape, x)) \(row.accessibilityLabel() ?? "")")
+                } else { priceX[list] = (shape, x) }
                 // Fixed widths: a long converted price or a 100% discount never widens its column.
-                precondition(abs(priceFrame.width - Self.shopPriceWidth) < 0.5 && abs(percentFrame.width - Self.shopPercentWidth) < 0.5)
-                // A deal's usual price sits right under the sale price, struck through and right-aligned with it.
+                precondition(abs(priceFrame.width - Self.shopOfferWidth) < 0.5)
+                // A deal's usual price sits beside the sale price on the same line, struck through.
                 if let was = views(cluster).first(where: { $0.accessibilityIdentifier() == "shopWasPrice" }) as? NSTextField,
                    let now = was.superview?.subviews.compactMap({ $0 as? NSTextField }).first(where: { $0 !== was }) {
                     let wasFrame = was.convert(was.bounds, to: row), nowFrame = now.convert(now.bounds, to: row)
-                    let style = was.attributedStringValue.attribute(.paragraphStyle, at: 0, effectiveRange: nil) as? NSParagraphStyle
-                    precondition(abs(wasFrame.maxX - nowFrame.maxX) < 0.5 && abs(wasFrame.width - nowFrame.width) < 0.5 &&
-                                 style?.alignment == .right && now.alignment == .right && wasFrame.maxY <= nowFrame.minY + 0.5 &&
+                    precondition(nowFrame.maxX <= wasFrame.minX + 0.5 && abs(wasFrame.midY - nowFrame.midY) < 4 &&
                                  was.attributedStringValue.attribute(.strikethroughStyle, at: 0, effectiveRange: nil) != nil,
-                                 "Usual price right under the price on tab \(tab): \(wasFrame) vs \(nowFrame)")
+                                 "Usual price beside the price on tab \(tab): \(wasFrame) vs \(nowFrame)")
                 }
             }
         }
@@ -13550,8 +14393,9 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
         // Expiry text by local calendar day; urgent within two days; nothing once ended.
         let now = local(2026, 6, 10, 12)
         func label(_ end: Date) -> String? { DealExpiry.label(until: end, now: now, calendar: calendar).map { $0.text + ($0.urgent ? "!" : "") } }
-        precondition(label(local(2026, 6, 10, 20)) == "Ends today!" && label(local(2026, 6, 11, 1)) == "Ends tomorrow!" &&
-                     label(local(2026, 6, 12, 9)) == "2 days left!" && label(local(2026, 6, 13, 20)) == "3 days left" &&
+        precondition(label(local(2026, 6, 10, 20)) == "Offer ends today!" && label(local(2026, 6, 11, 1)) == "Offer ends tomorrow!" &&
+                     label(local(2026, 6, 12, 9)) == "Offer ends 12 June!" && label(local(2026, 6, 13, 20)) == "Offer ends 13 June" &&
+                     label(local(2027, 1, 2, 9)) == "Offer ends 2 January 2027" &&
                      label(local(2026, 6, 10, 11)) == nil)
         // Reminder: 09:00 the day before; else 09:00 today if ahead; else a few minutes from now; never after the end.
         func remind(_ end: Date, _ at: Date) -> (Date, Bool)? {
@@ -13597,7 +14441,9 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
         }
         renderDeals()
         func badge() -> NSButton { views(dealsList).compactMap { $0 as? NSButton }.first { $0.accessibilityIdentifier() == "dealReminder" }! }
-        precondition(badge().title.hasSuffix("days left") && badge().accessibilityLabel()!.hasPrefix("Remind me the day before this deal ends"))
+        precondition(badge().title.hasPrefix("Offer ends ") && badge().accessibilityLabel()!.hasPrefix("Remind me the day before this deal ends"))
+        precondition(badge().superview?.superview?.accessibilityIdentifier() == "shopPriceColumn" && badge().superview?.superview?.subviews.last === badge().superview,
+                     "The offer's end date sits right under its price block")
         let row = views(dealsList).compactMap { $0 as? ClickableRowView }.first!
         dealsList.window?.layoutIfNeeded()
         row.layoutSubtreeIfNeeded()
@@ -13611,7 +14457,7 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
         precondition(opened().last?.absoluteString.hasPrefix("x-apple.systempreferences:com.apple.preference.security?Privacy_Reminders") == true)
         mock.access = .notDetermined
         badge().performClick(nil)
-        precondition(mock.requests == 1 && mock.items.count == 1 && badge().title == "Reminder set")
+        precondition(mock.requests == 1 && mock.items.count == 1 && badge().title.hasPrefix("Offer ends ") && badge().toolTip!.contains("reminder is set"))
         let item = mock.items["mock-1"]!
         precondition(item.title == "Free Adventure deal ends \u{2014} Epic Games Store" && item.url?.host == "www.gamerpower.com" &&
                      item.notes.contains("usually $19.99") && item.notes.contains("read as UTC") && item.notes.contains("free-adventure"))
@@ -13619,16 +14465,16 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
         // No duplicates: a second add for the same giveaway does nothing; a second click offers removal.
         addDealReminder(giveaways[0], end: DealExpiry.parseGamerPowerEnd(giveaways[0].endDate)!, button: badge())
         badge().performClick(nil)
-        precondition(mock.items.count == 1 && badge().title == "Reminder set", "Cancelled removal keeps the reminder")
+        precondition(mock.items.count == 1 && badge().title.hasPrefix("Offer ends ") && badge().toolTip!.contains("reminder is set"), "Cancelled removal keeps the reminder")
         confirm = true
         badge().performClick(nil)
-        precondition(mock.items.isEmpty && dealReminders.isEmpty && badge().title.hasSuffix("days left"))
+        precondition(mock.items.isEmpty && dealReminders.isEmpty && badge().title.hasPrefix("Offer ends "))
         // A reminder deleted in Reminders resets the badge on the next render.
         badge().performClick(nil)
         precondition(mock.requests == 1 && dealReminders.count == 1)
         mock.items.removeAll()
         renderDeals()
-        precondition(dealReminders.isEmpty && badge().title.hasSuffix("days left"))
+        precondition(dealReminders.isEmpty && badge().title.hasPrefix("Offer ends "))
     }
 
     private func assertSmokePageScrolls() {

@@ -96,6 +96,10 @@ class DealsTests(unittest.TestCase):
         self.assertIn("storeID=7", url)
         self.assertIn("title=the+witcher+xxx", url)
         self.assertEqual(opener.requests[-1].get_header("User-agent"), deals.USER_AGENT)
+        deals.store_deals(sort="price-desc", opener=opener, now=1000)
+        url = opener.requests[-1].full_url
+        self.assertIn("sortBy=Price", url)
+        self.assertIn("desc=1", url)
         for bad in [{"sort": "metacritic; drop"}, {"store": "7&evil=1"}]:
             with self.assertRaises(deals.DealsError):
                 deals.store_deals(opener=opener, now=1000, **bad)

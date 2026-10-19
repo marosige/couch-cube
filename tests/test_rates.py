@@ -96,11 +96,13 @@ class RatesTests(unittest.TestCase):
                 {"price": 9.99, "normal_price": 14.99, "savings": 33, "store": "GOG"}]}}})
             wishlist.write(path, data)
             raw = json.loads(path.read_text())["items"][0]
-        self.assertEqual(set(raw), {"title", "game_id", "steam_app_id", "app_store_id", "added", "target_price", "best"})
+        self.assertEqual(set(raw), {"title", "game_id", "steam_app_id", "app_store_id", "added", "target_price", "target_currency", "thumb", "best"})
         self.assertEqual(raw["best"]["currency"], "USD")
         self.assertEqual(raw["best"]["price"], 9.99)
-        source = (ROOT / "scripts/wishlist.py").read_text()
-        self.assertNotIn("rates", source.replace("apply_prices", ""))
+        # Rates are only used to compare against a target (target_reached/annotate/report); nothing that saves uses them.
+        import inspect
+        for function in (wishlist.normalize_item, wishlist.apply_prices, wishlist._serialise, wishlist.write, wishlist.set_target):
+            self.assertNotIn("rates", inspect.getsource(function).replace("apply_prices", ""), function.__name__)
 
 
 if __name__ == "__main__":

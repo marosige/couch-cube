@@ -9,6 +9,8 @@ the drive (through the mirror merge) once one is set up.
 """
 
 import contextlib
+from datetime import datetime, timezone
+from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 import errno
 import fcntl
 import json
@@ -61,8 +63,65 @@ def _money(value):
     return round(float(value), 2)
 
 
+def _currency(value):
+    return value if isinstance(value, str) and re.fullmatch(r"[A-Z]{3}", value) else None
+
+
+def _art(value):
+    """An https artwork link only (the image itself stays in the artwork cache, never in the file)."""
+    if not isinstance(value, str) or len(value) > 500 or not value.startswith("https://") or re.search(r"\s", value):
+        return None
+    return value
+
+
 def _time(value):
     return float(value) if isinstance(value, (int, float)) and not isinstance(value, bool) and value > 0 else None
+
+
+def price_history(record, currency="USD"):
+    """CheapShark's cheapestPriceEver ({"price": "2.28", "date": 1759177295}): the lowest price it ever recorded for
+    the game across the PC stores it tracks, in US dollars. A single record, not a price series, so it can say
+    "all-time low" or "X% above the all-time low", never "rare", "average" or "typical"."""
+    if not isinstance(record, dict):
+        return None
+    try:
+        low = Decimal(str(record.get("price")))
+    except InvalidOperation:
+        return None
+    stamp = record.get("date")
+    if not low.is_finite() or low < 0 or isinstance(stamp, bool) or not isinstance(stamp, (int, float)) or stamp <= 0:
+        return None
+    try:
+        date = datetime.fromtimestamp(stamp, timezone.utc).date().isoformat()
+    except (OverflowError, OSError, ValueError):
+        return None
+    return {"low": float(low.quantize(Decimal("0.01"), ROUND_HALF_UP)), "currency": currency, "date": date}
+
+
+def price_insight(price, currency, history):
+    """How a current price compares with the recorded all-time low, in the same currency and scope only.
+    "record": at or below the recorded low. "above": percent above it (whole percent, at least 1; None when the
+    low was free). None when there's no record, no price or the currencies differ (no conversion, ever)."""
+    if not isinstance(history, dict) or price is None or currency != history.get("currency"):
+        return None
+    try:
+        current, low = Decimal(str(price)), Decimal(str(history["low"]))
+    except (InvalidOperation, KeyError):
+        return None
+    base = {"low": history["low"], "currency": currency, "date": history.get("date")}
+    if current <= low:
+        return {**base, "kind": "record", "percent": None}
+    if low == 0:
+        return {**base, "kind": "above", "percent": None}
+    percent = ((current - low) / low * 100).quantize(Decimal(1), ROUND_HALF_UP)
+    return {**base, "kind": "above", "percent": max(1, int(percent))}
+
+
+def _history(raw):
+    if not isinstance(raw, dict) or _money(raw.get("low")) is None or _currency(raw.get("currency")) is None:
+        return None
+    date = raw.get("date") if isinstance(raw.get("date"), str) and re.fullmatch(r"\d{4}-\d{2}-\d{2}", raw["date"]) else None
+    return {"low": _money(raw["low"]), "currency": raw["currency"], "date": date}
 
 
 def item_key(item):
@@ -82,14 +141,16 @@ def normalize_item(raw):
         return None
     item = {"title": title, "game_id": _digits(raw.get("game_id")), "steam_app_id": _digits(raw.get("steam_app_id")),
             "app_store_id": _digits(raw.get("app_store_id")), "added": _time(raw.get("added")) or time.time(),
-            "target_price": _money(raw.get("target_price"))}
+            "target_price": _money(raw.get("target_price")), "thumb": _art(raw.get("thumb"))}
+    # A target is kept in the currency it was entered in; files from before targets had a currency used US dollars.
+    item["target_currency"] = (_currency(raw.get("target_currency")) or "USD") if item["target_price"] is not None else None
     best = raw.get("best") if isinstance(raw.get("best"), dict) else None
     if best and _money(best.get("price")) is not None:
         currency = best.get("currency") if isinstance(best.get("currency"), str) and re.fullmatch(r"[A-Z]{3}", best["currency"]) else "USD"
         savings = best.get("savings") if isinstance(best.get("savings"), int) and 0 <= best["savings"] <= 100 else 0
         item["best"] = {"price": _money(best["price"]), "normal_price": _money(best.get("normal_price")),
                         "savings": savings, "store": _text(best.get("store"), 60), "currency": currency,
-                        "checked": _time(best.get("checked"))}
+                        "checked": _time(best.get("checked")), "history": _history(best.get("history"))}
     item["key"] = item_key(item)
     return item
 
@@ -211,13 +272,17 @@ def remove(path, key):
     return update(path, lambda data: data.__setitem__("items", [item for item in data["items"] if item["key"] != key]))
 
 
-def set_target(path, key, price):
+def set_target(path, key, price, currency="USD"):
     price = _money(price) if price is not None else None
+    currency = _currency(currency)
+    if price is not None and currency is None:
+        raise WishlistError("The target price needs a currency.")
 
     def change(data):
         for item in data["items"]:
             if item["key"] == key:
                 item["target_price"] = price
+                item["target_currency"] = currency if price is not None else None
     return update(path, change)
 
 
@@ -230,12 +295,14 @@ def apply_prices(data, prices, now=None):
         if game and game.get("offers"):
             offer = game["offers"][0]
             item["steam_app_id"] = item.get("steam_app_id") or game.get("steam_app_id")
+            item["thumb"] = _art(game.get("thumb")) or item.get("thumb")
             item["best"] = {"price": offer["price"], "normal_price": offer.get("normal_price"),
                             "savings": offer.get("savings") or 0, "store": offer["store"], "currency": "USD",
-                            "checked": now}
+                            "checked": now, "history": game.get("history")}
             continue
         app = apps.get(item.get("app_store_id") or "")
         if app:
+            item["thumb"] = _art(app.get("thumb")) or item.get("thumb")
             previous = item.get("best") or {}
             drop = 0
             if previous.get("currency") == app["currency"] and (previous.get("normal_price") or previous.get("price") or 0) > app["price"]:
@@ -243,17 +310,37 @@ def apply_prices(data, prices, now=None):
                 drop = max(0, min(100, round(100 * (base - app["price"]) / base)))
             normal = (previous.get("normal_price") or previous.get("price")) if drop else None
             item["best"] = {"price": app["price"], "normal_price": normal, "savings": drop, "store": "App Store",
-                            "currency": app["currency"], "checked": now}
+                            "currency": app["currency"], "checked": now, "history": None}
     return data
 
 
-def annotate(item):
-    """Badges for display: on sale (with store and percentage) and target price reached."""
+def target_reached(item, rates=None, fee_percent=0):
+    """True/False when the best price is at or below the target, None when it can't be told (no target, no price,
+    or no exchange rate between the two currencies). The price is converted into the target's currency without
+    rounding, so a price a fraction above the target never counts as reached."""
+    target, best = item.get("target_price"), item.get("best") or {}
+    if target is None or best.get("price") is None:
+        return None
+    source, wanted = best.get("currency") or "USD", item.get("target_currency") or "USD"
+    try:
+        price, limit, fee = Decimal(str(best["price"])), Decimal(str(target)), Decimal(str(fee_percent or 0))
+    except InvalidOperation:
+        return None
+    if source == wanted:
+        return price <= limit
+    table = (rates or {}).get("rates") or {}
+    if source not in table or wanted not in table:
+        return None
+    return price / Decimal(table[source]) * Decimal(table[wanted]) * (1 + fee / 100) <= limit
+
+
+def annotate(item, rates=None):
+    """Badges for display: on sale (with store and percentage) and target price reached (None: can't compare)."""
     best = item.get("best") or {}
     on_sale = bool(best and (best.get("savings") or 0) > 0)
-    target = item.get("target_price")
-    hit = target is not None and best.get("price") is not None and best.get("currency", "USD") == "USD" and best["price"] <= target
-    return {**item, "on_sale": on_sale, "target_hit": hit,
+    hit = target_reached(item, rates)
+    insight = price_insight(best.get("price"), best.get("currency"), best.get("history")) if best else None
+    return {**item, "on_sale": on_sale, "target_hit": hit, "insight": insight,
             "sale_text": f"On sale at {best['store']} −{best['savings']}%" if on_sale and best.get("store") else None}
 
 
@@ -277,8 +364,8 @@ def read_mirror():
         return None, None, None
 
 
-def report(data, **extra):
-    return {"items": [annotate(item) for item in data["items"]], **extra}
+def report(data, rates=None, **extra):
+    return {"items": [annotate(item, rates) for item in data["items"]], **extra}
 
 
 def status(path, library):

@@ -47,18 +47,26 @@ The Couch Cube section groups Play (the home screen), Controllers and Cube Shop.
 Settings groups Game library, App Store, Retro consoles, Console Mode and App Settings,
 in that order. Game library also contains what used to be Library storage.
 
-**Cube Shop** (it replaced the Deals page and remembers which Deals tab you used) is a native,
-read-only shop window for PC games with five tabs: **Home**, **Deals**, **Free Games**,
-**Search** and **Wishlist**. It never buys anything, signs in anywhere or claims that a game
+**Cube Shop** (it replaced the Deals page and always opens on Home) is a native,
+read-only shop window for PC games: **Home**, **Deals**, **Free Games** and **Wishlist**, plus
+search results. It never buys anything, signs in anywhere or claims that a game
 runs on a Mac. Every row is one clickable row (hover, pointer, keyboard and VoiceOver) that
 opens your **default browser**: store deals use CheapShark's `cheapshark.com/redirect` link
 (their terms require it, Steam deals included), giveaways open on gamerpower.com, Mac App
 Store results open apps.apple.com (which hands off to the App Store app). Any other host or
 scheme is refused. There is no in-app browser and no store-app deep linking.
-The header is kept small: the tabs, a large search field, a compact **My Stores / All Stores**
-switch and Refresh. Home shows a few games per section with a **See all ›** link. Rate source,
-attribution and store-filter details sit in small print at the bottom or in tooltips. Each price
-column shows the sale price with the old price struck through directly beneath it.
+The header has one large search field ("Search games in every store") and, below it, the four
+sections with a quiet **My Stores / All Stores** popup and Refresh on the right. Searching
+(Return, or a short pause after two or more letters) shows results in place of the section;
+clearing the field goes back. Home shows a few games per section with a **See all ›** link.
+Rate source, attribution and store-filter details sit in small print at the bottom or in tooltips.
+
+Every row has the artwork, the title with its Mac/Windows badge, then Set Target and the
+wishlist heart (neither opens the store). On the right, the price block has two right-aligned
+lines: the price, with the usual price struck through beside it on a sale; under it the store by
+its full name, gray with its icon, or on a sale a green tag with the store and discount
+("Steam −75%"). A game row covering several stores shows only its lowest price and best discount;
+the stores are listed under it. A real end date or the all-time-low note goes on a small line below.
 
 - **Sources.** [CheapShark](https://www.cheapshark.com) store deals and per-store prices (USD),
   [GamerPower](https://www.gamerpower.com) giveaways, and Apple's keyless
@@ -74,14 +82,14 @@ column shows the sale price with the old price struck through directly beneath i
   none installed, All Stores is used and a hint explains why.
 - **Home** shows Wishlist deals, Featured deals, Price drops and Free now, picked locally from
   discount, ratings, recency and your wishlist. Nothing about you is sent anywhere.
-- **Deals rows** show the store and an Installed badge on the left; Installed means a deal's Steam
-  app ID matches a game installed in a Steam library on this Mac. On the right, every row of a
-  list shares fixed columns: Steam rating, Metacritic and deal rating (each in its own column,
-  left empty when a game lacks it), then the wishlist heart, the price and the discount.
+- **Deals rows** show an Installed badge when a deal's Steam app ID matches a game installed in
+  a Steam library on this Mac. Every row of a list shares fixed columns: Steam rating, Metacritic
+  and deal rating (each left empty when a game lacks it), then the price block.
 - **Expiry and Reminders.** Only GamerPower provides end dates (`end_date`, read as UTC because
   the API doesn't state a time zone; "N/A" means no badge). CheapShark has none, so store deals
-  never show one. The badge (“3 days left”, “Ends tomorrow”, orange within two days) is its own
-  control: clicking it adds a reminder to your default Apple Reminders list at 09:00 on the day
+  never show one (a source limit; nothing is guessed from sale start dates or price history). The
+  date shows under the price (“Offer ends 22 October”, with the year when it isn't this year) and is
+  its own control: clicking it adds a reminder to your default Apple Reminders list at 09:00 on the day
   before the end (or the soonest sensible time, which the confirmation states). Access is asked on
   first use; if denied, a note links to Privacy & Security › Reminders. A second click offers
   removal, and a reminder you delete in Reminders resets the badge.
@@ -90,16 +98,41 @@ column shows the sale price with the old price struck through directly beneath i
   its lowest price and, indented under it, one row per store, cheapest first and marked Lowest. CheapShark prices are
   USD and App Store prices use your storefront's currency, labelled; without a Shop currency the
   App Store rows are grouped after the USD stores instead of being mixed into the sort.
+- **Store icons.** Every store price without a discount has a small store icon (bundled launcher
+  icons, an SF Symbol fallback otherwise); the store's full name and discount are read by VoiceOver.
+- **All-time low.** CheapShark's game lookup (used by Search and the Wishlist price check, so no
+  extra requests) includes only `cheapestPriceEver`: the lowest USD price it recorded across the
+  stores it tracks, and when. Rows show “All-time low” (green) when the best USD price is at or
+  below it, or “X% above all-time low”, with the record and date in the tooltip. It's a single
+  minimum, not a price history, so Cube Shop never says a price is rare, typical or above average.
+  Converted prices aren't used for it, other currencies (App Store) get no note, and Deals and Home
+  lists don't carry the record, so they show none.
+- **Mac / Windows badges.** A green Mac badge means Steam's `appdetails` lists a Mac build (or
+  it's a Mac App Store app). A yellow **Windows** badge means Steam explicitly lists Windows and
+  no Mac build; its tooltip says it needs a compatibility app (naming the ones installed, if any).
+  CheapShark and GamerPower have no platform data, so other stores' deals and giveaways make no
+  claim. Lookups are one Steam app per request, at most 12 per refresh, cached for 7 days.
+- **Sort by.** Deals, Free Games, Search and Wishlist each have a Sort by popup (Relevance,
+  Name A–Z, lowest/highest price, discount, plus rating on Deals, Ends Soon on Free Games and
+  Date Added on Wishlist), remembered per list. Prices sort by the converted value when a Shop
+  currency is set, otherwise by currency group; missing values go last and ties keep their order.
+  Deals sorting is done by CheapShark because it's paginated; Search sorts games by their lowest
+  price while each game's stores stay cheapest first.
 - **Wishlist** is Couch Cube's own, saved on the active Couch Cube drive in
   `Couch Cube/Wishlist/wishlist.json` (schema version, title, CheapShark game ID, Steam app ID,
-  App Store ID, date added, optional target price in USD, last known best price with its currency).
+  App Store ID, artwork URL, date added, optional target price with its currency code, last known
+  best price with its currency; converted values are never stored).
   It moves with the drive and works offline. Writes are atomic (temp file + rename, coordinated);
   when the drive is unplugged or read-only the last copy is shown read-only with a note, and lists
   from different drives are merged when you switch. Before a drive is set up, the wishlist is
   saved on this Mac (`~/Library/Application Support/Couch Cube/Wishlist`) and moves onto the drive
-  when you set one up. Add or remove with the heart on any row; the heart never opens the store.
+  when you set one up. Each item shows its artwork (from the artwork cache, with a placeholder),
+  current best price and an editable target in your Shop currency (e.g. HUF); the target is
+  converted to each store's currency with the current ECB rates, and without rates the comparison
+  is shown as unavailable. Add or remove with the heart on any row; the heart never opens the store.
   Prices are checked in batches only when you open Cube Shop or press Refresh, never in the
-  background, and hits (“On sale at <store> −X%”, target reached) appear on Home. There are no
+  background, and hits (on sale, shown under the price as a green “<store> −X%”, or target reached;
+  the full “On sale at …” sentence is in the tooltip) appear on Home. There are no
   notifications or e-mail alerts.
 - **Caching.** Replies are cached in `~/Library/Caches/Couch Cube/deals`; rate limits
   (including 429 Retry-After) and connection failures keep the last results with a message.
@@ -699,7 +732,11 @@ bash scripts/build-icons.sh --export   # Export artwork
 ```
 
 The first build downloads a pinned runtime (`config/runtime.json`).
-Each build clears `build/` first, including previous apps, releases and caches.
+Each build clears `build/` first except the current `CouchCube.app` and release DMG/ZIP files.
+The app is built in `build/staging/CouchCube.app` and then swapped into `build/CouchCube.app` in
+one atomic rename, so a copy that's already running never sees a half-built bundle
+(`scripts/build-setup-app.sh --stage-only` stops after staging). If the bundle is replaced
+anyway, Couch Cube asks you to quit and reopen instead of showing a raw Python error.
 Update settings live in `config/release.json`. The manual GitHub workflow
 builds downloads; publishing a release is a separate, explicit action.
 Pushing a `v0.3.0-alpha.N` tag builds and verifies that tagged commit, then

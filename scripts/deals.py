@@ -26,10 +26,10 @@ RESPONSE_LIMIT = 4 * 1024 ** 2
 PAGE_SIZE = 60
 # Fresh enough to reuse without asking: CheapShark refreshes prices about hourly and caches for 5–10 minutes.
 FRESH_SECONDS = {"deals": 10 * 60, "stores": 24 * 3600, "giveaways": 30 * 60, "search": 30 * 60, "games": 10 * 60,
-                 "appstore": 6 * 3600, "rates": 12 * 3600}
+                 "appstore": 6 * 3600, "rates": 12 * 3600, "platforms": 7 * 24 * 3600}
 # A manual refresh inside this window reuses the cache, so repeated clicks never become repeated requests.
 REFRESH_FLOOR = 60
-SORTS = {"rating": "Deal Rating", "savings": "Savings", "price": "Price", "recent": "Recent",
+SORTS = {"rating": "Deal Rating", "savings": "Savings", "price": "Price", "price-desc": "Price", "recent": "Recent",
          "reviews": "Reviews", "title": "Title"}
 # Only platforms a Mac can use natively or through Wine; console and mobile giveaways are never requested or shown.
 GIVEAWAY_PLATFORMS = ["pc", "steam", "epic-games-store", "gog", "itchio", "ubisoft", "origin", "battlenet", "drm-free"]
@@ -227,8 +227,8 @@ def store_deals(page=0, sort="rating", store=None, search=None, refresh=False, i
     known = [store_info for store_info in map(normalize_store, stores_reply.get("data") or []) if store_info]
     stores = {store_info["id"]: store_info["name"] for store_info in known}
     query = {"pageNumber": page, "pageSize": PAGE_SIZE, "sortBy": SORTS[sort], "onSale": 1}
-    if sort == "price":
-        query["desc"] = 0
+    if sort in ("price", "price-desc"):
+        query["desc"] = int(sort == "price-desc")
     if store is not None:
         query["storeID"] = store
     search = " ".join((search or "").split())[:60]

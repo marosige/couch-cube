@@ -1,13 +1,26 @@
 #!/bin/bash
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-APP="$ROOT/build/CouchCube.app"
+FINAL="$ROOT/build/CouchCube.app"
+# Build in a staging bundle and swap it in at the end, so a running Couch Cube never sees a half-built app.
+STAGING="$ROOT/build/staging"
+APP="$STAGING/CouchCube.app"
+OPEN=0
+STAGE_ONLY=0
+for arg in "$@"; do
+  case "$arg" in
+    --open) OPEN=1 ;;
+    --stage-only) STAGE_ONLY=1 ;;
+    *) echo "Usage: build-setup-app.sh [--open] [--stage-only]" >&2; exit 2 ;;
+  esac
+done
 
 if [[ "$(uname -s)" != Darwin ]]; then
   echo "Build requires macOS and Apple Command Line Tools (xcode-select --install)." >&2
   exit 1
 fi
-bash "$ROOT/scripts/clean-build.sh"
+bash "$ROOT/scripts/clean-build.sh" --keep CouchCube.app --keep "CouchCube-*.dmg*" --keep "CouchCube-*.zip*"
+mkdir -p "$STAGING"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources/scripts" "$APP/Contents/Resources/config" "$ROOT/build/module-cache"
 RUNTIME="$(bash "$ROOT/scripts/prepare-runtime.sh")"
 ditto "$RUNTIME" "$APP/Contents/Resources/python"
@@ -58,7 +71,24 @@ app = pathlib.Path(sys.argv[1])
 }))
 PY
 codesign --force --deep --sign - "$APP"
-echo "$APP"
-if [[ "${1:-}" == "--open" ]]; then
-  open "$APP"
+if [[ "$STAGE_ONLY" == 1 ]]; then
+  echo "$APP"
+  exit 0
+fi
+/usr/bin/python3 - "$APP" "$FINAL" <<'PY'
+import ctypes, os, shutil, sys
+staged, final = sys.argv[1], sys.argv[2]
+if os.path.lexists(final):
+    # RENAME_SWAP exchanges both paths in one step; the old app ends up in staging and is removed.
+    libc = ctypes.CDLL(None, use_errno=True)
+    if libc.renamex_np(staged.encode(), final.encode(), 0x2) != 0:
+        raise SystemExit(f"Cannot swap in the new app: {os.strerror(ctypes.get_errno())}")
+    shutil.rmtree(staged)
+else:
+    os.rename(staged, final)
+PY
+rmdir "$STAGING" 2>/dev/null || true
+echo "$FINAL"
+if [[ "$OPEN" == 1 ]]; then
+  open "$FINAL"
 fi

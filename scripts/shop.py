@@ -15,7 +15,14 @@ import urllib.parse
 _spec = importlib.util.spec_from_file_location("shop_deals", Path(__file__).with_name("deals.py"))
 deals = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(deals)
+_spec = importlib.util.spec_from_file_location("shop_wishlist", Path(__file__).with_name("wishlist.py"))
+wishlist = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(wishlist)
 
+STEAM_APPDETAILS = "https://store.steampowered.com/api/appdetails?"
+STEAM_HOSTS = {"store.steampowered.com"}
+# Steam's appdetails answers one game per request and is rate-limited, so each call looks up only a few new games.
+PLATFORM_LOOKUPS = 12
 ITUNES = "https://itunes.apple.com/"
 ITUNES_HOSTS = {"itunes.apple.com"}
 APP_STORE_HOSTS = {"apps.apple.com"}
@@ -162,10 +169,13 @@ def games_by_ids(ids, refresh=False, now=None, opener=None, stores=None):
             if not isinstance(title, str) or not title.strip():
                 continue
             app_id = str(info.get("steamAppID") or "")
-            offers = [offer for offer in (normalize_offer(item, stores) for item in entry.get("deals") or []) if offer]
+            offers = sorted_offers([offer for offer in (normalize_offer(item, stores) for item in entry.get("deals") or []) if offer])
+            # The all-time low covers every CheapShark store in USD, so it's compared with the best USD offer only.
+            history = wishlist.price_history(entry.get("cheapestPriceEver"))
             games[game_id] = {"id": game_id, "title": " ".join(title.split()),
                               "steam_app_id": app_id if app_id.isdigit() and app_id != "0" else None,
-                              "thumb": deals.https_url(info.get("thumb")), "offers": sorted_offers(offers)}
+                              "thumb": deals.https_url(info.get("thumb")), "offers": offers, "history": history,
+                              "insight": wishlist.price_insight(offers[0]["price"], "USD", history) if offers else None}
     return games, error
 
 
@@ -316,3 +326,53 @@ def home(mine, scope="mine", refresh=False, installed=frozenset(), now=None, ope
         free = []
     return {"scope": "mine" if use_mine else "all", "my_stores": mine, "featured": featured, "drops": drops,
             "free": free, "errors": list(dict.fromkeys(errors))}
+
+
+def platform_status(platforms):
+    """"mac" when Steam lists a macOS build, "windows" only when it lists Windows and explicitly no macOS build,
+    otherwise None (unknown: no claim is made)."""
+    if not isinstance(platforms, dict):
+        return None
+    if platforms.get("mac") is True:
+        return "mac"
+    if platforms.get("windows") is True and platforms.get("mac") is False:
+        return "windows"
+    return None
+
+
+def steam_platform_url(app_id):
+    return STEAM_APPDETAILS + urllib.parse.urlencode({"appids": app_id, "filters": "platforms"})
+
+
+def steam_platforms(app_ids, refresh=False, now=None, opener=None, limit=PLATFORM_LOOKUPS):
+    """Platform builds per Steam app from Steam's own store data, cached for a week. Only `limit` uncached games are
+    looked up per call; the rest are returned as pending so the next call continues. CheapShark and GamerPower carry
+    no platform data, so games without a Steam app ID stay unknown."""
+    ids = list(dict.fromkeys(str(value) for value in app_ids if re.fullmatch(r"\d{1,10}", str(value)) and str(value) != "0"))
+    result, pending, error, lookups = {}, [], None, 0
+    for app_id in ids:
+        url = steam_platform_url(app_id)
+        entry = deals.read_cache(deals.cache_path("platforms", url))
+        fresh = bool(entry) and (deals.time.time() if now is None else now) - entry["fetched"] < deals.FRESH_SECONDS["platforms"]
+        if fresh or (entry and (lookups >= limit or error)):
+            reply = entry
+        elif lookups >= limit or error:
+            pending.append(app_id)
+            continue
+        else:
+            lookups += 1
+            try:
+                reply = deals.cached_fetch("platforms", "steam", url, STEAM_HOSTS, refresh, now, opener)
+            except deals.DealsError as exc:
+                error = str(exc)
+                pending.append(app_id)
+                continue
+            error = error or reply.get("error")
+        data = reply.get("data") if isinstance(reply.get("data"), dict) else {}
+        game = data.get(app_id) if isinstance(data.get(app_id), dict) else {}
+        details = game.get("data") if game.get("success") is True and isinstance(game.get("data"), dict) else {}
+        platforms = details.get("platforms") if isinstance(details.get("platforms"), dict) else {}
+        builds = {key: platforms[key] for key in ("mac", "windows", "linux") if isinstance(platforms.get(key), bool)}
+        result[app_id] = {**builds, "status": platform_status(builds)}
+    return {"platforms": result, "pending": pending, "error": error}
+
