@@ -11380,9 +11380,15 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
         let epic = byLauncher.first { $0.id == "launcher:epic" }!
         precondition(epic.bytes == nil && epic.unknown == 1, "A launcher with only unknown sizes isn't shown as zero")
         let both = GameStorageSlice.slices(decoded, romsBySystem: true, pcByLauncher: true)
-        precondition(Set(both.map(\.id)) == ["system:psx", "system:snes", "launcher:steam", "launcher:gog", "launcher:bottle", "launcher:epic"] &&
-                     both.compactMap(\.bytes).reduce(0, +) == individual.compactMap(\.bytes).reduce(0, +) + 900_000 &&
-                     both.map(\.tenths).reduce(0, +) == 1000, "Both groupings together keep the same total")
+        // Split into typed values: one combined expression is too slow for older Swift type checkers (CI).
+        let bothIDs: Set<String> = Set(both.map { $0.id })
+        let expectedIDs: Set<String> = ["system:psx", "system:snes", "launcher:steam", "launcher:gog", "launcher:bottle", "launcher:epic"]
+        let bothBytes: Int64 = both.compactMap { $0.bytes }.reduce(0, +)
+        let individualBytes: Int64 = individual.compactMap { $0.bytes }.reduce(0, +)
+        let bothTenths: Int = both.map { $0.tenths }.reduce(0, +)
+        precondition(bothIDs == expectedIDs, "Both groupings: \(bothIDs)")
+        precondition(bothBytes == individualBytes + 900_000, "Both groupings together keep the same total")
+        precondition(bothTenths == 1000, "Both groupings' shares add up to 100%")
         func rows() -> [NSView] { views(driveDetailRows).filter { $0.identifier?.rawValue == "drive-games-row" } }
         func checkbox(_ id: String) -> NSButton { views(driveDetailRows).compactMap { $0 as? NSButton }.first { $0.identifier?.rawValue == id }! }
         let page = labels(driveDetailRows)
@@ -11898,9 +11904,13 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
                             self.renderControllerList()
                             self.window.contentView!.layoutSubtreeIfNeeded()
                             func layoutSnapshot() -> [NSRect] {
-                                [self.window.frame, self.activeControllerRows.frame] +
-                                    self.activeControllerRows.arrangedSubviews.map(\.frame) +
-                                    (self.controllerRowViews[entry.id].map { row in [row.frame] + row.subviews.map(\.frame) } ?? [])
+                                var frames: [NSRect] = [self.window.frame, self.activeControllerRows.frame]
+                                frames += self.activeControllerRows.arrangedSubviews.map { $0.frame }
+                                if let row = self.controllerRowViews[entry.id] {
+                                    frames.append(row.frame)
+                                    frames += row.subviews.map { $0.frame }
+                                }
+                                return frames
                             }
                             let idleLayout = layoutSnapshot()
                             precondition(self.controllerRowViews[entry.id]!.frame.maxX <= self.activeControllerRows.bounds.maxX + 0.5,
@@ -12926,9 +12936,11 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
                         catch { fputs("Cannot capture UI: \(error)\n", stderr); exit(1) }
                     }
                 }
-                print(ok ? "Native UI smoke test passed: settings navigation, apps, consoles and controller preview; no setup or pairing executed."
-                         : "Portable manager smoke test failed: \(self.status.stringValue)")
-                exit(ok ? 0 : 1)
+                let failure: String = "Portable manager smoke test failed: " + self.status.stringValue
+                let passed: String = "Native UI smoke test passed: settings navigation, apps, consoles and controller preview; no setup or pairing executed."
+                print(ok ? passed : failure)
+                let code: Int32 = ok ? 0 : 1
+                exit(code)
         }
     }
 
