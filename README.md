@@ -194,7 +194,7 @@ sidebar page. Install or remove menu applications in App Store.
 The default is selected with a native pop-up menu; unavailable menus cannot be selected.
 removal still asks for confirmation. Version details are available on hover.
 
-**Website:** [marosige.github.io/couch-cube](https://marosige.github.io/couch-cube/).
+**Website:** [couchcube.marosi.me](https://couchcube.marosi.me/).
 The app's Couch Cube branding opens this page. It links to the newest published
 release (including alpha releases) with an Installer DMG and SSD pack ZIP.
 For the SSD pack, unzip its contents onto your SSD, open `CouchCube.app` and
@@ -203,10 +203,11 @@ storage setup checks and binds them to the current volume; it does not erase the
 A modified template with extra files is preserved rather than overwritten.
 Emulators, games and BIOS are not included.
 
-The static site lives in `site/`; the Pages workflow adds the app icon and deploys
-on changes pushed to `main`. Enable **Settings → Pages → Source: GitHub Actions**
-in the repository before the first deployment. Downloads fall back to Releases
-when a release asset is unavailable or GitHub's API cannot be reached.
+The static site lives in `docs/` and is published by GitHub Pages straight from the
+`main` branch's `/docs` folder (**Settings → Pages → Deploy from a branch**), so there
+is no deployment workflow. `docs/CNAME` keeps the custom domain `couchcube.marosi.me`;
+`docs/icon.png` is a copy of `assets/icon-512.png`, so update both together. Downloads
+fall back to Releases when a release asset is unavailable or GitHub's API cannot be reached.
 
 **One window, no wizard.** Home uses a Discover-style layout: a full-width illustrated
 slim header showing only the bottom of a centered 16:9 TV, without text, then
@@ -728,7 +729,7 @@ bash scripts/package-release.sh        # One DMG and a local checksum in build/
 bash scripts/build-icons.sh --export   # Export artwork
 /usr/bin/python3 -B -m unittest discover -s tests -q
 /usr/bin/python3 -B scripts/verify-release.py \
-  build/CouchCube-0.3.0-arm64.dmg
+  build/CouchCube-0.1.0-arm64.dmg
 ```
 
 The first build downloads a pinned runtime (`config/runtime.json`).
@@ -739,8 +740,8 @@ one atomic rename, so a copy that's already running never sees a half-built bund
 anyway, Couch Cube asks you to quit and reopen instead of showing a raw Python error.
 Update settings live in `config/release.json`. The manual GitHub workflow
 builds downloads; publishing a release is a separate, explicit action.
-Pushing a `v0.3.0-alpha.N` tag builds and verifies that tagged commit, then
+Pushing a `v0.1-alpha.N` tag builds and verifies that tagged commit, then
 publishes a GitHub prerelease with only the DMG attachment.
-Alpha builds retain internal version `0.3.0`. Stable-only in-app release
+Alpha builds retain internal version `0.1.0`. Stable-only in-app release
 discovery does not show alpha releases. SSD copying uses the running app
 and works offline, including in alpha builds.

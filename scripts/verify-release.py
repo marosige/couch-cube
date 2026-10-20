@@ -5,6 +5,21 @@ import plistlib
 import subprocess
 import sys
 import tempfile
+import time
+
+
+def detach(mount):
+    """Unmount the image; retry while a crashed smoke child releases files, then force."""
+    for attempt in range(5):
+        result = subprocess.run(["/usr/bin/hdiutil", "detach", str(mount)],
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        if result.returncode == 0:
+            return
+        time.sleep(2)
+    result = subprocess.run(["/usr/bin/hdiutil", "detach", "-force", str(mount)],
+                            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    if result.returncode != 0:
+        raise RuntimeError(f"Could not detach {mount}: {result.stderr.strip()}")
 
 
 def run(args, **kwargs):
@@ -20,7 +35,7 @@ def verify_app(app, working_directory, distribution="local"):
     assert info["CFBundleIconFile"] == "Console"
     assert info["MCCDistribution"] == distribution
     assert info["NSBluetoothAlwaysUsageDescription"]
-    assert info["CFBundleShortVersionString"] == "0.3.0"
+    assert info["CFBundleShortVersionString"] == "0.1.0"
     # Activity must never open by itself in release: no debug flag baked in, no window restoration.
     assert "COUCH_CUBE_DEBUG_ACTIVITY" not in (info.get("LSEnvironment") or {})
     assert not info.get("NSQuitAlwaysKeepsWindows")
@@ -88,7 +103,13 @@ with tempfile.TemporaryDirectory(prefix="mac-console-release-") as directory:
         print("Read-only release verification passed: DMG contents, signature, relocated runtime, backend and native GUI.")
     finally:
         if attached:
-            run(["/usr/bin/hdiutil", "detach", str(mount)], stdout=subprocess.PIPE)
+            try:
+                detach(mount)
+            except RuntimeError as error:
+                # Report it, but never mask the verification failure that is already propagating.
+                if sys.exc_info()[0] is None:
+                    raise
+                print(f"warning: {error}", file=sys.stderr)
 
     with tempfile.TemporaryDirectory(prefix="mac-console-copy-") as copy_directory:
         app = relocated

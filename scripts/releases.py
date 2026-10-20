@@ -23,7 +23,7 @@ def configuration():
 
 def version(value):
     if not isinstance(value, str) or not re.fullmatch(r"v?\d+\.\d+\.\d+", value):
-        raise ReleaseError("Expected a stable release version such as v0.3.0.")
+        raise ReleaseError("Expected a stable release version such as v0.1.0.")
     return tuple(int(part) for part in value.removeprefix("v").split("."))
 
 

@@ -11691,11 +11691,14 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
                                 ((view as? NSButton).map { [$0.title] } ?? (view as? NSTextField).map { [$0.stringValue] } ?? []) +
                                     view.subviews.flatMap { texts($0) }
                             }
-                            let pageTexts = texts(library)
-                            precondition(pageTexts.filter { $0 == "Refresh connected drives" }.count == 1 &&
-                                         pageTexts.contains("Add or prepare an SSD...") && pageTexts.contains("Move library...") &&
-                                         pageTexts.filter { $0 == "Where your games live" }.count == 1,
-                                         "The merged page has no duplicate storage sections")
+                            let pageTexts: [String] = texts(library)
+                            let refreshCount: Int = pageTexts.filter { $0 == "Refresh connected drives" }.count
+                            let headingCount: Int = pageTexts.filter { $0 == "Where your games live" }.count
+                            let storageDiagnostics: String = "refresh=\(refreshCount) heading=\(headingCount) texts=\(pageTexts.filter { !$0.isEmpty })"
+                            precondition(refreshCount == 1, "The merged page has one drive refresh button: " + storageDiagnostics)
+                            precondition(headingCount == 1, "The merged page has one storage heading: " + storageDiagnostics)
+                            precondition(pageTexts.contains("Add or prepare an SSD..."), "The merged page offers SSD setup: " + storageDiagnostics)
+                            precondition(pageTexts.contains("Move library..."), "The merged page offers moving the library: " + storageDiagnostics)
                             precondition(texts(self.tabs.tabViewItems[2].view!).isEmpty)
                             self.storageStatus = StorageStatus(locations: [], active: nil, transfer: nil)
                             self.renderStorageLocations()
@@ -13162,6 +13165,8 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
         consolesLoaded = true
         consolesChecking = false
         consolePersistedEnabled = nil
+        // Fixture readiness: release runners have no emulators installed; the deferred restore puts real state back.
+        for index in consoleSystems.indices { consoleSystems[index].emulator_installed = true }
         renderSystems()
         window.contentView!.layoutSubtreeIfNeeded()
         let scroll = tabs.selectedTabViewItem!.view as! NSScrollView

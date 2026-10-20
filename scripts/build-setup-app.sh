@@ -61,7 +61,7 @@ app = pathlib.Path(sys.argv[1])
     "CFBundleExecutable": "ConsoleSetup",
     "CFBundlePackageType": "APPL",
     "CFBundleVersion": "3",
-    "CFBundleShortVersionString": "0.3.0",
+    "CFBundleShortVersionString": "0.1.0",
     "LSArchitecturePriority": ["arm64"],
     "LSMinimumSystemVersion": "13.0",
     "NSHighResolutionCapable": True,

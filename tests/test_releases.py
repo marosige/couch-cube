@@ -17,7 +17,7 @@ spec.loader.exec_module(releases)
 
 class ReleaseTests(unittest.TestCase):
     def setUp(self):
-        self.config = {"repository": "marosige/couch-cube", "version": "0.3.0",
+        self.config = {"repository": "marosige/couch-cube", "version": "0.1.0",
                        "asset_prefix": "CouchCube", "app_name": "CouchCube.app"}
         configuration = patch.object(releases, "configuration", return_value=self.config)
         configuration.start()
