@@ -1,44 +1,58 @@
-name: Build Couch Cube installer
+# Releases are driven by config/release.json (see scripts/version.py):
+# when its version changes on main and no tag exists for it yet, this builds,
+# verifies and publishes v<version>. Pre-releases (-alpha.N, -beta.N, -rc.N)
+# are published as GitHub pre-releases; stable versions become "Latest".
+# Run it manually to build and verify the installer without publishing.
+name: Release
 on:
   push:
-    tags:
-      - "v0.1-alpha.*"
+    branches: [main]
+    paths: [config/release.json]
   workflow_dispatch:
-    inputs:
-      publish_draft:
-        description: "Create a draft GitHub Release (requires repository owner's publication approval)"
-        type: boolean
-        default: false
-      tag:
-        description: "Existing version tag for an approved draft release (e.g. v0.1.0)"
-        type: string
-        default: "v0.1.0"
 permissions:
   contents: read
 jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      tag: ${{ steps.version.outputs.tag }}
+      dmg: ${{ steps.version.outputs.dmg }}
+      prerelease: ${{ steps.version.outputs.prerelease }}
+      publish: ${{ steps.version.outputs.publish }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: version
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          for field in version tag dmg prerelease; do
+            echo "$field=$(python3 scripts/version.py get "$field")" >> "$GITHUB_OUTPUT"
+          done
+          tag="$(python3 scripts/version.py get tag)"
+          if [ "$EVENT_NAME" = push ] && ! git ls-remote --exit-code --tags origin "refs/tags/$tag" >/dev/null; then
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+          fi
   dmg:
+    needs: plan
+    if: github.event_name == 'workflow_dispatch' || needs.plan.outputs.publish == 'true'
     runs-on: macos-14
     steps:
       - uses: actions/checkout@v4
-        with:
-          ref: ${{ inputs.publish_draft && inputs.tag || github.ref }}
-      - name: Validate alpha tag
-        if: github.event_name == 'push'
-        env:
-          RELEASE_TAG: ${{ github.ref_name }}
-        run: '[[ "$RELEASE_TAG" =~ ^v0\.1-alpha\.[0-9]+$ ]]'
       - run: /usr/bin/python3 -B -m unittest discover -s tests -q
       - run: bash scripts/package-release.sh
-      - run: /usr/bin/python3 -B scripts/verify-release.py build/CouchCube-0.1.0-arm64.dmg
+      - run: /usr/bin/python3 -B scripts/verify-release.py "build/${{ needs.plan.outputs.dmg }}"
       - uses: actions/upload-artifact@v4
         with:
           name: CouchCube-arm64
           path: |
             build/*.dmg
             build/*-SSD.zip
-  publish-release:
-    if: github.event_name == 'push' || inputs.publish_draft
-    needs: dmg
+  publish:
+    needs: [plan, dmg]
+    if: needs.plan.outputs.publish == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -47,23 +61,28 @@ jobs:
         with:
           name: CouchCube-arm64
           path: artifacts
-      - name: Publish alpha or create explicitly requested draft
+      - name: Publish ${{ needs.plan.outputs.tag }}
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-          RELEASE_TAG: ${{ github.event_name == 'push' && github.ref_name || inputs.tag }}
-          EVENT_NAME: ${{ github.event_name }}
+          TAG: ${{ needs.plan.outputs.tag }}
+          VERSION: ${{ needs.plan.outputs.version }}
+          PRERELEASE: ${{ needs.plan.outputs.prerelease }}
         run: |
-          if [ "$EVENT_NAME" = push ]; then
-            [[ "$RELEASE_TAG" =~ ^v0\.1-alpha\.[0-9]+$ ]]
-            gh release create "$RELEASE_TAG" --verify-tag --prerelease --latest=false \
-              --title "Couch Cube ${RELEASE_TAG#v} (Apple Silicon)" \
-              --notes "Early alpha for Apple Silicon Macs running macOS 13+. Installer: open the DMG and drag CouchCube.app to Applications. SSD pack: unzip onto your SSD, open CouchCube.app and finish Setup before adding games. The ZIP includes empty game folders, not a preconfigured library. Internal app version: 0.1.0. Ad-hoc signed, not notarized: macOS may require explicit approval in Privacy & Security. No games, BIOS, firmware or keys included. Steam storage and shortcuts are configured manually. Switch emulator setup is manual with no verified automatic download. Back up data before testing. Physical SSD erase and login/controller hotplug have not been exercised on a test Mac." \
-              artifacts/*.dmg artifacts/*-SSD.zip
+          if [ "$PRERELEASE" = true ]; then
+            flags=(--prerelease --latest=false)
+            notes="Early test build for Apple Silicon Macs running macOS 13+. Back up your data before testing."
           else
-            test "$RELEASE_TAG" = v0.1.0
-            gh release create "$RELEASE_TAG" --verify-tag --draft \
-              --title "Couch Cube 0.1.0 (Apple Silicon)" \
-              --notes "Apple Silicon macOS 13+. Ad-hoc signed; not notarized. See README for storage and SSD-preparation limitations." \
-              artifacts/*.dmg artifacts/*-SSD.zip
+            flags=(--latest)
+            notes="Couch Cube for Apple Silicon Macs running macOS 13+."
           fi
+          notes="$notes
+
+          **Install:** open the DMG and drag CouchCube.app to Applications.
+          **External SSD:** unzip the SSD pack onto your SSD, open CouchCube.app and finish Setup before adding games. The ZIP contains empty game folders, not a preconfigured library.
+
+          Ad-hoc signed, not notarized: macOS may ask for approval in System Settings → Privacy & Security.
+          No games, BIOS, firmware or keys are included. Steam storage and shortcuts are configured manually. Switch emulator setup is manual."
+          gh release create "$TAG" --target "$GITHUB_SHA" "${flags[@]}" \
+            --title "Couch Cube $VERSION" --notes "$notes" \
+            artifacts/*.dmg artifacts/*-SSD.zip

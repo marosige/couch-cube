@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Read-only DMG/app verification; never runs setup or erase."""
 from pathlib import Path
+import json
 import plistlib
 import subprocess
 import sys
@@ -22,6 +23,9 @@ def detach(mount):
         raise RuntimeError(f"Could not detach {mount}: {result.stderr.strip()}")
 
 
+RELEASE = json.loads((Path(__file__).resolve().parent.parent / "config/release.json").read_text())
+
+
 def run(args, **kwargs):
     return subprocess.run(args, check=True, **kwargs)
 
@@ -35,7 +39,10 @@ def verify_app(app, working_directory, distribution="local"):
     assert info["CFBundleIconFile"] == "Console"
     assert info["MCCDistribution"] == distribution
     assert info["NSBluetoothAlwaysUsageDescription"]
-    assert info["CFBundleShortVersionString"] == "0.1.0"
+    assert info["CFBundleIdentifier"] == RELEASE["bundle_id"]
+    assert info["CouchCubeVersion"] == RELEASE["version"]
+    assert info["CFBundleShortVersionString"] == RELEASE["version"].split("-")[0]
+    assert info["CFBundleVersion"] == str(RELEASE["build"])
     # Activity must never open by itself in release: no debug flag baked in, no window restoration.
     assert "COUCH_CUBE_DEBUG_ACTIVITY" not in (info.get("LSEnvironment") or {})
     assert not info.get("NSQuitAlwaysKeepsWindows")
@@ -77,7 +84,7 @@ def verify_app(app, working_directory, distribution="local"):
 
 
 image = Path(sys.argv[1]).resolve(strict=True)
-with tempfile.TemporaryDirectory(prefix="mac-console-release-") as directory:
+with tempfile.TemporaryDirectory(prefix="couch-cube-release-") as directory:
     mount = Path(directory) / "image"
     mount.mkdir()
     attached = False
@@ -111,7 +118,7 @@ with tempfile.TemporaryDirectory(prefix="mac-console-release-") as directory:
                     raise
                 print(f"warning: {error}", file=sys.stderr)
 
-    with tempfile.TemporaryDirectory(prefix="mac-console-copy-") as copy_directory:
+    with tempfile.TemporaryDirectory(prefix="couch-cube-copy-") as copy_directory:
         app = relocated
         directory = copy_directory
         verify_app(app, directory)

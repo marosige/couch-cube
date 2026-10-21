@@ -21,10 +21,23 @@ def configuration():
     return json.loads(path.read_text())
 
 
+SEMVER = re.compile(r"v?(\d+)\.(\d+)\.(\d+)(?:-((?:alpha|beta|rc)\.\d+))?")
+
+
 def version(value):
-    if not isinstance(value, str) or not re.fullmatch(r"v?\d+\.\d+\.\d+", value):
-        raise ReleaseError("Expected a stable release version such as v0.1.0.")
-    return tuple(int(part) for part in value.removeprefix("v").split("."))
+    """SemVer sort key: 0.1.0-alpha.1 < 0.1.0-alpha.2 < 0.1.0-beta.1 < 0.1.0 < 0.1.1."""
+    match = SEMVER.fullmatch(value) if isinstance(value, str) else None
+    if not match:
+        raise ReleaseError("Expected a release version such as v0.1.0 or v0.1.0-alpha.1.")
+    major, minor, patch, pre = match.groups()
+    if pre is None:
+        return int(major), int(minor), int(patch), (1,)
+    stage, number = pre.split(".")
+    return int(major), int(minor), int(patch), (0, ["alpha", "beta", "rc"].index(stage), int(number))
+
+
+def is_prerelease(value):
+    return version(value)[3][0] == 0
 
 
 def fetch(url, limit):
@@ -44,19 +57,35 @@ def fetch(url, limit):
             return data
     except urllib.error.HTTPError as exc:
         if exc.code == 404:
-            raise ReleaseError("No public release is available yet. Publish a stable GitHub Release with the ARM64 DMG first.") from exc
+            raise ReleaseError("No public release is available yet. Publish a GitHub Release with the ARM64 DMG first.") from exc
         raise ReleaseError(f"GitHub returned HTTP {exc.code}. Check connectivity or API rate limits and try again.") from exc
     except (urllib.error.URLError, TimeoutError) as exc:
         raise ReleaseError(f"Cannot reach GitHub: {exc}. Check your internet connection and try again.") from exc
 
 
 def latest():
+    """Newest published release this app may update to.
+
+    A stable app only follows stable releases; an alpha/beta/rc app also follows pre-releases.
+    """
     config = configuration()
-    release = json.loads(fetch(f"https://api.github.com/repos/{config['repository']}/releases/latest", 2 * 1024 ** 2))
-    if release.get("draft") is not False or release.get("prerelease") is not False:
-        raise ReleaseError("Only published stable releases are supported.")
+    include_prereleases = is_prerelease(config["version"])
+    releases = json.loads(fetch(f"https://api.github.com/repos/{config['repository']}/releases?per_page=30",
+                                2 * 1024 ** 2))
+    candidates = []
+    for release in releases if isinstance(releases, list) else []:
+        tag = release.get("tag_name")
+        if release.get("draft") is not False or not isinstance(tag, str) or not SEMVER.fullmatch(tag):
+            continue
+        if release.get("prerelease") is not is_prerelease(tag):
+            continue
+        if is_prerelease(tag) and not include_prereleases:
+            continue
+        candidates.append(release)
+    if not candidates:
+        raise ReleaseError("No public release is available yet. Publish a GitHub Release with the ARM64 DMG first.")
+    release = max(candidates, key=lambda item: version(item["tag_name"]))
     tag = release["tag_name"]
-    version(tag)
     filename = f"{config['asset_prefix']}-{tag.removeprefix('v')}-arm64.dmg"
     assets = {}
     for name in [filename]:
@@ -113,7 +142,7 @@ def stage(directory, run):
             raise ReleaseError("Extracted app has an escaping symbolic link.")
     with (app / "Contents/Info.plist").open("rb") as file:
         info = plistlib.load(file)
-    if info.get("CFBundleIdentifier") != "org.macgameconsole.setup" or info.get("CFBundleShortVersionString") != release["version"]:
+    if info.get("CFBundleIdentifier") != config["bundle_id"] or info.get("CouchCubeVersion") != release["version"]:
         raise ReleaseError("Downloaded app identity/version does not match the release.")
     if info.get("MCCDistribution") != "portable":
         if info.get("MCCDistribution") != "local":

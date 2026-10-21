@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PATHS_ENV="$ROOT_DIR/config/paths.env"
 
-if [[ -f "$HOME/Library/Application Support/Mac Game Console/setup.json" ]]; then
+if [[ -f "$HOME/Library/Application Support/Couch Cube/setup.json" ]]; then
   env_file="$(mktemp)"
   if ! /usr/bin/python3 "$ROOT_DIR/scripts/console.py" env > "$env_file"; then
     rm -f "$env_file"

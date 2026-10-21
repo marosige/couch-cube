@@ -10804,8 +10804,8 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
                         } else if removeSelf.state == .on {
                             NSApp.terminate(nil)
                         } else {
-                            if targets.paths.contains(where: { $0.hasSuffix("/org.macgameconsole.setup.plist") }),
-                               let identifier = Bundle.main.bundleIdentifier {
+                            if let identifier = Bundle.main.bundleIdentifier,
+                               targets.paths.contains(where: { $0.hasSuffix("/\(identifier).plist") }) {
                                 UserDefaults.standard.removePersistentDomain(forName: identifier)
                             }
                             self.status.stringValue = "Selected items removed. Trash was not emptied. Unselected and undetected items were kept."
@@ -14863,6 +14863,20 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
 /// - `controller-fills-<style>-<light|dark>.png`: every controller type × key colors, plus the full palette on DualSense.
 /// - `controller-styles-<light|dark>.png`: outline (A) and double wall (B) side by side, at row and preview sizes.
 /// They render the same `ControllerArtView` used in the app.
+/// Couch Cube used the bundle identifier org.macgameconsole.setup before it was renamed.
+/// Copy those preferences once so saved choices survive the change; the old domain is left for Cleanup.
+func migrateLegacyDefaults() {
+    let defaults = UserDefaults.standard
+    let marker = "CouchCubeMigratedLegacyDefaults"
+    guard !defaults.bool(forKey: marker) else { return }
+    if let legacy = defaults.persistentDomain(forName: "org.macgameconsole.setup") {
+        for (key, value) in legacy where defaults.object(forKey: key) == nil {
+            defaults.set(value, forKey: key)
+        }
+    }
+    defaults.set(true, forKey: marker)
+}
+
 func renderControllerSheets(to folder: URL) -> Bool {
     let kinds = Array(ControllerArtwork.kinds.dropFirst())
     func label(_ text: String, _ frame: NSRect, size: CGFloat = 10, bold: Bool = false) -> NSTextField {
@@ -14994,6 +15008,7 @@ if let index = CommandLine.arguments.firstIndex(of: "--controller-sheet"), Comma
     exit(renderControllerSheets(to: folder) ? 0 : 1)
 }
 application.setActivationPolicy(.regular)
+if !CommandLine.arguments.contains("--smoke-test") { migrateLegacyDefaults() }
 let controller = SetupController()
 application.delegate = controller
 application.run()
