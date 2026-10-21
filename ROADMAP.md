@@ -25,7 +25,13 @@ Couch Cube should feel like Apple made it: simple, native, obvious to anyone who
    - one grid of all games: Steam (Mac), Windows games via compatibility layers (CrossOver,
      Steam in a VM…), Epic/GOG/Battle.net, emulator games (incl. Switch);
    - folders/collections (e.g. "Party", "4 players", "Retro");
-   - controller management (who is player 1–4, battery, connect/disconnect) without a keyboard;
+   - controller management (who is player 1–4, battery, connect/disconnect) without a keyboard,
+     as simple as on the Mac window: pairing a new controller works from the TV mode too;
+   - button hints use one neutral four-dot diamond with the pressed position filled (like Switch
+     icons), never X/□/○/△ or A/B/X/Y, so every brand of controller reads the same;
+   - every connected controller can navigate. Start+Select together locks the menu to that
+     controller; the same combo unlocks it, and Start+Select on another controller takes over —
+     so friends can't mess up the menu while someone is choosing;
    - media tiles: YouTube (TV web app), Apple Music and other apps/web apps, also opened by controller.
 3. **Desktop launcher** — the same library in the normal Mac window, so when playing at the desk
    (e.g. Warcraft II through Battle.net on Windows) every game is one click away, wherever it lives.
