@@ -63,8 +63,7 @@ Couch Cube includes no games, BIOS, firmware or keys. How each page works in det
 | PlayStation 3 | RPCS3, manual download from [rpcs3.net](https://rpcs3.net/download) | Install Sony firmware in RPCS3; game compatibility varies |
 | Nintendo Switch | Manually supplied compatible Ryujinx-based macOS build (`Ryujinx.app`) | No verified automatic download bundled; configure your own legally obtained keys, firmware and game dumps |
 
-These are launch integrations, not game compatibility guarantees. Every console
-has its folder in `ROMs` from the start, so you can copy games in before turning it on. Disabling a
+These are launch integrations, not game compatibility guarantees. Disabling a
 console preserves its ROMs and saves. Existing disabled ROM folders get ES-DE's
 `noload.txt` marker; only Couch Cube's unchanged markers are removed when
 re-enabling. The managed frontend disables gamelist-only loading so these
