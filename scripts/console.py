@@ -71,8 +71,8 @@ SYSTEMS = {
     "gbc": ("Game Boy Color", "gbc|zip|7z", "gambatte"),
     "gba": ("Game Boy Advance", "gba|zip|7z", "mgba"),
     "n64": ("Nintendo 64", "n64|z64|v64|zip|7z", "mupen64plus_next"),
-    "gc": ("GameCube", "iso|gcz|rvz", "dolphin"),
-    "wii": ("Wii", "iso|wbfs|rvz", "dolphin"),
+    "gc": ("GameCube", "iso|gcm|ciso|gcz|rvz|wia", "dolphin"),
+    "wii": ("Wii", "iso|wbfs|ciso|gcz|rvz|wia|wad", "dolphin"),
     "psx": ("PlayStation", "cue|chd|m3u|pbp", "pcsx_rearmed"),
     "psp": ("PlayStation Portable", "iso|cso|pbp", "ppsspp"),
     "megadrive": ("Mega Drive / Genesis", "md|bin|zip|7z", "genesis_plus_gx"),
@@ -82,7 +82,7 @@ SYSTEMS = {
     "wiiu": ("Wii U", "wua|wud|wux|rpx", "cemu-wiiu"),
     "ps2": ("PlayStation 2", "iso|chd|cso|bin", "pcsx2"),
     "ps3": ("PlayStation 3", "self|bin", "rpcs3"),
-    "switch": ("Nintendo Switch", "nsp|xci|nro", "switch"),
+    "switch": ("Nintendo Switch", "nsp|xci|nca|nro|nso", "switch"),
 }
 STANDALONE = {"dolphin", "pcsx2", "rpcs3", "cemu-wiiu", "switch"}
 
