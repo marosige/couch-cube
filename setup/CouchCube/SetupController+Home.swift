@@ -46,13 +46,15 @@ extension SetupController {
         playAction.isEnabled = task == nil && ready && frontend != nil
         renderHomeControllers()
         renderLauncher()
-        let frontendID = frontend == "es-de" ? "es-de.png" : "steam.jpg"
-        homePlayBackground.layer?.contentsGravity = frontend == "es-de" ? .resizeAspect : .resizeAspectFill
-        homePlayBackground.layer?.backgroundColor = NSColor(srgbRed: 0.025, green: 0.30, blue: 0.40, alpha: 1).cgColor
-        if let image = NSImage(contentsOf: Bundle.main.resourceURL!.appendingPathComponent("TVMenus/\(frontendID)")) {
-            homePlayBackground.layer?.contents = image.cgImage(forProposedRect: nil, context: nil, hints: nil)
+        // The artwork names the menu; the small line under "Cube TV" only speaks up while nothing is chosen.
+        if homeArtworkMenu != frontend || homePlayBackground.layer?.contents == nil {
+            homeArtworkMenu = frontend
+            let path = appStates.first { $0.id == frontend && $0.installed && !$0.path.isEmpty }?.path
+            let art = TVMenuArtwork.image(for: frontend, appIcon: path.map { NSWorkspace.shared.icon(forFile: $0) })
+            homePlayBackground.layer?.contentsGravity = .resizeAspectFill
+            homePlayBackground.layer?.contents = art.cgImage(forProposedRect: nil, context: nil, hints: nil)
         }
-        homePlaySubtitle.stringValue = homeMenuLabel.stringValue
+        homePlaySubtitle.stringValue = frontend == nil ? homeMenuLabel.stringValue : ""
         playAction.setAccessibilityLabel("Cube TV · \(homeMenuLabel.stringValue)")
         var tasks: [SidebarTask] = []
         if let report = report, !ready {

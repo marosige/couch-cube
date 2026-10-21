@@ -213,11 +213,11 @@ shortcuts in `~/Applications/CrossOver` (installers and uninstallers skipped); M
 `Native/Games`; and apps added with **+** (UserDefaults `launcherApps`). The list comes from
 `library-games`, read-only and unmeasured. Tiles fill the width in a flow grid; click, Return or
 VoiceOver opens them, and their menu offers Open, Show in Finder and, for added apps, Remove from Play. The search field filters by name.
-The Play tile uses a bundled Steam Big Picture image or EmulationStation artwork
-matching the chosen TV menu, with only the Play title over the image. The entire
-tile launches the menu; image sources are recorded in `assets/tv-menus/sources.json`.
-The supplied EmulationStation banner is resampled 4x with Lanczos interpolation
-and shown without cropping its logo against a matching blue background.
+The Cube TV tile's artwork is drawn in code (`TVMenuArtwork.swift`) so it stays sharp at any size: the
+chosen menu's colors (Steam blue, ES-DE red, Cube TV purple when none is chosen), a soft glow and
+scanlines, the installed app's own icon (bundled icon as fallback) and its name ("STEAM / Big Picture",
+"ES-DE / Retro Games"). The whole tile launches the menu; the line under "Cube TV" only shows status
+while no menu is chosen. No third-party screenshots are bundled.
 The header preserves the icon's Mac mini geometry, without controller overlays.
 The portable edition adds a connected SSD on the cabinet to the left of the Mac mini.
 The Controllers tile is an interactive mini version of the Controllers page. Its

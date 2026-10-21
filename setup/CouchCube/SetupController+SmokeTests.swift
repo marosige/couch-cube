@@ -1698,10 +1698,11 @@ extension SetupController {
                     self.preferredFrontend = "es-de"
                     self.updateSetupSummary()
                     precondition(self.homeMenuLabel.stringValue == "ES-DE")
-                    precondition(self.homePlayBackground.layer?.contentsGravity == .resizeAspect,
-                                 "The complete EmulationStation logo must remain visible")
-                    let esArtwork = NSImage(contentsOf: Bundle.main.resourceURL!.appendingPathComponent("TVMenus/es-de.png"))!
-                    precondition(esArtwork.size == NSSize(width: 1676, height: 784))
+                    precondition(self.homePlayBackground.layer?.contents != nil && self.homeArtworkMenu == .some("es-de"),
+                                 "The Cube TV tile shows the ES-DE artwork")
+                    for menu in ["steam", "es-de", nil] as [String?] {
+                        precondition(TVMenuArtwork.image(for: menu).cgImage(forProposedRect: nil, context: nil, hints: nil) != nil)
+                    }
                     self.preferredFrontend = nil
                     self.showFinishing()
                     precondition(!self.steamStorageAdvice.stringValue.isEmpty)
@@ -3279,6 +3280,12 @@ extension SetupController {
         var pages = sidebarPages.filter { $0 >= 0 }
         // The Cube Shop game page too, for the game it last showed (Portal 2 from the deals list).
         if shopDetailKey != nil { pages.append(14) }
+        for menu in ["steam", "es-de", "none"] {
+            let art = TVMenuArtwork.image(for: menu == "none" ? nil : menu)
+            if let tiff = art.tiffRepresentation, let png = NSBitmapImageRep(data: tiff)?.representation(using: .png, properties: [:]) {
+                try? png.write(to: URL(fileURLWithPath: folder).appendingPathComponent("page-tvart-\(menu).png"))
+            }
+        }
         for page in pages {
             selectPage(page)
             RunLoop.current.run(until: Date().addingTimeInterval(0.2))
