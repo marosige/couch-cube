@@ -61,7 +61,7 @@ final class TileFlowView: NSView {
     var minimumTileWidth: CGFloat = 168
     var spacing: CGFloat = 16
     static let artRatio: CGFloat = 215.0 / 460.0
-    static let textHeight: CGFloat = 42
+    var textHeight: CGFloat = 42
     override var isFlipped: Bool { true }
 
     func setTiles(_ tiles: [NSView]) {
@@ -76,7 +76,7 @@ final class TileFlowView: NSView {
 
     private var columns: Int { max(1, Int((bounds.width + spacing) / (minimumTileWidth + spacing))) }
     private var tileWidth: CGFloat { max(minimumTileWidth, (bounds.width - CGFloat(columns - 1) * spacing) / CGFloat(columns)) }
-    private var tileHeight: CGFloat { (tileWidth * Self.artRatio).rounded() + Self.textHeight }
+    private var tileHeight: CGFloat { (tileWidth * Self.artRatio).rounded() + textHeight }
 
     override var intrinsicContentSize: NSSize {
         let rows = (subviews.count + columns - 1) / columns

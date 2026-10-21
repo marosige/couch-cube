@@ -492,6 +492,14 @@ def shop_search(query, country="US", refresh=False):
         raise SetupError(str(exc)) from None
 
 
+def shop_game(game_id, refresh=False):
+    shop = shop_tools()
+    try:
+        return shop.game(game_id, refresh)
+    except (shop.ShopError, shop.deals.DealsError) as exc:
+        raise SetupError(str(exc)) from None
+
+
 def rates_tools():
     spec = importlib.util.spec_from_file_location("console_rates", Path(__file__).with_name("rates.py"))
     module = importlib.util.module_from_spec(spec)
@@ -2454,6 +2462,9 @@ def main():
     shop_search_parser.add_argument("--query", required=True)
     shop_search_parser.add_argument("--country", default="US")
     shop_search_parser.add_argument("--refresh", action="store_true")
+    shop_game_parser = sub.add_parser("shop-game")
+    shop_game_parser.add_argument("--id", required=True)
+    shop_game_parser.add_argument("--refresh", action="store_true")
     platforms_parser = sub.add_parser("shop-platforms")
     platforms_parser.add_argument("--steam", default="", help="comma-separated Steam app IDs")
     platforms_parser.add_argument("--refresh", action="store_true")
@@ -2594,6 +2605,8 @@ def main():
             print(json_text(shop_tools().steam_platforms(ids, args.refresh)))
         elif args.command == "shop-search":
             print(json_text(shop_search(args.query, args.country, args.refresh)))
+        elif args.command == "shop-game":
+            print(json_text(shop_game(args.id, args.refresh)))
         elif args.command == "wishlist":
             if args.add:
                 try:

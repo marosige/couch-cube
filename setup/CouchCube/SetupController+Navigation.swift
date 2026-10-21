@@ -91,11 +91,13 @@ extension SetupController {
         // Library storage (2, 3) now lives in Game library.
         if index == 2 || index == 3 { selectPage(6); return }
         guard (0..<tabs.numberOfTabViewItems).contains(index) else { return }
+        let previousPage = currentPage
         if !replayingHistory && (historyIndex < 0 || pageHistory[historyIndex].page != index ||
             (index == 9 && pageHistory[historyIndex].systemID != inspectorSystemID) ||
-            (index == 12 && pageHistory[historyIndex].systemID != driveDetailID)) {
+            (index == 12 && pageHistory[historyIndex].systemID != driveDetailID) ||
+            (index == 14 && pageHistory[historyIndex].systemID != shopDetailKey)) {
             pageHistory = Array(pageHistory.prefix(historyIndex + 1))
-            pageHistory.append((index, index == 9 ? inspectorSystemID : index == 12 ? driveDetailID : nil))
+            pageHistory.append((index, index == 9 ? inspectorSystemID : index == 12 ? driveDetailID : index == 14 ? shopDetailKey : nil))
             historyIndex = pageHistory.count - 1
         }
         backToolbarItem.isEnabled = historyIndex > 0
@@ -108,12 +110,13 @@ extension SetupController {
         mainWindow.title = "Couch Cube"
         screenTitle.stringValue = index == 0 ? "Play" : index == 9 ? inspectorTitle.stringValue :
             index == 12 ? (detailDrive.map(driveTitle) ?? driveDetailCache[driveDetailID ?? ""].map { driveTitle($0.drive) } ?? "Drive") : index == 4 ? "Library storage" :
-            index == 5 ? "Steam setup guide" :
+            index == 5 ? "Steam setup guide" : index == 14 ? (shopDetails[shopDetailKey ?? ""]?.title ?? "Cube Shop") :
             sidebarPages.firstIndex(of: index).map { sidebarTitles[$0] } ?? "Couch Cube"
         storageNext.isHidden = index != 4
         storageNext.keyEquivalent = index == 4 ? "\r" : ""
         playAction.keyEquivalent = index == 0 ? "\r" : ""
-        let sidebarPage = (index == 3 || index == 4) ? 6 : index == 5 ? 6 : index == 9 ? inspectorParent : index == 12 ? driveDetailParent : index
+        let sidebarPage = (index == 3 || index == 4) ? 6 : index == 5 ? 6 : index == 9 ? inspectorParent : index == 12 ? driveDetailParent :
+            index == 14 ? 13 : index
         if let selected = sidebarPages.firstIndex(of: sidebarPage), sidebar.selectedRow != selected {
             sidebar.selectRowIndexes(IndexSet(integer: selected), byExtendingSelection: false)
         }
@@ -130,7 +133,8 @@ extension SetupController {
         }
         if index == 0 { renderGeneral() }
         if index == 6 { renderStorageLocations() }
-        if index == 13 { openCubeShop() }
+        // Back from a game page returns to the same Shop list; any other way in starts on Home.
+        if index == 13 && previousPage != 14 { openCubeShop() }
         if index == 11, shopCurrency != nil { loadRates(refresh: false) }
     }
 
@@ -181,6 +185,9 @@ extension SetupController {
             showConsoleDetails(sender)
         } else if destination.page == 12, let id = destination.systemID {
             showDriveDetail(id)
+            return
+        } else if destination.page == 14, let id = destination.systemID, let detail = shopDetails[id] {
+            showShopGame(detail)
             return
         } else {
             selectPage(destination.page)

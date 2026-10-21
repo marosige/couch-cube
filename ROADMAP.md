@@ -19,7 +19,9 @@ Couch Cube should feel like Apple made it: simple, native, obvious to anyone who
 
 ## Milestones
 
-1. **Polish what exists** — review every page, fix layout, wording and flows; confirm SSD,
+1. **Polish what exists** — review every page, fix layout, wording and flows; Console Mode, App
+   Settings and Game library: only the essentials, short and friendly, nothing scary;
+   Cube Shop: a modern Mac game store (storefront Home, one game row style, game pages); confirm SSD,
    Console Mode and controller hotplug on a real Mac (→ beta).
 2. **Couch Cube TV mode** — a full-screen, Apple TV–style home screen driven by controller:
    - one grid of all games: Steam (Mac), Windows games via compatibility layers (CrossOver,
@@ -35,4 +37,7 @@ Couch Cube should feel like Apple made it: simple, native, obvious to anyone who
    - media tiles: YouTube (TV web app), Apple Music and other apps/web apps, also opened by controller.
 3. **Desktop launcher** — the same library in the normal Mac window, so when playing at the desk
    (e.g. Warcraft II through Battle.net on Windows) every game is one click away, wherever it lives.
-4. **Storage** — external SSD library shared between Macs, with clear status and safe moves.
+4. **More consoles** — PlayStation and SEGA cards split into Home consoles / Handhelds like
+   Nintendo; add PS Vita (Vita3K) and SEGA Game Gear; PS4 (shadPS4) only once it runs games
+   reliably on Apple Silicon (experimental today).
+5. **Storage** — external SSD library shared between Macs, with clear status and safe moves.

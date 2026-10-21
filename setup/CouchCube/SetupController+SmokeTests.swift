@@ -2486,7 +2486,18 @@ extension SetupController {
         precondition(views(dealsList).filter { $0.accessibilityIdentifier() == "shopTarget" }.count == 4
                      && views(dealsList).filter { $0.accessibilityIdentifier() == "shopStoreTag" }.count == 4,
                      "Every deal row has Set Target and its store under the price")
-        opens.forEach { $0.activate() }
+        // A row opens its game page; the page's main button opens the store, and Back returns to the same list.
+        var savedTabForPages = shopTab.selectedSegment
+        func openThroughGamePage(_ row: ClickableRowView) {
+            row.activate()
+            precondition(currentPage == 14 && screenTitle.stringValue == shopDetails[shopDetailKey!]!.title, "A row opens its game page")
+            views(shopDetailContent).compactMap { $0 as? NSButton }.first { $0.accessibilityIdentifier() == "shopGameOpen" }!.performClick(nil)
+            dealsReminderBar.isHidden = true
+            navigateHistory(-1)
+            precondition(currentPage == 13 && shopTab.selectedSegment == savedTabForPages, "Back returns to the same Shop list")
+        }
+        savedTabForPages = shopTab.selectedSegment
+        opens.forEach(openThroughGamePage)
         precondition(opened.map(\.absoluteString) == ["abc", "lng", "mc"].map { "https://www.cheapshark.com/redirect?dealID=" + $0 },
                      "Off-host deal links must never open")
         let attribution = views(page).compactMap { $0 as? NSTextField }.first { $0.accessibilityIdentifier() == "dealsAttribution" }!
@@ -2507,7 +2518,8 @@ extension SetupController {
         precondition(dealsFilters.arrangedSubviews.contains(giveawayPlatformPopup) && dealsFilters.arrangedSubviews.contains(giveawayTypePopup))
         precondition(dealsMore.isHidden)
         opened = []
-        views(dealsList).compactMap { $0 as? ClickableRowView }.forEach { $0.activate() }
+        savedTabForPages = shopTab.selectedSegment
+        views(dealsList).compactMap { $0 as? ClickableRowView }.forEach(openThroughGamePage)
         precondition(opened.map(\.host) == ["www.gamerpower.com"])
         window.contentView!.layoutSubtreeIfNeeded()
         precondition(dealsList.frame.width > 300, "Deal rows must use the page width")
@@ -2608,16 +2620,15 @@ extension SetupController {
         precondition(shopScopeBar.isHidden == false && !homePane.isHidden && dealsPane.isHidden)
         precondition(calls("shop-home").last! == ["shop-home", "--scope", "mine"])
         let home = labels(homeList).map { $0.replacingOccurrences(of: "\u{00A0}", with: " ") }
-        for title in ["Wishlist deals", "Featured deals", "Price drops", "Free now", "Drop Game", "Free Adventure", "Steam \u{2212}80%"] {
-            precondition(home.contains { $0 == title || $0.contains(title) }, "Home shows \(title)")
+        for title in ["FEATURED DEAL", "On Your Wishlist", "Price Drops", "Free to Keep", "Portal 2", "Drop Game", "Free Adventure", "\u{2212}80%"] {
+            precondition(home.contains { $0 == title || $0.contains(title) }, "Home shows \(title): \(home)")
         }
-        precondition(!home.contains { $0.contains("On sale at") }, "The sale tag shows only the store and discount")
-        let saleRow = views(homeList).first { $0.accessibilityIdentifier() == "wishlistRow" }!
-        precondition(labels(saleRow).filter { $0.contains("\u{2212}80%") } == ["Steam \u{2212}80%"], "The sale shows once, under the price, not under the title too: \(labels(saleRow))")
-        precondition(views(saleRow).contains { ($0 as? NSTextField)?.stringValue == "All-time low" && $0.accessibilityIdentifier() == "shopPriceInsight" },
-                     "Wishlist rows note the all-time low too")
-        precondition(((saleRow.toolTip ?? "") + (saleRow.accessibilityLabel() ?? "")).contains("On sale at Steam \u{2212}80%"),
-                     "The full sentence stays in the tooltip and VoiceOver: \(saleRow.toolTip ?? "") / \(saleRow.accessibilityLabel() ?? "")")
+        precondition(views(homeList).filter { $0.accessibilityIdentifier() == "shopHero" }.count == 1, "One featured banner on top")
+        precondition(!home.contains { $0.contains("On sale at") }, "Cards show the discount pill, not a sentence")
+        let saleCard = views(homeList).first { $0.accessibilityIdentifier() == "shopCard" && labels($0).contains("Portal 2") }!
+        precondition(views(saleCard).contains { $0.accessibilityIdentifier() == "shopDiscount" } &&
+                     (saleCard.accessibilityLabel() ?? "").contains("On sale at Steam \u{2212}80%"),
+                     "The wishlist card shows its discount, with the full sentence in VoiceOver: \(saleCard.accessibilityLabel() ?? "")")
         // Hearts: saved items are filled; adding sends only the allowed keys; removing clears it.
         precondition(heart("cs:612")?.image?.name() == nil && heart("cs:612")?.accessibilityLabel() == "Remove Portal 2 from wishlist")
         precondition(heart("cs:700")?.accessibilityLabel() == "Add Drop Game to wishlist" && heart("cs:700")!.isEnabled)
@@ -2653,7 +2664,8 @@ extension SetupController {
         // Each item shows its art (a cached link), its current best price and a target editor, even at the minimum width.
         window.contentView!.layoutSubtreeIfNeeded()
         let wishArt = views(rows[0]).compactMap { $0 as? RemoteImageView }
-        precondition(wishArt.count == 1 && wishArt[0].source?.absoluteString == "https://cdn.example.com/portal2.jpg", "Wishlist rows show the game's art")
+        precondition(wishArt.count == 1 && wishArt[0].source?.absoluteString == "https://cdn.cloudflare.steamstatic.com/steam/apps/620/header.jpg",
+                     "Wishlist rows show Steam's own art for Steam games")
         precondition(labels(rows[0]).contains { $0.contains("1.99") }, "Wishlist rows show the current best price: \(labels(rows[0]))")
         let targetButton = { views(self.wishlistList).compactMap { $0 as? NSButton }.first { $0.accessibilityIdentifier() == "wishlistTarget" }! }
         for view in [wishArt[0], targetButton()] as [NSView] {
@@ -2718,8 +2730,14 @@ extension SetupController {
         shopSearchSubmitted()
         spin()
         precondition(calls("shop-search").count == searches + 1, "An identical search reuses the loaded results")
+        // A search result opens its game page, which compares every store.
+        precondition(views(searchList).filter { $0.accessibilityIdentifier() == "shopOffer" }.isEmpty, "Search lists games, not stores")
+        let hollowRow = views(searchList).compactMap { $0 as? ClickableRowView }.first { $0.accessibilityIdentifier() == "shopGameRow" && labels($0).contains("Hollow Knight") }!
+        hollowRow.activate()
+        precondition(currentPage == 14 && screenTitle.stringValue == "Hollow Knight" && calls("shop-game").isEmpty,
+                     "Search results already know every store, so the page needs no extra lookup")
         func offers() -> [String] {
-            views(searchList).filter { $0.accessibilityIdentifier() == "shopOffer" }.compactMap { $0.accessibilityLabel() }
+            views(shopDetailContent).filter { $0.accessibilityIdentifier() == "shopOffer" }.compactMap { $0.accessibilityLabel() }
         }
         func order() -> [String] {
             offers().map { $0.replacingOccurrences(of: "Open Hollow Knight at ", with: "").components(separatedBy: ",")[0] }
@@ -2750,37 +2768,30 @@ extension SetupController {
         defaults.set(1.0, forKey: shopFeeKey)
         precondition(shopPrice(11.99, "USD").value == 3907 && shopPrice(3990, "HUF").value == 3990, "The fee applies only to conversions")
         defaults.removeObject(forKey: shopFeeKey)
-        // Rows open the default browser: CheapShark redirects and apps.apple.com only.
+        // Store rows open the default browser: CheapShark redirects and apps.apple.com only.
         let before = opened().count
-        let shopRows = views(searchList).compactMap { $0 as? ClickableRowView }
+        let shopRows = views(shopDetailContent).compactMap { $0 as? ClickableRowView }.filter { $0.accessibilityIdentifier() == "shopOffer" }
         shopRows.forEach { $0.activate() }
         let hosts = Set(opened().dropFirst(before).compactMap(\.host))
         precondition(opened().count - before == shopRows.count && hosts == ["www.cheapshark.com", "apps.apple.com"], "\(hosts)")
-        // Search groups: one parent row per game (art, title, heart, lowest price), stores indented beneath it, cheapest first.
+        // The game page: big art, the cheapest store's price, the all-time low, and every store with only the cheapest marked.
         defaults.set("original", forKey: shopCurrencyKey)
         rerenderShop()
         window.contentView!.layoutSubtreeIfNeeded()
-        let list = searchList.arrangedSubviews.filter { !($0 is NSBox) }
-        let parentIndex = list.firstIndex { $0.accessibilityIdentifier() == "shopGameRow" }!
-        let parent = list[parentIndex]
-        let children = Array(list[(parentIndex + 1)...].prefix { $0.accessibilityIdentifier() == "shopOffer" })
-        precondition(children.count == 3, "Every store sits under its game")
-        precondition(searchList.arrangedSubviews[searchList.arrangedSubviews.firstIndex(of: parent)! + 1].accessibilityIdentifier() == "shopOffer",
-                     "No separator between a game and its stores")
-        precondition(views(parent).contains { $0 is RemoteImageView && $0.accessibilityIdentifier() == "shopArtwork" }, "Search games show their art")
-        precondition(children.allSatisfy { child in !views(child).contains { $0 is RemoteImageView } && !labels(child).contains("Hollow Knight") },
-                     "Store rows don't repeat the art or title")
-        func art(_ row: NSView) -> NSRect { let a = views(row).first { ["shopArtwork", "shopStoreIcon"].contains($0.accessibilityIdentifier()) }!; return a.convert(a.bounds, to: searchList) }
-        func leftmost(_ row: NSView) -> CGFloat {
-            views(row).filter { ($0 is NSTextField || $0 is NSImageView) && $0.frame.width > 0 && !$0.isHiddenOrHasHiddenAncestor }
-                .map { $0.convert($0.bounds, to: searchList).minX }.min()!
-        }
-        precondition(children.allSatisfy { leftmost($0) >= art(parent).minX + Self.shopChildIndent - 0.5 }, "Store rows are indented")
-        let lowest = children.map { child in views(child).compactMap { $0 as? NSTextField }.first { $0.accessibilityIdentifier() == "shopLowest" }?.stringValue }
-        precondition(lowest.compactMap { $0 }.count == 1 && lowest[0]?.replacingOccurrences(of: "\u{00A0}", with: " ") == "Lowest USD",
+        precondition(views(shopDetailContent).contains { $0.accessibilityIdentifier() == "shopGameHero" })
+        precondition(labels(shopDetailContent).contains("$9.99") && labels(shopDetailContent).contains("Lowest ever $7.99 (\u{2212}47%)"),
+                     "The all-time low with its price and discount: \(labels(shopDetailContent))")
+        let lowest = views(shopDetailContent).compactMap { $0 as? NSTextField }.filter { $0.accessibilityIdentifier() == "shopLowest" }.map(\.stringValue)
+        precondition(lowest.map { $0.replacingOccurrences(of: "\u{00A0}", with: " ") } == ["Lowest USD"],
                      "Only the cheapest store is marked, with its currency when prices are mixed: \(lowest)")
-        let parentMarker = views(parent).compactMap { $0 as? NSTextField }.first { $0.accessibilityIdentifier() == "shopLowest" }
-        precondition(parentMarker == nil && parent.accessibilityLabel()!.contains("lowest price $9.99 at GOG"), parent.accessibilityLabel() ?? "")
+        let buy = views(shopDetailContent).compactMap { $0 as? NSButton }.first { $0.accessibilityIdentifier() == "shopGameOpen" }!
+        precondition(buy.title == "View at GOG", buy.title)
+        navigateHistory(-1)
+        precondition(currentPage == 13 && shopTab.selectedSegment == 3, "Back returns to the search results")
+        let parent = searchList.arrangedSubviews.first { $0.accessibilityIdentifier() == "shopGameRow" }!
+        precondition(views(parent).contains { $0 is RemoteImageView && $0.accessibilityIdentifier() == "shopArtwork" }, "Search games show their art")
+        precondition(!views(parent).contains { $0.accessibilityIdentifier() == "shopLowest" } &&
+                     parent.accessibilityLabel()!.contains("lowest price $9.99 at GOG"), parent.accessibilityLabel() ?? "")
         // Search → wishlist with real clicks while the search field is editing: the heart must survive and toggle.
         // Real mouse events through the window, like a user's click: hit testing, responder chain and button tracking.
         func click(_ view: NSView, expecting target: NSView? = nil) {
@@ -2871,35 +2882,31 @@ extension SetupController {
             let text = labels(silksong).map { $0.replacingOccurrences(of: "\u{00A0}", with: " ") }
             precondition(!text.contains("Mac") && !text.contains { $0.hasPrefix("Windows") }, "No Steam ID, no claim: \(text)")
         }
-        let offerViews = views(searchList).filter { $0.accessibilityIdentifier() == "shopOffer" }
-        precondition(!offerViews.isEmpty)
+        hollowRow.activate()
+        window.contentView!.layoutSubtreeIfNeeded()
+        let offerViews = views(shopDetailContent).filter { $0.accessibilityIdentifier() == "shopOffer" }
+        precondition(offerViews.count == 3)
         for offer in offerViews {
             let icons = views(offer).filter { $0.accessibilityIdentifier() == "shopStoreIcon" }
-            let tags = views(offer).filter { $0.accessibilityIdentifier() == "shopStoreTag" }
-            let sale = views(offer).contains { $0.accessibilityIdentifier() == "shopSaleTag" }
-            let store = (tags.first?.accessibilityLabel() ?? "").components(separatedBy: ", ")[0]
-            let tagText = labels(tags.first ?? offer)
-            precondition(tags.count == 1 && (sale ? icons.isEmpty && tagText.count == 1 && tagText[0].hasPrefix(store + " \u{2212}") && tagText[0].hasSuffix("%")
-                                                  : icons.count == 1 && icons[0].accessibilityLabel() == store && icons[0].frame.width == 12 && tagText == [store])
-                         && labels(offer).filter { $0.hasPrefix(store) }.count == 1,
-                         "Every store price names its store in full, once: gray with its icon, or a green tag with the discount: \(store) \(labels(offer))")
-            let price = views(offer).first { $0.accessibilityIdentifier() == "shopPriceLine" }!
-            let tagFrame = tags[0].convert(tags[0].bounds, to: offer), priceFrame = price.convert(price.bounds, to: offer)
-            precondition(abs(tagFrame.maxX - priceFrame.maxX) < 0.5 && (offer.isFlipped ? tagFrame.minY >= priceFrame.maxY - 0.5 : tagFrame.maxY <= priceFrame.minY + 0.5),
-                         "The store line sits right under the price, right-aligned: \(tagFrame) \(priceFrame)")
+            let store = icons.first?.accessibilityLabel() ?? ""
+            let onSale = (offer.accessibilityLabel() ?? "").contains("% off") || views(offer).contains { $0.accessibilityIdentifier() == "shopDiscount" }
+            precondition(icons.count == 1 && labels(offer).filter { $0 == store }.count == 1 &&
+                         views(offer).contains { $0.accessibilityIdentifier() == "shopDiscount" } == onSale,
+                         "Every store row shows its logo and full name once, and a pill when discounted: \(store) \(labels(offer))")
             let text = labels(offer).joined(separator: " ")
             if !(store == "Steam" || store == "Mac App Store") {
                 precondition(!text.contains("Windows") && !text.contains("Mac\u{00A0}") && !text.hasSuffix("Mac"),
                              "Other PC stores may ship other builds, so they make no claim: \(text)")
             }
         }
+        navigateHistory(-1)
         // The all-time low: only CheapShark's record minimum, as a small line under the price, with the record in the tooltip.
         let insights = views(searchList).filter { $0.accessibilityIdentifier() == "shopPriceInsight" }.compactMap { $0 as? NSTextField }
-        precondition(insights.map(\.stringValue).sorted() == ["25% above all-time low", "All-time low"]
+        precondition(insights.map(\.stringValue).sorted() == ["All-time low", "Lowest ever $7.99 (\u{2212}47%)"]
                      && insights.allSatisfy { ($0.toolTip ?? "").contains("7.99 USD") || ($0.toolTip ?? "").contains("19.99 USD") }
                      && insights.allSatisfy { !($0.toolTip ?? "").lowercased().contains("average") && ($0.toolTip ?? "").contains("2025") }
                      && !views(searchList).filter { $0.accessibilityIdentifier() == "shopOffer" }.contains { views($0).contains { $0.accessibilityIdentifier() == "shopPriceInsight" } },
-                     "All-time-low notes on the game rows only: \(insights.map(\.stringValue))")
+                     "All-time lows with their price and discount, on the game rows: \(insights.map(\.stringValue))")
         for insight in insights {
             let column = insight.superview!.superview!
             precondition(column.accessibilityIdentifier() == "shopPriceColumn" && column.subviews.last === insight.superview, "The note sits under the price and store")
@@ -3069,12 +3076,16 @@ extension SetupController {
         let dealTitle = views(dealRowView).compactMap { $0 as? NSTextField }.first { $0.stringValue == "Portal 2" }!
         let openedBeforeRow = opened().count
         click(dealTitle, expecting: dealRowView)
-        precondition(opened().count == openedBeforeRow + 1 && opened().last!.host == "www.cheapshark.com", "Clicking the row opens the deal")
+        precondition(opened().count == openedBeforeRow && currentPage == 14 && screenTitle.stringValue == "Portal 2", "Clicking the row opens its game page")
+        let pageText = labels(shopDetailContent).joined(separator: " ")
+        precondition(pageText.contains("Steam 98%") && pageText.contains("Metacritic 95") && pageText.contains("Installed"),
+                     "Ratings live on the game page: \(pageText)")
+        navigateHistory(-1)
+        precondition(currentPage == 13 && shopTab.selectedSegment == 1)
         window.setFrame(roomyFrame, display: false)
         // Search: a game sold in one store is a plain row; groups mark only the cheapest store, not the game.
-        let single = views(searchList).first { $0.accessibilityIdentifier() == "shopSingleOffer" }
+        let single = views(searchList).first { $0.accessibilityIdentifier() == "shopGameRow" && labels($0).contains { $0.hasPrefix("Hollow Knight: Silksong") } }
         precondition(single != nil && !views(single!).contains { $0.accessibilityIdentifier() == "shopLowest" } &&
-                     searchList.arrangedSubviews.filter { $0.accessibilityIdentifier() == "shopOffer" }.count == 3 &&
                      views(single!).contains { $0.accessibilityIdentifier() == "wishlistHeart" && $0.identifier?.rawValue == "cs:200" },
                      "A one-store game is an ordinary row with its own heart")
         // A real click on a one-store result's heart adds it, a second removes it, and neither opens the store.
@@ -3100,26 +3111,6 @@ extension SetupController {
                 precondition(!views(parent).contains { $0.accessibilityIdentifier() == "shopLowest" }, "No Lowest tag on the game row")
             }
         }
-        // Ratings: each kind in its own column; a missing rating leaves its cell empty instead of sliding the others over.
-        selectShopTab(1)
-        spin()
-        window.contentView!.layoutSubtreeIfNeeded()
-        let dealRows = views(dealsList).compactMap { $0 as? ClickableRowView }
-        for id in ["shopRatingSteam", "shopRatingMetacritic", "shopRatingDeal"] {
-            let cells = dealRows.map { row in views(row).first { $0.accessibilityIdentifier() == id }! }
-            let xs = Set(cells.map { Int(($0.convert($0.bounds, to: dealsList).minX * 2).rounded()) })
-            precondition(xs.count == 1, "\(id) lines up in every row: \(xs)")
-        }
-        func cellText(_ row: NSView, _ id: String) -> String? {
-            views(views(row).first { $0.accessibilityIdentifier() == id }!).compactMap { $0 as? NSTextField }.first?.stringValue
-        }
-        let skyrim = dealRows.first { $0.accessibilityLabel()!.contains("Skyrim") }!
-        let critics = dealRows.first { $0.accessibilityLabel()!.contains("Critics Pick") }!
-        precondition(cellText(skyrim, "shopRatingSteam") == "85%" && cellText(skyrim, "shopRatingMetacritic") == nil &&
-                     cellText(skyrim, "shopRatingDeal") == "7.2", "Skyrim: Steam and deal rating, no Metacritic")
-        precondition(cellText(critics, "shopRatingSteam") == nil && cellText(critics, "shopRatingMetacritic") == "71" &&
-                     cellText(critics, "shopRatingDeal") == nil, "Critics Pick: Metacritic only, in the Metacritic column")
-        precondition(views(skyrim).first { $0.accessibilityIdentifier() == "shopRatingSteam" }!.toolTip == "Steam reviews: Very Positive (85%)")
         smokeCaptureShop()
         smokeCapturePages()
         // Every tab fits the narrowest window.
@@ -3142,7 +3133,7 @@ extension SetupController {
                 func frame(_ id: String) -> NSRect? { views(cluster).first { $0.accessibilityIdentifier() == id }.map { $0.convert($0.bounds, to: row) } }
                 precondition(frame("shopHeartColumn") == nil && frame("shopMarkerColumn") == nil, "Hearts and tags sit by the title, not in the price grid")
                 let priceFrame = frame("shopPriceColumn")!
-                precondition(frame("shopPercentColumn") == nil, "The discount sits with the store, not in its own column")
+                precondition(frame("shopPercentColumn") != nil, "Every row reserves the discount pill's column")
                 precondition(abs(priceFrame.maxX - (row.bounds.maxX - 6)) < 1, "The price block ends at the row's edge on tab \(tab): \(priceFrame) \(row.bounds)")
                 if let line = frame("shopPriceLine"), let tag = frame("shopStoreTag") {
                     precondition(abs(line.maxX - priceFrame.maxX) < 0.5 && abs(tag.maxX - priceFrame.maxX) < 0.5
@@ -3165,7 +3156,7 @@ extension SetupController {
                 if let was = views(cluster).first(where: { $0.accessibilityIdentifier() == "shopWasPrice" }) as? NSTextField,
                    let now = was.superview?.subviews.compactMap({ $0 as? NSTextField }).first(where: { $0 !== was }) {
                     let wasFrame = was.convert(was.bounds, to: row), nowFrame = now.convert(now.bounds, to: row)
-                    precondition(nowFrame.maxX <= wasFrame.minX + 0.5 && abs(wasFrame.midY - nowFrame.midY) < 4 &&
+                    precondition(wasFrame.maxX <= nowFrame.minX + 0.5 && abs(wasFrame.midY - nowFrame.midY) < 4 &&
                                  was.attributedStringValue.attribute(.strikethroughStyle, at: 0, effectiveRange: nil) != nil,
                                  "Usual price beside the price on tab \(tab): \(wasFrame) vs \(nowFrame)")
                 }
@@ -3242,7 +3233,10 @@ extension SetupController {
              sample("Nintendo Switch", "Switch emulator", .retro, "switch")]
         renderLauncher()
         defer { launcherSmokeItems = nil; renderLauncher() }
-        for page in sidebarPages where page >= 0 {
+        var pages = sidebarPages.filter { $0 >= 0 }
+        // The Cube Shop game page too, for the game it last showed (Portal 2 from the deals list).
+        if shopDetailKey != nil { pages.append(14) }
+        for page in pages {
             selectPage(page)
             RunLoop.current.run(until: Date().addingTimeInterval(0.2))
             let view = window.contentView!
