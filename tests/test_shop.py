@@ -53,6 +53,8 @@ class Opener:
             app = query["appids"][0]
             data = json.loads((FIX / "steam-appdetails.json").read_text())
             return Response(json.dumps({app: data.get(app, {"success": False})}).encode(), url)
+        elif parts.path == "/api/featuredcategories":
+            return Response(json.dumps({"top_sellers": {"items": [{"id": 1675200}, {"id": 367520}, {"id": 367520}]}}).encode(), url)
         elif parts.path in ("/search", "/lookup"):
             name = FIX / "itunes-search.json"
         else:
@@ -107,6 +109,16 @@ class ShopTests(unittest.TestCase):
         self.assertEqual(nothing["scope"], "all", "No installed store falls back to all stores")
         ranked = [shop.score(deal) for deal in report["featured"]]
         self.assertEqual(ranked, sorted(ranked, reverse=True))
+
+    def test_home_top_sellers_and_couch_games_are_full_price_shelves(self):
+        report = shop.home([], "all", opener=Opener(), now=1000)
+        self.assertEqual([game["title"] for game in report["top_sellers"]], ["Hollow Knight"],
+                         "Steam's top sellers that CheapShark lists, once each, on sale or not")
+        self.assertTrue(report["top_sellers"][0]["offers"])
+        self.assertEqual(report["couch"], [], "Couch picks CheapShark doesn't list are left out")
+        with patch.object(shop, "COUCH_GAMES", ["367520"]):
+            couch = shop.home([], "all", opener=Opener(), now=1000)["couch"]
+        self.assertEqual([game["steam_app_id"] for game in couch], ["367520"])
 
     def test_search_groups_sorts_and_keeps_currencies_apart(self):
         opener = Opener()

@@ -138,6 +138,28 @@ extension SetupController {
             line.setAccessibilityIdentifier("dealBadges")
             views.append(line)
         }
+        // What kind of game it is, right under the name (Steam's genres), like a store's category tags.
+        if let genres = detail.steam?.genres, !genres.isEmpty {
+            let tags = row(genres.map { genre in
+                let tag = NSTextField(labelWithString: genre)
+                tag.font = .systemFont(ofSize: 11, weight: .medium)
+                tag.textColor = .secondaryLabelColor
+                let pill = NSBox()
+                pill.boxType = .custom
+                pill.titlePosition = .noTitle
+                pill.borderWidth = 0
+                pill.cornerRadius = 9
+                pill.fillColor = .quaternaryLabelColor
+                pill.contentViewMargins = NSSize(width: 8, height: 2)
+                pill.contentView = tag
+                return pill
+            } + [NSView()])
+            tags.spacing = 6
+            tags.setAccessibilityIdentifier("shopGameGenres")
+            tags.setAccessibilityElement(true)
+            tags.setAccessibilityLabel("Genre: " + genres.joined(separator: ", "))
+            views.append(tags)
+        }
 
         views.append(shopGamePriceCard(detail))
         if let about = shopGameAboutCard(detail) { views.append(about) }
@@ -497,6 +519,21 @@ extension SetupController {
         }
     }
 
+    /// A Shop game (every store's offer) as a card: the cheapest offer's price, struck-through usual price when on sale.
+    func shopCard(game: ShopGame) -> NSView {
+        let heart = wishlistHeart(key: "cs:" + game.id, title: game.title,
+                                  payload: ["title": game.title, "game_id": game.id, "steam_app_id": game.steamAppId ?? "", "thumb": game.thumb ?? ""])
+        let best = game.offers.min { $0.price < $1.price }
+        let price = best.map { shopPrice($0.price, $0.currency) }
+        let was = best.flatMap { offer in offer.normalPrice.flatMap { $0 > offer.price ? shopPrice($0, offer.currency).text : nil } }
+        let savings = best?.savings ?? 0
+        return shopCard(title: game.title, art: steamArtURL(game.steamAppId) ?? game.thumb, price: price, was: was,
+                        savings: savings > 0 ? savings : nil, compat: compatibility(steamAppId: game.steamAppId), heart: heart,
+                        accessibility: "Open \(game.title)" + (price.map { ", \($0.spoken)" } ?? "") + (savings > 0 ? ", \(savings)% off" : "")) { [weak self] in
+            self?.showShopGame(self?.shopDetail(game: game))
+        }
+    }
+
     func shopCard(giveaway: Giveaway) -> NSView {
         let heart = wishlistHeart(key: "title:" + giveaway.title.lowercased(), title: giveaway.title,
                                   payload: ["title": giveaway.title, "thumb": giveaway.thumb ?? ""])
@@ -598,10 +635,11 @@ extension SetupController {
     }
 
     /// A Home shelf: a large heading with "See all" and a grid of cards that fills the page width.
-    func shopShelf(_ title: String, cards: [NSView], more tab: Int) -> [NSView] {
+    func shopShelf(_ title: String, cards: [NSView], more tab: Int?) -> [NSView] {
         guard !cards.isEmpty else { return [] }
         let more = NSButton(title: "See All", target: self, action: #selector(shopSeeAll(_:)))
-        more.tag = tab
+        more.tag = tab ?? 0
+        more.isHidden = tab == nil
         more.bezelStyle = .inline
         more.isBordered = false
         more.contentTintColor = .controlAccentColor

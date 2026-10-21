@@ -30,8 +30,11 @@ search results and a **game page** per game. It never buys anything, signs in an
 that a game runs on a Mac. The page is wider than the settings pages (up to 960 pt).
 
 - **Home** is a storefront: one featured banner (big Steam art, discount pill, price), then shelves
-  of cards: On Your Wishlist (wishlist games on sale or at your target), Top Deals, Price Drops and
-  Free to Keep, each with **See All** to the full list. Cards show art, title, Mac/Windows badge,
+  of cards: On Your Wishlist (wishlist games on sale or at your target), Top Deals, **Top Sellers**
+  (Steam's keyless `featuredcategories` top sellers, on sale or not), **Couch Games** (Couch Cube's own
+  pick of local multiplayer games, `COUCH_GAMES` in shop.py, on sale or not), Price Drops and
+  Free to Keep; the deal shelves have **See All** to the full list. Full-price shelves are matched to
+  CheapShark by Steam app ID (cached a week) so every card has every store's price. Cards show art, title, Mac/Windows badge,
   the discount pill and the price, with the wishlist heart on the art.
 - **One row style** everywhere else: art (Steam's own header art when the game is on Steam), the
   title with its Mac/Windows badge, Set Target and the heart; on the right a green discount pill,
@@ -40,7 +43,8 @@ that a game runs on a Mac. The page is wider than the settings pages (up to 960 
   Shop currency and the discount it was, or a green "All-time low" when today's price is the record.
   Search lists one row per game (best price and how many stores); ratings live on the game page.
 - **Game page** (opened by any row or card; Back/Forward and ⌘[ ⌘] return to the same list): a
-  gallery (the cover, then Steam's screenshots, with ‹ › arrows dimmed at either end and "2 / 8"), title, badges (Mac/Windows, Installed, Steam rating, Metacritic), a price card with the pill,
+  gallery (the cover, then Steam's screenshots, with ‹ › arrows dimmed at either end and "2 / 8"), title, badges (Mac/Windows, Installed, Owned, Steam rating, Metacritic), genre tags (Action,
+  RPG… from Steam), a price card with the pill,
   price, usual price, all-time low, target and heart, and one main button ("View at GOG", "Get It on
   Epic Games Store"); then **Where to Buy** with every store cheapest first, Lowest on the cheapest.
   A page opened from a single deal or the wishlist loads every store with `shop-game --id`.

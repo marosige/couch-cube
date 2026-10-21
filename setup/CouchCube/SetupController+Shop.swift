@@ -430,6 +430,8 @@ extension SetupController {
         let featured = home.featured.dropFirst(hero == nil ? 0 : 1)
         for (index, view) in [shopShelf("On Your Wishlist", cards: hits.prefix(4).map { shopCard(wishlist: $0) }, more: 4),
                               shopShelf("Top Deals", cards: featured.prefix(8).map { shopCard(deal: $0) }, more: 1),
+                              shopShelf("Top Sellers", cards: (home.topSellers ?? []).prefix(8).map { shopCard(game: $0) }, more: nil),
+                              shopShelf("Couch Games", cards: (home.couch ?? []).prefix(8).map { shopCard(game: $0) }, more: nil),
                               shopShelf("Price Drops", cards: home.drops.prefix(4).map { shopCard(deal: $0) }, more: 1),
                               shopShelf("Free to Keep", cards: home.free.prefix(4).map { shopCard(giveaway: $0) }, more: 2)]
             .joined().enumerated() {

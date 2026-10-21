@@ -29,6 +29,11 @@ APP_STORE_HOSTS = {"apps.apple.com"}
 GAMES_BATCH = 25
 LOOKUP_BATCH = 50
 SEARCH_GAMES = 12
+STEAM_FEATURED = "https://store.steampowered.com/api/featuredcategories?cc=us&l=english"
+TOP_SELLERS = 10
+# Couch Cube's own pick of local multiplayer games (Steam app IDs), shown on Home whether or not they're on sale.
+COUCH_GAMES = ["728880", "880940", "1426210", "477160", "285900", "386940", "1243830", "268910", "204360",
+               "996770", "1016920", "674940", "437920", "905340", "312530", "251470", "1260320", "252110"]
 APP_STORE_GAMES_GENRE = "6014"
 
 # Stores Couch Cube can tell are "yours": a Mac app or a launcher in the Couch Cube Wine bottles.
@@ -326,6 +331,42 @@ def with_insights(deals_list, refresh=False, now=None, opener=None):
     return result
 
 
+def steam_library_tools():
+    spec = importlib.util.spec_from_file_location("shop_steam_library", Path(__file__).with_name("steam_library.py"))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    module.deals = deals
+    return module
+
+
+def steam_top_sellers(refresh=False, now=None, opener=None):
+    """Steam's current top sellers (app IDs), on sale or not, from its keyless featured-categories feed."""
+    reply = deals.cached_fetch("steamfeatured", "steam", STEAM_FEATURED, STEAM_HOSTS, refresh, now, opener)
+    data = reply.get("data") if isinstance(reply.get("data"), dict) else {}
+    section = data.get("top_sellers") if isinstance(data.get("top_sellers"), dict) else {}
+    ids = [str(item.get("id")) for item in section.get("items") or [] if isinstance(item, dict) and str(item.get("id", "")).isdigit()]
+    return list(dict.fromkeys(ids)), reply.get("error")
+
+
+def games_for_apps(app_ids, limit, refresh=False, now=None, opener=None):
+    """Shop games (every store offer, all-time low) for Steam app IDs, in the given order; games CheapShark
+    doesn't list are left out. App-ID lookups are cached for a week, prices for minutes."""
+    tools = steam_library_tools()
+    found, error = [], None
+    for app_id in app_ids:
+        if len(found) >= limit:
+            break
+        try:
+            game = tools.game_for_app(app_id, refresh, now, opener)
+        except deals.DealsError as exc:
+            error = str(exc)
+            break
+        if game and game.get("game_id"):
+            found.append(game["game_id"])
+    games, games_error = games_by_ids(found, refresh, now, opener) if found else ({}, None)
+    return [games[game_id] for game_id in found if game_id in games and games[game_id]["offers"]], error or games_error
+
+
 def home(mine, scope="mine", refresh=False, installed=frozenset(), now=None, opener=None):
     """Featured deals, recent price drops and free games for the chosen scope, ranked locally."""
     use_mine = scope == "mine" and bool(mine)
@@ -355,8 +396,18 @@ def home(mine, scope="mine", refresh=False, installed=frozenset(), now=None, ope
         errors.append(str(exc))
         free = []
     featured, drops = with_insights(featured, refresh, now, opener), with_insights(drops, refresh, now, opener)
+    try:
+        sellers, error = steam_top_sellers(refresh, now, opener)
+        top, games_error = games_for_apps(sellers, TOP_SELLERS, refresh, now, opener)
+        errors += [message for message in (error, games_error) if message]
+    except deals.DealsError as exc:
+        errors.append(str(exc))
+        top = []
+    couch, error = games_for_apps(COUCH_GAMES, len(COUCH_GAMES), refresh, now, opener)
+    if error:
+        errors.append(error)
     return {"scope": "mine" if use_mine else "all", "my_stores": mine, "featured": featured, "drops": drops,
-            "free": free, "errors": list(dict.fromkeys(errors))}
+            "free": free, "top_sellers": top, "couch": couch, "errors": list(dict.fromkeys(errors))}
 
 
 def platform_status(platforms):
