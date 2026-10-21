@@ -1,6 +1,7 @@
 # dmgbuild settings for the Couch Cube installer window: the app, an arrow and the Applications folder
 # on a titled background, and nothing else. Run by scripts/package-release.sh with -D app=… -D background=…
-# -D icon=…; the icon positions match the arrow drawn by setup/GenerateIcon.swift --dmg-background.
+# -D icon=…. No hide_extensions: it writes Finder info onto the app bundle, which strict codesign rejects.
+# The icon positions match the arrow drawn by setup/GenerateIcon.swift --dmg-background.
 import os.path
 
 application = defines["app"]  # noqa: F821 (provided by dmgbuild)
@@ -12,7 +13,6 @@ files = [application]
 symlinks = {"Applications": "/Applications"}
 icon = defines["icon"]  # noqa: F821
 background = defines["background"]  # noqa: F821
-hide_extensions = [app_name]
 
 window_rect = ((200, 160), (660, 400))
 default_view = "icon-view"
