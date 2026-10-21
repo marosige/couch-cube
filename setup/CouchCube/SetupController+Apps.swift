@@ -81,7 +81,7 @@ extension SetupController {
                 self.renderGeneral()
                 if self.collapsedAppCategories.isEmpty {
                     precondition(self.appMenuRows.arrangedSubviews.count == 4)
-                    precondition(self.appPCRows.arrangedSubviews.count == 14)
+                    precondition(self.appPCRows.arrangedSubviews.count == 12)
                     precondition(self.appWindowsRows.arrangedSubviews.count == 4 + 2 * self.windowsDownloads.count)
                     precondition(self.appRetroRows.arrangedSubviews.count == 12)
                 }
