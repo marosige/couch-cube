@@ -887,12 +887,13 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
         driveDetailRows.alignment = .leading
         driveDetailRows.spacing = 16
         addPage("Drive", content: column([driveDetailRows]))
-        addPage("Cube Shop", content: column([cubeShopPage()]))
+        // Cube Shop is a storefront: wider than the settings pages, so shelves show several games side by side.
+        addPage("Cube Shop", content: column([cubeShopPage()]), maxWidth: 960)
         shopDetailContent.orientation = .vertical
         shopDetailContent.alignment = .leading
         shopDetailContent.spacing = 16
         shopDetailContent.setAccessibilityIdentifier("shopGamePage")
-        addPage("Game", content: column([shopDetailContent]))
+        addPage("Game", content: column([shopDetailContent]), maxWidth: 820)
         navigationBar.orientation = .vertical
         navigationBar.alignment = .leading
         let sidebarScroll = NSScrollView()

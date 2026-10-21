@@ -255,7 +255,7 @@ extension SetupController {
         let card = ClickableRowView()
         card.layer?.cornerRadius = 10
         card.onActivate = open
-        card.setAccessibilityLabel(accessibility + (compatibilityBadge(compat).map { ". " + $0.tip } ?? ""))
+        card.setAccessibilityLabel(accessibility + (was.map { ", usually \($0)" } ?? "") + (compatibilityBadge(compat).map { ". " + $0.tip } ?? ""))
         card.setAccessibilityIdentifier("shopCard")
         card.toolTip = title
         let image = RemoteImageView()
@@ -280,8 +280,8 @@ extension SetupController {
         let spacer = NSView()
         spacer.setContentHuggingPriority(.init(1), for: .horizontal)
         bottom.append(spacer)
+        // Cards are narrow: the pill says how much is off; the usual price is on the game page and in VoiceOver.
         if let savings, savings > 0 { bottom.append(discountPill(savings)) }
-        if let was { bottom.append(strikethrough(was)) }
         if let shown = price ?? priceText.map({ ShopPrice(text: $0, original: $0, converted: false, value: nil) }) {
             bottom.append(priceLabel(shown, highlight: price == nil || shown.text == "Free"))
         }

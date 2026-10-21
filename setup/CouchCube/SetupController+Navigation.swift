@@ -56,7 +56,7 @@ extension SetupController {
         return result
     }
 
-    func addPage(_ title: String, content: NSStackView) {
+    func addPage(_ title: String, content: NSStackView, maxWidth: CGFloat = 640) {
         let page = NSTabViewItem(identifier: title)
         page.label = title
         let scroll = NSScrollView()
@@ -77,7 +77,7 @@ extension SetupController {
         ])
         let isHome = tabs.tabViewItems.isEmpty
         if !isHome {
-            content.widthAnchor.constraint(lessThanOrEqualToConstant: 640).isActive = true
+            content.widthAnchor.constraint(lessThanOrEqualToConstant: maxWidth).isActive = true
         }
         let width = content.widthAnchor.constraint(equalTo: container.widthAnchor, constant: -16)
         // Below windowSizeStayPut so the capped page width never shrinks the window.
