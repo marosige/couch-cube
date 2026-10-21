@@ -338,10 +338,10 @@ extension SetupController {
         shopRatesNote.setAccessibilityIdentifier("shopRatesNote")
         updateCurrencyNotes()
         return card("Cube Shop", subtitle: nil, views: [
-            settingsRow("Shop currency", subtitle: "Show Cube Shop prices converted to this currency. Original prices (the default) keeps each store's own currency.", symbol: "dollarsign.circle",
+            settingsRow("Shop currency", subtitle: "Prices in your currency, or each store's own.", symbol: "dollarsign.circle",
                         color: .systemGreen, trailing: shopCurrencyPopup, detail: nil),
             separator(),
-            settingsRow("Add card/FX fee", subtitle: "Added to converted prices, e.g. a weekend exchange markup.", symbol: "percent",
+            settingsRow("Add card/FX fee", subtitle: "Your card's fee, added to converted prices.", symbol: "percent",
                         color: .systemOrange, trailing: row([shopFeeField, text("%", size: 12)]), detail: nil),
             shopRatesNote
         ])

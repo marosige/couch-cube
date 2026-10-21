@@ -787,12 +787,12 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
         addPage("Game library", content: column([
             card("", subtitle: nil, views: [
                 storageHeader,
-                text("ROMs, BIOS, saves and portable games can live on this Mac and on external SSDs. Choose a drive to see its storage, Steam games and retro games.", size: 12, secondary: true),
+                text("Keep games on this Mac or an external SSD. Choose a drive to see what's on it.", size: 12, secondary: true),
                 setupFolderStatus, gameLibraryOverviewRows, libraryHealth, libraryTitle, libraryDescription, libraryAction,
                 row([button("Refresh connected drives", #selector(refresh)), button("Add or prepare an SSD...", #selector(choosePortable))])
             ]),
             card("", subtitle: nil, views: [yourGames, librarySummary]),
-            card("Move your library", subtitle: "Copy to another drive, verify the contents and activate it. The old copy stays until you choose to remove it. Steam libraries are moved in Steam.", views: [
+            card("Move your library", subtitle: "Copies everything to another drive and checks it. The old copy stays until you remove it.", views: [
                 transferLibraryButton, retireLibraryButton
             ])
         ]))
@@ -888,19 +888,19 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
                             trailing: row([button("Check...", #selector(checkUpdates)), updateButton]),
                             detail: updateStatus),
                 separator(),
-                settingsRow("Guided setup", subtitle: "Show one sidebar step at a time. Turn off to see every task.",
+                settingsRow("Guided setup", subtitle: "One step at a time in the sidebar.",
                             symbol: "checklist", color: .systemBlue, trailing: guidedSetupToggle),
                 separator(),
                 settingsRow("App location", subtitle: "Find this copy of Couch Cube.", symbol: "folder",
                             color: .systemGray, trailing: button("Show in Finder", #selector(revealApp))),
                 separator(),
-                settingsRow("Installer copy", subtitle: "Keep a download on your game drive.", symbol: "square.and.arrow.down",
+                settingsRow("Installer copy", subtitle: "Keep the installer on your game drive.", symbol: "square.and.arrow.down",
                             color: .systemOrange, trailing: button("Copy installer...", #selector(copyDMG))),
                 separator(),
                 settingsRow("Remove Couch Cube", subtitle: "Your games, saves and other apps are kept.", symbol: "trash",
                             color: .systemGray, trailing: button("Uninstall...", #selector(uninstallCouchCube))),
                 separator(),
-                settingsRow("Clean up gaming setup", subtitle: "Review apps, games, saves and related files to remove.", symbol: "trash",
+                settingsRow("Clean up gaming setup", subtitle: "Choose what to remove from this Mac.", symbol: "trash",
                             color: .systemRed, trailing: button("Review...", #selector(reviewGamingCleanup)))
             ]),
             shopSettingsCard(),

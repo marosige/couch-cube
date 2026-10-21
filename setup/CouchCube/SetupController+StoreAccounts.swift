@@ -24,7 +24,7 @@ extension SetupController {
         storeWalkthroughPanel.alignment = .leading
         storeWalkthroughPanel.spacing = 8
         storeWalkthroughPanel.isHidden = true
-        let note = text("Shows who is signed in to the game clients on this Mac, read from their own local files. Passwords and sign-in tokens are never read. Each client has its own sign-in: signing in to Steam on the Mac doesn't sign you in to the Windows launchers in CrossOver or Whisky, and the other way round. Deals open in your web browser, which keeps its own logins.",
+        let note = text("Who is signed in to each game app. Read from the apps' own files; passwords are never read. Mac and Windows apps sign in separately.",
                         size: 11, secondary: true)
         note.lineBreakMode = .byWordWrapping
         note.maximumNumberOfLines = 0
