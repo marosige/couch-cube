@@ -59,7 +59,14 @@ extension SetupController {
         shopScopeBar.orientation = .horizontal
         shopScopeBar.alignment = .centerY
         shopScopeBar.spacing = 10
-        shopScopeBar.setViews([shopScope], in: .leading)
+        shopMacOnlyToggle.controlSize = .small
+        shopMacOnlyToggle.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
+        shopMacOnlyToggle.state = shopMacOnly ? .on : .off
+        shopMacOnlyToggle.target = self
+        shopMacOnlyToggle.action = #selector(shopMacOnlyChanged)
+        shopMacOnlyToggle.toolTip = "Hide games without a macOS version (no Windows compatibility apps needed)"
+        shopMacOnlyToggle.setAccessibilityIdentifier("shopMacOnly")
+        shopScopeBar.setViews([shopMacOnlyToggle, shopScope], in: .leading)
         shopStatusLabel(shopCurrencyNote)
         shopCurrencyNote.setAccessibilityIdentifier("shopCurrencyNote")
         // Store header: one calm search field for every store on top, then the sections, with the store scope and refresh tucked at the right.
@@ -199,6 +206,16 @@ extension SetupController {
     }
 
     // MARK: My Stores / All Stores
+
+    @objc func shopMacOnlyChanged() {
+        UserDefaults.standard.set(shopMacOnlyToggle.state == .on, forKey: "shopMacOnly")
+        rerenderShop()
+    }
+
+    /// With "Mac games only" on, a game shows only once Steam confirms a macOS version (Mac App Store apps always do).
+    func shopShows(steamAppId: String?, appStore: Bool = false) -> Bool {
+        !shopMacOnly || compatibility(steamAppId: steamAppId, appStore: appStore) == .mac
+    }
 
     @objc func shopScopeChanged() {
         UserDefaults.standard.set(shopScope.selectedSegment == 0 ? "mine" : "all", forKey: shopScopeKey)
@@ -425,15 +442,19 @@ extension SetupController {
             view.widthAnchor.constraint(equalTo: homeList.widthAnchor).isActive = true
         }
         let hits = (wishlist?.items ?? []).filter { $0.onSale || targetReached($0) == true }
-        let hero = home.featured.first
+        let shown = home.featured.filter { shopShows(steamAppId: $0.steamAppId) }
+        let hero = shown.first
         if let hero { add(shopHero(deal: hero)) }
-        let featured = home.featured.dropFirst(hero == nil ? 0 : 1)
+        let featured = shown.dropFirst(hero == nil ? 0 : 1)
+        let drops = home.drops.filter { shopShows(steamAppId: $0.steamAppId) }
+        let topSellers = (home.topSellers ?? []).filter { shopShows(steamAppId: $0.steamAppId) }
+        let couch = (home.couch ?? []).filter { shopShows(steamAppId: $0.steamAppId) }
         for (index, view) in [shopShelf("On Your Wishlist", cards: hits.prefix(4).map { shopCard(wishlist: $0) }, more: 4),
                               shopShelf("Top Deals", cards: featured.prefix(8).map { shopCard(deal: $0) }, more: 1),
-                              shopShelf("Top Sellers", cards: (home.topSellers ?? []).prefix(8).map { shopCard(game: $0) }, more: nil),
-                              shopShelf("Couch Games", cards: (home.couch ?? []).prefix(8).map { shopCard(game: $0) }, more: nil),
-                              shopShelf("Price Drops", cards: home.drops.prefix(4).map { shopCard(deal: $0) }, more: 1),
-                              shopShelf("Free to Keep", cards: home.free.prefix(4).map { shopCard(giveaway: $0) }, more: 2)]
+                              shopShelf("Top Sellers", cards: topSellers.prefix(8).map { shopCard(game: $0) }, more: nil),
+                              shopShelf("Couch Games", cards: couch.prefix(8).map { shopCard(game: $0) }, more: nil),
+                              shopShelf("Price Drops", cards: drops.prefix(4).map { shopCard(deal: $0) }, more: 1),
+                              shopShelf("Free to Keep", cards: shopMacOnly ? [] : home.free.prefix(4).map { shopCard(giveaway: $0) }, more: 2)]
             .joined().enumerated() {
             if index % 2 == 0, let previous = homeList.arrangedSubviews.last { homeList.setCustomSpacing(Self.shopSectionGap, after: previous) }
             add(view)
@@ -690,7 +711,7 @@ extension SetupController {
             return
         }
         let sort = selectedSort(searchSortPopup)
-        let games = shopSorted(reply.games, by: sort, convert: sortConvert, fields: searchSortFields)
+        let games = shopSorted(reply.games.filter { shopShows(steamAppId: $0.steamAppId) }, by: sort, convert: sortConvert, fields: searchSortFields)
         for (index, game) in games.enumerated() { addShopRow(searchGameRow(game), to: searchList, separated: index > 0) }
         if !reply.appStore.apps.isEmpty {
             let currency = reply.appStore.currency ?? reply.appStore.apps[0].currency
@@ -757,6 +778,7 @@ extension SetupController {
 
     func lookUpPlatforms() {
         var ids = storeDeals.compactMap(\.steamAppId) + (shopHome.map { ($0.featured + $0.drops).compactMap(\.steamAppId) } ?? [])
+        ids += shopHome.map { (($0.topSellers ?? []) + ($0.couch ?? [])).compactMap(\.steamAppId) } ?? []
         ids += (searchReply?.games ?? []).compactMap(\.steamAppId) + (wishlist?.items ?? []).compactMap(\.steamAppId)
         var seen = Set<String>()
         let wanted = ids.filter { !platformsRequested.contains($0) && seen.insert($0).inserted }.prefix(40)

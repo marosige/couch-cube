@@ -73,6 +73,9 @@ clearing the field goes back. Rate source, attribution and store-filter details 
   CheapShark PC stores, itch.io/DRM-free and the Mac App Store. GamerPower is asked only for PC
   platforms and replies are filtered again, so PlayStation, Xbox, Switch, Android and iOS
   giveaways never appear.
+- **Mac only** (a checkbox beside the store popup, saved): Home, Deals and Search show only games Steam
+  confirms have a macOS version (Mac App Store apps always count); Free to Keep hides, since giveaways
+  carry no platform data. Games whose platform isn't known yet appear once the lookup confirms them.
 - **My Stores / All Stores.** Home, Deals and Free Games share one saved toggle. My Stores keeps
   the stores whose Mac app or Windows launcher is installed (detected like App Store does). With
   none installed, All Stores is used and a hint explains why.

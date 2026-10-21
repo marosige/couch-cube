@@ -228,11 +228,12 @@ extension SetupController {
         schedulePlatformLookup()
         dealsList.arrangedSubviews.forEach { $0.removeFromSuperview() }
         let store = dealsMode.selectedSegment == 0
-        let count = store ? storeDeals.count : giveaways.count
+        let shownDeals = storeDeals.filter { shopShows(steamAppId: $0.steamAppId) }
+        let count = store ? shownDeals.count : giveaways.count
         if let fetched { dealsFetched[dealsMode.selectedSegment] = fetched }
         let fetched = fetched ?? dealsFetched[dealsMode.selectedSegment]
         if store {
-            for deal in storeDeals { addDealRow(storeDealRow(deal)) }
+            for deal in shownDeals { addDealRow(storeDealRow(deal)) }
         } else {
             for giveaway in sortedGiveaways() { addDealRow(giveawayRow(giveaway)) }
         }
