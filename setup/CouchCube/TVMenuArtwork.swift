@@ -28,15 +28,18 @@ enum TVMenuArtwork {
         }
         return NSImage(size: size, flipped: false) { rect in
             NSGradient(starting: style.top, ending: style.bottom)?.draw(in: rect, angle: -90)
-            // A soft light behind the logo, off to the right, like a TV glowing in a dark room.
+            // A soft light behind the logo, like a TV glowing in a dark room.
             let glow = NSGradient(colors: [style.glow.withAlphaComponent(0.55), style.glow.withAlphaComponent(0)])
-            glow?.draw(fromCenter: NSPoint(x: rect.width * 0.66, y: rect.height * 0.55), radius: 0,
-                       toCenter: NSPoint(x: rect.width * 0.66, y: rect.height * 0.55), radius: rect.height * 0.75, options: [])
+            glow?.draw(fromCenter: NSPoint(x: rect.midX, y: rect.height * 0.6), radius: 0,
+                       toCenter: NSPoint(x: rect.midX, y: rect.height * 0.6), radius: rect.height * 0.75, options: [])
             // Fine scanlines give the TV feel without competing with the logo.
             NSColor.white.withAlphaComponent(0.035).setFill()
             for y in stride(from: 0, to: rect.height, by: 6) { NSRect(x: 0, y: y, width: rect.width, height: 2).fill() }
-            let logoSide: CGFloat = 300
-            let logoRect = NSRect(x: rect.width * 0.66 - logoSide / 2, y: rect.height * 0.55 - logoSide / 2, width: logoSide, height: logoSide)
+            // The Play tile crops the sides (it can be as narrow as a square), so everything sits in the
+            // centered 720 × 720 safe area: logo above, kicker and name below, all centered.
+            let logoSide: CGFloat = 250
+            let logoRect = NSRect(x: rect.midX - logoSide / 2, y: rect.height * 0.52 - logoSide / 2 + 40,
+                                  width: logoSide, height: logoSide)
             if let id = style.icon,
                let logo = appIcon ?? Bundle.main.resourceURL.flatMap({ NSImage(contentsOf: $0.appendingPathComponent("AppIcons/\(id).png")) }) {
                 NSGraphicsContext.current?.imageInterpolation = .high
@@ -49,21 +52,24 @@ enum TVMenuArtwork {
                 logo.draw(in: logoRect)
                 NSGraphicsContext.restoreGraphicsState()
             } else if let symbol = NSImage(systemSymbolName: "sparkles.tv.fill", accessibilityDescription: nil)?
-                        .withSymbolConfiguration(.init(pointSize: 220, weight: .regular)
+                        .withSymbolConfiguration(.init(pointSize: 200, weight: .regular)
                             .applying(.init(paletteColors: [NSColor.white.withAlphaComponent(0.9)]))) {
                 symbol.draw(in: logoRect.insetBy(dx: 10, dy: 30))
             }
-            // Name on the lower left, where the tile's own title doesn't sit.
+            guard style.icon != nil else { return true }
             let kicker = NSAttributedString(string: style.kicker, attributes: [
-                .font: NSFont.systemFont(ofSize: 34, weight: .heavy), .kern: 8,
+                .font: NSFont.systemFont(ofSize: 30, weight: .heavy), .kern: 8,
                 .foregroundColor: style.glow.blended(withFraction: 0.4, of: .white) ?? .white])
-            let title = NSAttributedString(string: style.title, attributes: [
-                .font: NSFont.systemFont(ofSize: 92, weight: .bold), .foregroundColor: NSColor.white])
-            // The tile crops the sides (it is narrower than 16:9), so text stays inside a safe area.
-            if style.icon != nil {
-                kicker.draw(at: NSPoint(x: 200, y: 196))
-                title.draw(at: NSPoint(x: 194, y: 80))
-            }
+            // Shrinks to fit the safe area, so a longer name never runs off the cropped tile.
+            var size: CGFloat = 84
+            var title = NSAttributedString()
+            repeat {
+                title = NSAttributedString(string: style.title, attributes: [
+                    .font: NSFont.systemFont(ofSize: size, weight: .bold), .foregroundColor: NSColor.white])
+                size -= 4
+            } while title.size().width > 640 && size > 40
+            kicker.draw(at: NSPoint(x: rect.midX - kicker.size().width / 2, y: logoRect.minY - 70))
+            title.draw(at: NSPoint(x: rect.midX - title.size().width / 2, y: logoRect.minY - 70 - title.size().height))
             return true
         }
     }

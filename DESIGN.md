@@ -234,7 +234,8 @@ VoiceOver opens them, and their menu offers Open, Show in Finder and, for added 
 The Cube TV tile's artwork is drawn in code (`TVMenuArtwork.swift`) so it stays sharp at any size: the
 chosen menu's colors (Steam blue, ES-DE red, Cube TV purple when none is chosen), a soft glow and
 scanlines, the installed app's own icon (bundled icon as fallback) and its name ("STEAM / Big Picture",
-"ES-DE / Retro Games"). The whole tile launches the menu; the line under "Cube TV" only shows status
+"ES-DE / Retro Games"), all centered in a square safe area so nothing is cut off however narrow the
+tile gets (the name shrinks to fit). The whole tile launches the menu; the line under "Cube TV" only shows status
 while no menu is chosen. No third-party screenshots are bundled.
 The installer DMG (built with dmgbuild from `scripts/dmg-settings.py`) opens one clean window: a light
 background titled **Couch Cube** with the subtitle **Your Mac Console** (the tagline everywhere), the app
