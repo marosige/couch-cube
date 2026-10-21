@@ -874,8 +874,8 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
         consoleDelayRow = row([text("Wait"), autoLaunchDelay, text("seconds after signing in, so the Mac can settle.", secondary: true)])
         consoleDelayRow.edgeInsets = NSEdgeInsets(top: 4, left: 8, bottom: 0, right: 8)
         addPage("Console Mode", content: column([
-            card("1  Turning it on", subtitle: "How do you get past the login screen?", views: [signInChoices, signInGuide]),
-            card("2  After you sign in", subtitle: "What starts by itself?", views: [afterLoginChoices, consoleDelayRow, autoLaunchStatus]),
+            card("1  Signing in & waking", subtitle: "After a restart, and when the Mac wakes from sleep.", views: [signInChoices, signInGuide]),
+            card("2  Open at Login", subtitle: "What starts by itself after you sign in.", views: [afterLoginChoices, consoleDelayRow, autoLaunchStatus]),
             card("3  On the TV", subtitle: "Which menu Play and the TV mode open.", views: [tvMenuChoices, tvMenuStatus])
         ]))
         renderConsoleMode()
@@ -909,6 +909,11 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
         shopDetailContent.spacing = 16
         shopDetailContent.setAccessibilityIdentifier("shopGamePage")
         addPage("Game", content: column([shopDetailContent]), maxWidth: 820)
+        cleanupContent.orientation = .vertical
+        cleanupContent.alignment = .leading
+        cleanupContent.spacing = 16
+        cleanupContent.setAccessibilityIdentifier("cleanupPage")
+        addPage("Clean up", content: column([cleanupContent]))
         navigationBar.orientation = .vertical
         navigationBar.alignment = .leading
         let sidebarScroll = NSScrollView()
@@ -1184,6 +1189,13 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
 
     var cleanupInProgress = false
     var cleanupReviewChoices: [NSButton] = []
+    var cleanupPlan: CleanupPlan?
+    var cleanupMessage: (text: String, color: NSColor)?
+    let cleanupContent = NSStackView()
+    let cleanupSummary = NSTextField(labelWithString: "")
+    let cleanupRemoveSelf = NSButton(checkboxWithTitle: "", target: nil, action: nil)
+    let cleanupConfirmField = NSTextField()
+    let cleanupRemoveButton = NSButton()
 
     /// Only an explicit debug flag lets Activity open by itself; release builds open it solely from View > Activity.
     static let activityAutoOpens = ProcessInfo.processInfo.environment["COUCH_CUBE_DEBUG_ACTIVITY"] == "1"

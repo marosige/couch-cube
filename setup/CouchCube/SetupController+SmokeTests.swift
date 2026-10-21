@@ -227,7 +227,7 @@ extension SetupController {
         precondition(views(driveDetailRows).last { $0.identifier?.rawValue == "drive-games-bar" } != nil && rows().count == 12 &&
                      checkbox("drive-games-more").title == "Show all 15", "The list starts with the biggest games and can show every one")
         precondition(page.contains { $0.contains("unknown size") && $0.contains("Amazon isn't detected.") }, "Coverage and unknowns are stated")
-        let bar = views(driveDetailRows).compactMap { $0 as? GameStorageBar }.first!
+        let bar = views(driveDetailRows).compactMap { $0 as? GameStorageBar }.first { $0.identifier?.rawValue == "drive-games-bar" }!
         precondition(bar.segments.count == GameStorageBar.colored + 1 && bar.segments.last!.title.hasPrefix("Other ("),
                      "Only the largest games get colors; the rest share one gray segment")
         views(driveDetailRows).compactMap { $0 as? NSButton }.first { $0.identifier?.rawValue == "drive-games-more" }!.performClick(nil)
@@ -435,7 +435,7 @@ extension SetupController {
                 let stack = self.detail.subviews.compactMap { $0 as? NSStackView }.first!
                 let discoveryOK = success && !self.volumes.isEmpty && self.window.isVisible
                     && self.selected != nil
-                    && self.tabs.numberOfTabViewItems == 15 && self.logWindow == nil
+                    && self.tabs.numberOfTabViewItems == 16 && self.logWindow == nil
                 precondition(self.sidebarPages.count == self.sidebarTitles.count &&
                              self.sidebarPages.count == self.sidebarSymbols.count)
                 precondition(!self.sidebarPages.contains(3) && !self.sidebarPages.contains(4),

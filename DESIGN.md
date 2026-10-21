@@ -305,14 +305,18 @@ shows or hides every console on it in one batch (a mixed group shows "3 of 7"); 
 consoles never installs emulators.
 Game library shows where your games live and each drive's games, with a Steam setup guide.
 Console Mode asks three questions in the order they happen, each answered by tapping a row with a
-checkmark (no Save buttons, no confirmations): **1 Turning it on** — type your password, password
-once then Apple Watch (links to Touch ID & Password), or start without signing in (automatic login is
-read from macOS; the System Settings steps show only for this choice). **2 After you sign in** —
-nothing, open Couch Cube in its window (a macOS Login Item via SMAppService), or open the TV menu when
-a controller is on and no keyboard or mouse is connected (the LaunchAgent, with its wait in seconds).
+checkmark (no Save buttons, no confirmations): **1 Signing in & waking** (after a restart and when
+the Mac wakes from sleep) — type your password, password once then Apple Watch (links to Touch ID &
+Password), or start without signing in (automatic login is read from macOS; the System Settings steps,
+including Lock Screen's password-after-sleep, show only for this choice). **2 Open at Login** —
+nothing, open Couch Cube in its window (a macOS Login Item via SMAppService), or open the TV menu (the
+true console experience) when a controller is on and no keyboard or mouse is connected (the LaunchAgent, with its wait in seconds).
 **3 On the TV** — Steam Big Picture, ES-DE (a missing one leads to App Store) or Cube TV Home
 (Couch Cube's own, shown as coming soon). The Play tile is titled **Cube TV**, with the chosen menu beneath. Game library also sets up and switches the drive; App Settings groups app updates,
-app location, uninstall and gaming cleanup.
+app location, uninstall and gaming cleanup. **Clean up gaming setup** opens its own page (not a
+popup): what was found, grouped in cards (Apps, Games and data…) with each item's icon, name and path,
+Select all, then a Remove card that lists the selection, offers to move Couch Cube to the Trash too, and
+needs REMOVE typed before the red Remove button runs; problems (apps still running) show inline.
 Nothing is installed or erased until you confirm it. Storage is checked on launch,
 explicit refresh, volume changes and returning Home, not whenever the app gains focus.
 Home keeps its last results during background refreshes. App Store and Retro

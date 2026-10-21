@@ -10,76 +10,161 @@ import UniformTypeIdentifiers
 
 extension SetupController {
     @objc func selectCleanupItems(_ sender: NSButton) {
-        cleanupReviewChoices.forEach { $0.state = sender.tag == 1 ? .on : .off }
+        cleanupReviewChoices.forEach { $0.state = sender.state }
+        updateCleanupSummary()
     }
 
+    @objc func cleanupChoiceChanged(_ sender: NSButton) { updateCleanupSummary() }
+
+    /// Opens the Clean up page (under App Settings) and scans what can be removed.
     @objc func reviewGamingCleanup() {
         guard task == nil, !cleanupInProgress else {
             status.stringValue = "Wait for the current operation to finish."
             return
         }
+        selectPage(15)
+        cleanupPlan = nil
+        cleanupMessage = nil
+        renderCleanup(scanning: true)
         execute(["cleanup-plan"], capture: true) { code, data in
-            guard code == 0 else { self.activityNeeded("Couldn't scan for cleanup items."); return }
-            do {
-                let plan = try JSONDecoder().decode(CleanupPlan.self, from: data)
-                self.presentGamingCleanup(plan)
-            } catch {
-                self.status.stringValue = "Couldn't read cleanup items: \(error.localizedDescription)"
-                self.append(self.status.stringValue + "\n")
-                self.activityNeeded(self.status.stringValue)
+            guard code == 0, let plan = try? JSONDecoder().decode(CleanupPlan.self, from: data) else {
+                self.cleanupMessage = ("Couldn't scan for cleanup items. See Activity for details.", .systemRed)
+                self.renderCleanup()
+                return
             }
+            self.cleanupPlan = plan
+            self.renderCleanup()
         }
     }
 
-    func presentGamingCleanup(_ plan: CleanupPlan) {
-        let alert = NSAlert()
-        alert.messageText = "Clean up gaming setup"
-        alert.informativeText = "Select what to remove, including anything installed before Couch Cube. Back up first and quit all games and launchers.\n\nGame data includes saves, BIOS, addons and Windows bottles. Removing Couch Cube settings also disables automatic console mode.\n\nOnly detected locations are listed. Custom folders, other accounts and disconnected drives are not scanned. Homebrew, shared dependencies and Rosetta are kept. Trash is not emptied."
-        alert.addButton(withTitle: "Continue...")
-        alert.addButton(withTitle: "Cancel")
-        let list = NSStackView()
-        list.orientation = .vertical
-        list.alignment = .leading
-        list.spacing = 12
-        var choices: [NSButton] = []
-        for item in plan.items {
-            let checkbox = NSButton(checkboxWithTitle: "\(item.name) (\(item.category))", target: nil, action: nil)
-            checkbox.state = .off
-            choices.append(checkbox)
-            list.addArrangedSubview(checkbox)
-            let path = NSTextField(wrappingLabelWithString: item.path)
-            path.font = .systemFont(ofSize: 11)
-            path.textColor = .secondaryLabelColor
-            path.isSelectable = true
-            path.widthAnchor.constraint(equalToConstant: 550).isActive = true
-            list.addArrangedSubview(path)
+    /// One cleanup row: checkbox, the item's own icon (or a category symbol), its name and where it is.
+    func cleanupRow(_ item: CleanupItem, checkbox: NSButton) -> NSView {
+        let symbol = item.category == "App" ? "app.fill" : item.name.lowercased().contains("setting") ? "gearshape.fill" : "folder.fill"
+        let image = item.category == "App" && FileManager.default.fileExists(atPath: item.path)
+            ? NSWorkspace.shared.icon(forFile: item.path) : NSImage(systemSymbolName: symbol, accessibilityDescription: nil)!
+        let icon = NSImageView(image: image)
+        icon.imageScaling = .scaleProportionallyUpOrDown
+        icon.contentTintColor = .secondaryLabelColor
+        icon.widthAnchor.constraint(equalToConstant: 28).isActive = true
+        icon.heightAnchor.constraint(equalToConstant: 28).isActive = true
+        let name = NSTextField(labelWithString: item.name)
+        name.font = .systemFont(ofSize: 13, weight: .medium)
+        name.lineBreakMode = .byTruncatingTail
+        let path = NSTextField(labelWithString: (item.path as NSString).abbreviatingWithTildeInPath)
+        path.font = .systemFont(ofSize: 11)
+        path.textColor = .secondaryLabelColor
+        path.lineBreakMode = .byTruncatingMiddle
+        path.toolTip = item.path
+        for label in [name, path] { label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal) }
+        let labels = NSStackView(views: [name, path])
+        labels.orientation = .vertical
+        labels.alignment = .leading
+        labels.spacing = 1
+        checkbox.target = self
+        checkbox.action = #selector(cleanupChoiceChanged(_:))
+        checkbox.setAccessibilityLabel("\(item.name), \(item.path)")
+        let line = NSStackView(views: [checkbox, icon, labels])
+        line.orientation = .horizontal
+        line.alignment = .centerY
+        line.spacing = 10
+        line.edgeInsets = NSEdgeInsets(top: 6, left: 0, bottom: 6, right: 0)
+        return line
+    }
+
+    var selectedCleanupItems: [CleanupItem] {
+        guard let plan = cleanupPlan else { return [] }
+        return zip(plan.items, cleanupReviewChoices).filter { $0.1.state == .on }.map(\.0)
+    }
+
+    func renderCleanup(scanning: Bool = false) {
+        clearRows(cleanupContent)
+        cleanupReviewChoices = []
+        func add(_ view: NSView) {
+            cleanupContent.addArrangedSubview(view)
+            view.widthAnchor.constraint(equalTo: cleanupContent.widthAnchor).isActive = true
         }
-        let removeSelf = NSButton(checkboxWithTitle: "Also move this copy of Couch Cube to Trash", target: nil, action: nil)
-        list.addArrangedSubview(removeSelf)
-        cleanupReviewChoices = choices
-        defer { cleanupReviewChoices = [] }
-        let selectAll = NSButton(title: "Select all detected items", target: self, action: #selector(selectCleanupItems(_:)))
-        selectAll.tag = 1
-        let deselectAll = NSButton(title: "Deselect all", target: self, action: #selector(selectCleanupItems(_:)))
-        let scroll = NSScrollView(frame: NSRect(x: 0, y: 0, width: 580, height: 360))
-        scroll.hasVerticalScroller = true
-        scroll.documentView = list
-        list.translatesAutoresizingMaskIntoConstraints = false
-        NSLayoutConstraint.activate([
-            list.leadingAnchor.constraint(equalTo: scroll.contentView.leadingAnchor, constant: 8),
-            list.topAnchor.constraint(equalTo: scroll.contentView.topAnchor, constant: 8),
-            list.widthAnchor.constraint(equalToConstant: 560)
-        ])
-        scroll.widthAnchor.constraint(equalToConstant: 580).isActive = true
-        scroll.heightAnchor.constraint(equalToConstant: 360).isActive = true
-        alert.accessoryView = column([row([selectAll, deselectAll]), scroll])
-        guard alert.runModal() == .alertFirstButtonReturn else { return }
-        let selected = zip(plan.items, choices).filter { $0.1.state == .on }.map { $0.0 }
-        guard !selected.isEmpty else {
-            status.stringValue = "No cleanup items selected. Use Uninstall to remove only Couch Cube."
+        add(text("Choose what to remove from this Mac. Back up your saves first and quit games and launchers.", size: 13, secondary: true))
+        guard let plan = cleanupPlan else {
+            if let message = cleanupMessage {
+                let label = text(message.text, size: 12)
+                label.textColor = message.color
+                add(card("", subtitle: nil, views: [label, button("Scan Again", #selector(reviewGamingCleanup))]))
+            } else if scanning {
+                add(card("", subtitle: nil, views: [statusIndicator("Looking for gaming apps and data\u{2026}", color: .systemBlue, pulsing: true)]))
+            }
             return
         }
-        let gamingApps = Set(["Steam.app", "FX Steam Launcher.app", "GOG Galaxy.app", "EA app.app", "Epic Games Launcher.app",
+        guard !plan.items.isEmpty else {
+            add(card("", subtitle: nil, views: [text("Nothing to clean up was found.", size: 13)]))
+            return
+        }
+        let order = ["App", "Games and data", "Games"]
+        let categories = Array(Set(plan.items.map(\.category)))
+            .sorted { (order.firstIndex(of: $0) ?? order.count, $0) < (order.firstIndex(of: $1) ?? order.count, $1) }
+        var choiceFor: [String: NSButton] = [:]
+        let selectAll = NSButton(checkboxWithTitle: "Select all", target: self, action: #selector(selectCleanupItems(_:)))
+        selectAll.setAccessibilityIdentifier("cleanupSelectAll")
+        add(row([selectAll, NSView(), button("Scan Again", #selector(reviewGamingCleanup))]))
+        for category in categories {
+            var views: [NSView] = []
+            for item in plan.items where item.category == category {
+                let checkbox = NSButton(checkboxWithTitle: "", target: nil, action: nil)
+                choiceFor[item.id] = checkbox
+                if !views.isEmpty { views.append(separator()) }
+                views.append(cleanupRow(item, checkbox: checkbox))
+            }
+            add(card(category == "App" ? "Apps" : category, subtitle: nil, views: views))
+        }
+        cleanupReviewChoices = plan.items.map { choiceFor[$0.id]! }
+
+        cleanupRemoveSelf.title = "Also move Couch Cube to the Trash"
+        cleanupRemoveSelf.target = self
+        cleanupRemoveSelf.action = #selector(cleanupChoiceChanged(_:))
+        cleanupConfirmField.placeholderString = "Type REMOVE"
+        cleanupConfirmField.stringValue = ""
+        cleanupConfirmField.setAccessibilityLabel("Type REMOVE to confirm cleanup")
+        cleanupConfirmField.widthAnchor.constraint(equalToConstant: 140).isActive = true
+        cleanupRemoveButton.title = "Remove"
+        cleanupRemoveButton.bezelStyle = .rounded
+        cleanupRemoveButton.hasDestructiveAction = true
+        cleanupRemoveButton.bezelColor = .systemRed
+        cleanupRemoveButton.target = self
+        cleanupRemoveButton.action = #selector(runGamingCleanup)
+        cleanupSummary.font = .systemFont(ofSize: 12)
+        cleanupSummary.lineBreakMode = .byWordWrapping
+        cleanupSummary.maximumNumberOfLines = 0
+        let note = text("Apps are uninstalled; files go to the Trash (an external disk may delete them instead). Homebrew and Rosetta stay, and the Trash isn't emptied. Only what Couch Cube found is listed.",
+                        size: 11, secondary: true)
+        var views: [NSView] = [cleanupSummary, cleanupRemoveSelf, note, row([cleanupConfirmField, cleanupRemoveButton, NSView()])]
+        if let message = cleanupMessage {
+            let label = text(message.text, size: 12)
+            label.textColor = message.color
+            views.append(label)
+        }
+        add(card("Remove", subtitle: nil, views: views))
+        updateCleanupSummary()
+    }
+
+    func updateCleanupSummary() {
+        let names = selectedCleanupItems.map(\.name) + (cleanupRemoveSelf.state == .on ? ["Couch Cube"] : [])
+        cleanupSummary.stringValue = names.isEmpty ? "Nothing selected yet." : "\(names.count) selected: " + names.joined(separator: ", ")
+        cleanupRemoveButton.isEnabled = !names.isEmpty && !cleanupInProgress
+    }
+
+    @objc func runGamingCleanup() {
+        guard let plan = cleanupPlan, !cleanupInProgress, task == nil else { return }
+        let selected = selectedCleanupItems
+        let removeSelf = cleanupRemoveSelf.state == .on
+        func say(_ message: String, _ color: NSColor = .systemRed) {
+            cleanupMessage = (message, color)
+            renderCleanup()
+        }
+        guard cleanupConfirmField.stringValue == "REMOVE" else {
+            say("Type REMOVE in the box to confirm.")
+            return
+        }
+        guard !selected.isEmpty || removeSelf else { return }
+        let gamingApps = Set(["Steam.app", "GOG Galaxy.app", "EA app.app", "Epic Games Launcher.app",
                               "Battle.net.app", "CurseForge.app", "ES-DE.app", "RetroArch.app",
                               "Dolphin.app", "Porting Kit.app", "CrossOver.app", "PCSX2.app",
                               "RPCS3.app", "Cemu.app", "Ryujinx.app"])
@@ -89,83 +174,56 @@ extension SetupController {
                 selected.contains { url.path == $0.path || url.path.hasPrefix($0.path + "/") }
         }
         guard running.isEmpty else {
-            let warning = NSAlert()
-            warning.messageText = "Quit gaming apps first"
-            warning.informativeText = running.map { $0.localizedName ?? "Gaming app" }.joined(separator: ", ")
-            warning.runModal()
+            say("Quit these first: " + running.map { $0.localizedName ?? "Gaming app" }.joined(separator: ", ") + ".")
             return
         }
-        let confirmation = NSAlert()
-        confirmation.alertStyle = .warning
-        confirmation.messageText = "Remove \(selected.count) selected items?"
-        confirmation.informativeText = "Homebrew-managed apps will be uninstalled. Other selected files move to Trash where supported; macOS may report that an external disk cannot use Trash. Recovery of uninstalled apps or unsynced saves is not guaranteed.\n\nType REMOVE to confirm."
-        let summary = NSTextView(frame: NSRect(x: 0, y: 0, width: 550, height: 180))
-        summary.isEditable = false
-        summary.font = .systemFont(ofSize: 12)
-        summary.isVerticallyResizable = true
-        summary.maxSize = NSSize(width: 550, height: CGFloat.greatestFiniteMagnitude)
-        summary.textContainer?.widthTracksTextView = true
-        summary.string = selected.map { "\($0.name)\n\($0.path)" }.joined(separator: "\n\n") +
-            (removeSelf.state == .on ? "\n\nCouch Cube\n\(Bundle.main.bundleURL.path)" : "")
-        let summaryScroll = NSScrollView(frame: NSRect(x: 0, y: 0, width: 550, height: 180))
-        summaryScroll.hasVerticalScroller = true
-        summaryScroll.documentView = summary
-        summaryScroll.widthAnchor.constraint(equalToConstant: 550).isActive = true
-        summaryScroll.heightAnchor.constraint(equalToConstant: 180).isActive = true
-        let typed = NSTextField(frame: NSRect(x: 0, y: 0, width: 360, height: 24))
-        typed.setAccessibilityLabel("Type REMOVE to confirm cleanup")
-        confirmation.accessoryView = column([summaryScroll, typed])
-        confirmation.addButton(withTitle: "Remove selected items")
-        confirmation.addButton(withTitle: "Cancel")
-        guard confirmation.runModal() == .alertFirstButtonReturn, typed.stringValue == "REMOVE" else { return }
-        var arguments = ["cleanup-prepare", "--confirm", "--token", plan.token, "--items"]
-        arguments += selected.map(\.id)
-        execute(arguments, capture: true) { code, data in
-            guard code == 0 else {
-                self.status.stringValue = "Cleanup stopped. Some apps may already be uninstalled. Review Activity and scan again."
-                self.activityNeeded(self.status.stringValue)
+        if selected.isEmpty {
+            NSWorkspace.shared.recycle([Bundle.main.bundleURL]) { _, error in
+                DispatchQueue.main.async {
+                    if let error { say("Couldn't move Couch Cube to the Trash: \(error.localizedDescription)") } else { NSApp.terminate(nil) }
+                }
+            }
+            return
+        }
+        cleanupInProgress = true
+        updateCleanupSummary()
+        execute(["cleanup-prepare", "--confirm", "--token", plan.token, "--items"] + selected.map(\.id), capture: true) { code, data in
+            guard code == 0, let targets = try? JSONDecoder().decode(CleanupTargets.self, from: data) else {
+                self.cleanupInProgress = false
+                say("Cleanup stopped. Some apps may already be uninstalled. Scan again to see what's left.")
+                self.activityNeeded("Cleanup stopped.")
                 return
             }
-            do {
-                let targets = try JSONDecoder().decode(CleanupTargets.self, from: data)
-                var urls = targets.paths.map { URL(fileURLWithPath: $0) }
-                if removeSelf.state == .on { urls.append(Bundle.main.bundleURL) }
-                if urls.isEmpty {
-                    self.status.stringValue = "Selected apps removed. Shared dependencies and unselected data were kept."
-                    self.appsHaveResults = false
-                    self.consolesLoaded = false
-                    self.refresh()
-                    return
-                }
-                self.cleanupInProgress = true
-                self.busy(true)
-                NSWorkspace.shared.recycle(urls) { moved, error in
-                    DispatchQueue.main.async {
+            var urls = targets.paths.map { URL(fileURLWithPath: $0) }
+            if removeSelf { urls.append(Bundle.main.bundleURL) }
+            func finished() {
+                self.cleanupInProgress = false
+                self.appsHaveResults = false
+                self.consolesLoaded = false
+                self.refresh()
+                self.reviewGamingCleanup()
+                self.cleanupMessage = ("Removed. The Trash wasn't emptied.", .systemGreen)
+            }
+            if urls.isEmpty { finished(); return }
+            self.busy(true)
+            NSWorkspace.shared.recycle(urls) { moved, error in
+                DispatchQueue.main.async {
+                    self.busy(false)
+                    if let error {
                         self.cleanupInProgress = false
-                        self.busy(false)
-                        if let error = error {
-                            let remaining = urls.filter { moved[$0] == nil }.map(\.path).joined(separator: "\n")
-                            self.status.stringValue = "Cleanup incomplete: \(error.localizedDescription)"
-                            self.append(self.status.stringValue + "\nNot moved:\n" + remaining + "\n")
-                            self.activityNeeded(self.status.stringValue)
-                        } else if removeSelf.state == .on {
-                            NSApp.terminate(nil)
-                        } else {
-                            if let identifier = Bundle.main.bundleIdentifier,
-                               targets.paths.contains(where: { $0.hasSuffix("/\(identifier).plist") }) {
-                                UserDefaults.standard.removePersistentDomain(forName: identifier)
-                            }
-                            self.status.stringValue = "Selected items removed. Trash was not emptied. Unselected and undetected items were kept."
-                            self.appsHaveResults = false
-                            self.consolesLoaded = false
-                            self.refresh()
+                        let remaining = urls.filter { moved[$0] == nil }.map(\.path).joined(separator: "\n")
+                        self.append("Cleanup incomplete: \(error.localizedDescription)\nNot moved:\n" + remaining + "\n")
+                        say("Cleanup incomplete: \(error.localizedDescription)")
+                    } else if removeSelf {
+                        NSApp.terminate(nil)
+                    } else {
+                        if let identifier = Bundle.main.bundleIdentifier,
+                           targets.paths.contains(where: { $0.hasSuffix("/\(identifier).plist") }) {
+                            UserDefaults.standard.removePersistentDomain(forName: identifier)
                         }
+                        finished()
                     }
                 }
-            } catch {
-                self.status.stringValue = "Cleanup stopped after app removal: \(error.localizedDescription)"
-                self.append(self.status.stringValue + "\n")
-                self.activityNeeded(self.status.stringValue)
             }
         }
     }

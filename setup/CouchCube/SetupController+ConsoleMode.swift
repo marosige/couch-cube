@@ -150,9 +150,9 @@ extension SetupController {
         clearRows(signInGuide)
         let signIn = consoleSignIn
         for (id, title, subtitle, symbol, color) in [
-            ("password", "Type your password", "Like any Mac: sign in at the login screen.", "key.fill", NSColor.systemGray),
-            ("watch", "Password once, then Apple Watch", "After a restart type it once; then your Apple Watch unlocks the Mac.", "applewatch", .systemBlue),
-            ("auto", "Start without signing in", "The Mac opens straight into your gaming account.", "bolt.fill", .systemOrange)
+            ("password", "Type your password", "Like any Mac: at the login screen and when it wakes.", "key.fill", NSColor.systemGray),
+            ("watch", "Password once, then Apple Watch", "Type it once after a restart; then your Apple Watch unlocks it when it wakes.", "applewatch", .systemBlue),
+            ("auto", "Start without signing in", "Starts straight into your gaming account, and wakes without a password.", "bolt.fill", .systemOrange)
         ] {
             addChoice(choiceRow(title, subtitle: subtitle, symbol: symbol, color: color, selected: signIn == id, id: "signin-" + id) { [weak self] in
                 UserDefaults.standard.set(id, forKey: "consoleSignIn")
@@ -169,11 +169,13 @@ extension SetupController {
                 for step in ["1. In Users & Groups, add a Standard user for gaming.",
                              "2. Sign in as that user and set up Couch Cube there.",
                              "3. Choose that user under \u{201C}Automatically log in as\u{201D}.",
+                             "4. In Lock Screen, set \u{201C}Require password after the display is turned off\u{201D} to Never.",
                              "This needs FileVault off, which lowers protection for the whole Mac."] {
                     signInGuide.addArrangedSubview(text(step, size: 12, secondary: step.first?.isNumber == false))
                 }
             }
             signInGuide.addArrangedSubview(row([button("Users & Groups", #selector(openUsersAndGroups)),
+                                                button("Lock Screen", #selector(openLockScreenSettings)),
                                                 button("FileVault", #selector(openFileVaultSettings)),
                                                 button("Apple Guide", #selector(openAutomaticLoginGuide))]))
         }
@@ -184,7 +186,7 @@ extension SetupController {
         for (id, title, subtitle, symbol, color) in [
             ("none", "Nothing", "Open Couch Cube yourself when you want to play.", "moon.fill", NSColor.systemGray),
             ("window", "Open Couch Cube", "In its window, like any app.", "macwindow", .systemBlue),
-            ("tv", "Open the TV menu", "When a controller is on and no keyboard or mouse is connected.", "tv.fill", .systemGreen)
+            ("tv", "Open the TV menu", "The true console experience: when a controller is on and no keyboard or mouse is connected.", "tv.fill", .systemGreen)
         ] {
             addChoice(choiceRow(title, subtitle: subtitle, symbol: symbol, color: color, selected: after == id,
                                                            enabled: autoLaunchLoaded, id: "after-" + id) { [weak self] in
@@ -247,6 +249,10 @@ extension SetupController {
         highlightedAppID = id
         selectPage(1)
         loadPageData(1)
+    }
+
+    @objc func openLockScreenSettings() {
+        if let url = URL(string: "x-apple.systempreferences:com.apple.Lock-Screen-Settings.extension") { NSWorkspace.shared.open(url) }
     }
 
     @objc func openAppleWatchUnlockSettings() {
