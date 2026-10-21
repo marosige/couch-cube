@@ -586,27 +586,36 @@ extension SetupController {
         add(detailSection("Couch Cube library", views: library))
         let loadingDetail = driveDetailLoading && detail == nil
         if let capacity = detail?.capacity {
-            func amount(_ label: String, _ bytes: Int64, _ identifier: String) -> NSView {
+            let full = capacity.total > 0 && Double(capacity.used) >= Double(capacity.total) * 0.95
+            let couchColor = NSColor.controlAccentColor, otherColor = full ? NSColor.systemRed : NSColor.systemGray
+            func amount(_ label: String, _ bytes: Int64, _ identifier: String, color: NSColor? = nil) -> NSView {
                 let value = text(ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file), size: 13)
                 value.identifier = NSUserInterfaceItemIdentifier(identifier)
                 value.alignment = .right
-                let line = row([text(label, size: 13), NSView(), value])
+                var parts: [NSView] = [text(label, size: 13), NSView(), value]
+                if let color {
+                    let dot = NSImageView(image: NSImage(systemSymbolName: "circle.fill", accessibilityDescription: nil)!)
+                    dot.symbolConfiguration = .init(pointSize: 8, weight: .regular)
+                    dot.contentTintColor = color
+                    parts.insert(dot, at: 0)
+                }
+                let line = row(parts)
                 line.distribution = .fill
                 return line
             }
-            let bar = NSLevelIndicator()
-            bar.levelIndicatorStyle = .continuousCapacity
-            bar.minValue = 0
-            bar.maxValue = Double(max(capacity.total, 1))
-            bar.doubleValue = Double(capacity.used)
-            bar.warningValue = bar.maxValue * 0.85
-            bar.criticalValue = bar.maxValue * 0.95
-            bar.setAccessibilityLabel("Used space")
+            // One bar: Couch Cube files, then everything else that's used; the rest of the track is free space.
+            let couch = min(max(capacity.couch, 0), capacity.used)
+            let bar = GameStorageBar()
+            bar.accessibilityPrefix = "Drive space"
+            bar.segments = [(title: "Couch Cube files", bytes: couch, color: couchColor),
+                            (title: "Other files", bytes: max(capacity.used - couch, 0), color: otherColor),
+                            (title: "Free", bytes: max(capacity.total - capacity.used, 0), color: .clear)].filter { $0.bytes > 0 }
+            bar.identifier = NSUserInterfaceItemIdentifier("drive-space-bar")
             add(detailSection("Storage", views: [
                 bar,
                 amount("Drive size", capacity.total, "drive-total"),
-                amount("Used (all files)", capacity.used, "drive-used"),
-                amount("Couch Cube files", capacity.couch, "drive-couch"),
+                amount("Used (all files)", capacity.used, "drive-used", color: otherColor),
+                amount("Couch Cube files", capacity.couch, "drive-couch", color: couchColor),
                 amount("Free space", capacity.free, "drive-free")
             ]))
         } else if loadingDetail {

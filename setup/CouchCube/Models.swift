@@ -187,6 +187,7 @@ struct GameStorageSlice: Equatable {
 final class GameStorageBar: NSView {
     static let colors: [NSColor] = [.systemBlue, .systemPurple, .systemTeal, .systemOrange, .systemPink, .systemGreen, .systemIndigo, .systemYellow]
     static let colored = 8
+    var accessibilityPrefix = "Game storage"
     var segments: [(title: String, bytes: Int64, color: NSColor)] = [] {
         didSet { needsDisplay = true; updateToolTips() }
     }
@@ -240,7 +241,7 @@ final class GameStorageBar: NSView {
     override func isAccessibilityElement() -> Bool { true }
     override func accessibilityRole() -> NSAccessibility.Role? { .image }
     override func accessibilityLabel() -> String? {
-        "Game storage: " + segments.map { $0.title + " " + ByteCountFormatter.string(fromByteCount: $0.bytes, countStyle: .file) }.joined(separator: ", ")
+        accessibilityPrefix + ": " + segments.map { $0.title + " " + ByteCountFormatter.string(fromByteCount: $0.bytes, countStyle: .file) }.joined(separator: ", ")
     }
 }
 

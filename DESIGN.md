@@ -532,7 +532,8 @@ without opening the drive. Click the row or its chevron to open the drive page:
   in Finder and **Copy to another drive** (the verified transfer below) first,
   then needs a second confirmation that you backed up what you want to keep.
   The folder goes to the Trash; the running app inside it is refused.
-- **Storage**: drive size, used (all files), Couch Cube files and free space.
+- **Storage**: one bar (Couch Cube files in the accent color, other used files gray, red when 95% full; the rest
+  of the track is free), then drive size, used (all files), Couch Cube files and free space.
 - **Steam**: games in Steam libraries on that drive, with **Play** and **Manage**
   (opens the game's page in Steam via `steam://nav/games/details/<appid>`) and
   **Open Steam Storage**.

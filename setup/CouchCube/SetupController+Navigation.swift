@@ -76,13 +76,18 @@ extension SetupController {
             content.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -16)
         ])
         let isHome = tabs.tabViewItems.isEmpty
-        if !isHome {
+        if isHome {
+            content.widthAnchor.constraint(equalTo: container.widthAnchor, constant: -16).isActive = true
+        } else {
             content.widthAnchor.constraint(lessThanOrEqualToConstant: maxWidth).isActive = true
+            // A fixed width that follows the container (see TopAlignedView), above content hugging so a page never
+            // starts narrow; it only tracks the window, so it never resizes it.
+            let width = content.widthAnchor.constraint(equalToConstant: maxWidth)
+            width.priority = NSLayoutConstraint.Priority(rawValue: 999)
+            width.isActive = true
+            container.pageWidth = width
+            container.maxPageWidth = maxWidth
         }
-        let width = content.widthAnchor.constraint(equalTo: container.widthAnchor, constant: -16)
-        // Below windowSizeStayPut so the capped page width never shrinks the window.
-        width.priority = isHome ? .required : NSLayoutConstraint.Priority(rawValue: NSLayoutConstraint.Priority.windowSizeStayPut.rawValue - 1)
-        width.isActive = true
         page.view = scroll
         tabs.addTabViewItem(page)
     }

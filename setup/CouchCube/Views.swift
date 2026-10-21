@@ -186,6 +186,17 @@ final class RemoteImageView: NSImageView {
 
 final class TopAlignedView: NSView {
     override var isFlipped: Bool { true }
+    /// The page column's width: the available width (minus margins) up to the page's cap. It is set from this view's own
+    /// size, not left to content, so a page with little in it yet doesn't start narrow and then jump as rows arrive.
+    var pageWidth: NSLayoutConstraint?
+    var maxPageWidth: CGFloat = .greatestFiniteMagnitude
+
+    override func setFrameSize(_ newSize: NSSize) {
+        super.setFrameSize(newSize)
+        guard let pageWidth, newSize.width > 16 else { return }
+        let target = min(newSize.width - 16, maxPageWidth)
+        if pageWidth.constant != target { pageWidth.constant = target }
+    }
 }
 
 let settingsSectionBackground = NSColor.controlBackgroundColor
