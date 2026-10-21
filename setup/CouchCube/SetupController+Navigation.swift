@@ -205,7 +205,7 @@ extension SetupController {
         if page == 0 {
             refreshGeneral()
             if steamReport == nil { loadSteamStatus() }
-            if storeAccounts.phase == .idle { loadStoreAccounts() }
+            loadLauncherLibrary()
         }
     }
 

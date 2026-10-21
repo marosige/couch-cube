@@ -36,11 +36,10 @@ FOLDER = "Couch Cube"
 SSD_TEMPLATE = ".couch-cube-ssd-template"
 SSD_FOLDERS = [
     "SteamLibrary", "ROMs", "BIOS/retroarch/dc", "Saves", "Native/Games",
-    "Native/Assets", "Windows/Wrappers", "Windows/Installers",
+    "Native/Assets", "Windows/Wrappers", "Windows/Installers", "Windows/Porting Kit",
 ]
 PACKAGES = {
     "steam": "Steam.app",
-    "steamac": "FX Steam Launcher.app",
     "gog-galaxy": "GOG Galaxy.app",
     "ea": "EA app.app",
     "epic-games": "Epic Games Launcher.app",
@@ -58,7 +57,6 @@ PACKAGES = {
 }
 MANUAL_APPS = {
     # Notarized DMG (Developer ID: FX GAMES FZ LLC); no Homebrew cask, so the official release page is opened.
-    "steamac": "https://github.com/fxgl/steamac/releases/tag/v1.9.1",
     "crossover": "https://www.codeweavers.com/crossover",
     "battle-net": "https://download.battle.net/",
     "rpcs3": "https://rpcs3.net/download",
@@ -1126,7 +1124,7 @@ def initialize(storage, systems=None):
     folders = [
         "SteamLibrary", "ROMs", "BIOS/retroarch/dc",
         "Saves/RetroArch/States", "Saves/Dolphin", "Saves/Native", "Saves/Windows",
-        "Native/Games", "Native/Assets", "Windows/Wrappers", "Windows/Installers",
+        "Native/Games", "Native/Assets", "Windows/Wrappers", "Windows/Installers", "Windows/Porting Kit",
         "Frontend", "Config", "Runtime", "Launchers",
     ]
     folders += ["ROMs/" + system for system in selected_systems(state)]
@@ -2147,6 +2145,51 @@ def launch(storage, action, identifier=None):
         run(["/usr/bin/open", "-W", str(app)])
 
 
+LAUNCHER_SKIP = re.compile(r"^(uninstall|install|setup|readme|update)\b", re.I)
+
+
+def app_bundles(folder, depth=1):
+    """`.app` bundles in a folder (and its subfolders up to `depth`), never following symlinks."""
+    found = []
+    if folder.is_symlink() or not folder.is_dir():
+        return found
+    for entry in sorted(folder.iterdir()):
+        if entry.name.startswith(".") or entry.is_symlink():
+            continue
+        if entry.suffix == ".app" and entry.is_dir():
+            if not LAUNCHER_SKIP.match(entry.stem):
+                found.append(entry)
+        elif entry.is_dir() and depth > 0:
+            found += app_bundles(entry, depth - 1)
+    return found
+
+
+def library_games(storage, home=None):
+    """Everything playable for the Play page's game grid, read-only and fast (nothing is measured):
+    ROMs of enabled consoles, native Mac games and Windows wrappers in the library, Porting Kit ports
+    and CrossOver's program shortcuts. Steam games come from steam-status."""
+    home = Path.home() if home is None else home
+    enabled = set(selected_systems(read_json(storage.target(MARKER))))
+    roms = []
+    for system, (system_name, extensions, _) in SYSTEMS.items():
+        folder = storage.root / "ROMs" / system
+        if system not in enabled or folder.is_symlink() or not folder.is_dir():
+            continue
+        games, _ = rom_games(folder, extensions.split("|"))
+        for name, members in games:
+            if members and members[0].is_file():
+                roms.append({"system": system, "system_name": system_name, "name": name, "path": str(members[0])})
+    apps = []
+    for kind, folder, depth in [("native", storage.root / "Native/Games", 1),
+                                ("windows", storage.root / "Windows/Wrappers", 1),
+                                ("porting-kit", storage.root / "Windows/Porting Kit", 1),
+                                ("crossover", home / "Applications/CrossOver", 2)]:
+        for app in app_bundles(folder, depth):
+            apps.append({"kind": kind, "name": app.stem, "path": str(app),
+                         "group": app.parent.name if kind == "crossover" and app.parent != folder else None})
+    return {"roms": roms, "apps": apps}
+
+
 def emulate(storage, system, rom):
     if system not in SYSTEMS:
         raise SetupError("Unknown emulation system.")
@@ -2549,7 +2592,7 @@ def main():
     setup.add_argument("--no-host-config", action="store_true",
                        help="Keep selection on the drive only; do not save it in this Mac's home folder.")
     setup.add_argument("--install", nargs="*", choices=list(PACKAGES), default=[])
-    for action in ["env", "index", "steam", "retro", "console", "launch", "emulate", "register"]:
+    for action in ["env", "index", "steam", "retro", "console", "launch", "emulate", "register", "library-games"]:
         command = sub.add_parser(action)
         command.add_argument("--root")
         if action == "launch":
@@ -2712,6 +2755,8 @@ def main():
                 register(storage, args.name, args.kind, args.app)
             elif args.command == "emulate":
                 emulate(storage, args.system, args.rom)
+            elif args.command == "library-games":
+                print(json_text(library_games(storage)))
             else:
                 launch(storage, args.command, getattr(args, "id", None))
     except (SetupError, OSError, ValueError, KeyError, ET.ParseError, subprocess.CalledProcessError) as exc:

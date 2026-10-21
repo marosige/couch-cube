@@ -192,8 +192,7 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
     var systemStoreLinks: [NSButton] = []
     let launcherSearch = NSSearchField()
     static let launcherAppsKey = "launcherApps"
-    static let windowsClientIcons = ["win-steam": "steam", "win-epic": "epic-games", "win-gog": "gog-galaxy",
-                                     "win-ea": "ea", "win-battlenet": "battle-net"]
+    var launcherLibrary: LibraryGames?
     /// Smoke screenshots show sample tiles instead of whatever the build machine has installed.
     var launcherSmokeItems: [LauncherItem]?
     var homeTiles: NSStackView!
@@ -1090,7 +1089,7 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
         return CBManager.authorization != .allowedAlways || bluetoothManager?.state == .poweredOff
     }
 
-    let computerGameApps: Set<String> = ["steam", "steamac", "gog-galaxy", "ea", "epic-games", "battle-net", "curseforge"]
+    let computerGameApps: Set<String> = ["steam", "gog-galaxy", "ea", "epic-games", "battle-net", "curseforge"]
     let emulatorApps: Set<String> = ["retroarch-metal", "dolphin", "pcsx2", "rpcs3", "cemu-wiiu", "switch"]
 
     var overviewAppSummary: String {
@@ -1148,7 +1147,7 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
     /// Installed apps that run Windows games (nil until the app list has been read).
     var compatibilityLayers: [String]? {
         guard lastAppsData != nil else { return nil }
-        return ["crossover", "porting-kit", "steamac"].compactMap { id in appStates.first { $0.id == id && $0.installed }?.name }
+        return ["crossover", "porting-kit"].compactMap { id in appStates.first { $0.id == id && $0.installed }?.name }
     }
 
     /// A compact badge (logo + short label) and the full explanation for tooltips and VoiceOver.
@@ -1164,7 +1163,6 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
 
     let appPurposes = [
             "steam": "Steam games for Mac",
-            "steamac": "SteamOS in a VM · Windows Steam games · Apple silicon, macOS 15+",
             "gog-galaxy": "GOG games for Mac",
             "ea": "EA games for Mac",
             "epic-games": "Epic Games for Mac",

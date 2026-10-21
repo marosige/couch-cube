@@ -7,13 +7,21 @@ import IOKit.hid
 import QuartzCore
 import UniformTypeIdentifiers
 
-/// Groups on the Play page's game launcher, in display order.
+/// Groups on the Play page's game grid, in display order. Only games: launchers and emulators live in App Store.
 enum LauncherSection: String, CaseIterable {
     case steam = "Steam games"
-    case windows = "Windows launchers"
-    case launchers = "Mac launchers"
-    case retro = "Retro and emulators"
+    case retro = "Retro games"
+    case windows = "Windows games"
+    case mac = "Mac games"
     case added = "Added by you"
+}
+
+/// `library-games` (scripts/console.py): ROMs of shown consoles and game apps in the library and CrossOver.
+struct LibraryGames: Decodable {
+    struct Rom: Decodable { let system: String; let systemName: String; let name: String; let path: String }
+    struct App: Decodable { let kind: String; let name: String; let path: String; let group: String? }
+    let roms: [Rom]
+    let apps: [App]
 }
 
 /// One thing the launcher can open: a Steam game, a store app, a Windows client in a bottle or any app you added.
