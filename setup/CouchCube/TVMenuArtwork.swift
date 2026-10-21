@@ -30,13 +30,13 @@ enum TVMenuArtwork {
             NSGradient(starting: style.top, ending: style.bottom)?.draw(in: rect, angle: -90)
             // A soft light behind the logo, off to the right, like a TV glowing in a dark room.
             let glow = NSGradient(colors: [style.glow.withAlphaComponent(0.55), style.glow.withAlphaComponent(0)])
-            glow?.draw(fromCenter: NSPoint(x: rect.width * 0.72, y: rect.height * 0.52), radius: 0,
-                       toCenter: NSPoint(x: rect.width * 0.72, y: rect.height * 0.52), radius: rect.height * 0.75, options: [])
+            glow?.draw(fromCenter: NSPoint(x: rect.width * 0.66, y: rect.height * 0.55), radius: 0,
+                       toCenter: NSPoint(x: rect.width * 0.66, y: rect.height * 0.55), radius: rect.height * 0.75, options: [])
             // Fine scanlines give the TV feel without competing with the logo.
             NSColor.white.withAlphaComponent(0.035).setFill()
             for y in stride(from: 0, to: rect.height, by: 6) { NSRect(x: 0, y: y, width: rect.width, height: 2).fill() }
             let logoSide: CGFloat = 300
-            let logoRect = NSRect(x: rect.width * 0.72 - logoSide / 2, y: rect.height * 0.52 - logoSide / 2, width: logoSide, height: logoSide)
+            let logoRect = NSRect(x: rect.width * 0.66 - logoSide / 2, y: rect.height * 0.55 - logoSide / 2, width: logoSide, height: logoSide)
             if let id = style.icon,
                let logo = appIcon ?? Bundle.main.resourceURL.flatMap({ NSImage(contentsOf: $0.appendingPathComponent("AppIcons/\(id).png")) }) {
                 NSGraphicsContext.current?.imageInterpolation = .high
@@ -59,8 +59,11 @@ enum TVMenuArtwork {
                 .foregroundColor: style.glow.blended(withFraction: 0.4, of: .white) ?? .white])
             let title = NSAttributedString(string: style.title, attributes: [
                 .font: NSFont.systemFont(ofSize: 92, weight: .bold), .foregroundColor: NSColor.white])
-            kicker.draw(at: NSPoint(x: 72, y: 196))
-            title.draw(at: NSPoint(x: 66, y: 80))
+            // The tile crops the sides (it is narrower than 16:9), so text stays inside a safe area.
+            if style.icon != nil {
+                kicker.draw(at: NSPoint(x: 200, y: 196))
+                title.draw(at: NSPoint(x: 194, y: 80))
+            }
             return true
         }
     }

@@ -3280,6 +3280,12 @@ extension SetupController {
         var pages = sidebarPages.filter { $0 >= 0 }
         // The Cube Shop game page too, for the game it last showed (Portal 2 from the deals list).
         if shopDetailKey != nil { pages.append(14) }
+        for menu in ["steam", "es-de", "none"] {
+            let art = TVMenuArtwork.image(for: menu == "none" ? nil : menu)
+            if let tiff = art.tiffRepresentation, let png = NSBitmapImageRep(data: tiff)?.representation(using: .png, properties: [:]) {
+                try? png.write(to: URL(fileURLWithPath: folder).appendingPathComponent("page-tvart-\(menu).png"))
+            }
+        }
         for page in pages {
             selectPage(page)
             RunLoop.current.run(until: Date().addingTimeInterval(0.2))
