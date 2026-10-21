@@ -214,7 +214,7 @@ extension SetupController {
                 }
             }, to: tvMenuChoices)
         }
-        addChoice(choiceRow("Couch Cube TV", subtitle: "Couch Cube's own TV mode \u{2014} coming soon.",
+        addChoice(choiceRow("Cube TV Home", subtitle: "Couch Cube's own TV home screen \u{2014} coming soon.",
                                                    symbol: "sparkles.tv.fill", color: .systemPurple, selected: false,
                                                    enabled: false, id: "menu-couchcube") {}, to: tvMenuChoices)
     }

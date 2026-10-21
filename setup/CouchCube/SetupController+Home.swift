@@ -52,7 +52,8 @@ extension SetupController {
         if let image = NSImage(contentsOf: Bundle.main.resourceURL!.appendingPathComponent("TVMenus/\(frontendID)")) {
             homePlayBackground.layer?.contents = image.cgImage(forProposedRect: nil, context: nil, hints: nil)
         }
-        playAction.setAccessibilityLabel("Play · \(homeMenuLabel.stringValue)")
+        homePlaySubtitle.stringValue = homeMenuLabel.stringValue
+        playAction.setAccessibilityLabel("Cube TV · \(homeMenuLabel.stringValue)")
         var tasks: [SidebarTask] = []
         if let report = report, !ready {
             if report.issues.isEmpty {
