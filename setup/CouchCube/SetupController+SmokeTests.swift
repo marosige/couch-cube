@@ -517,9 +517,10 @@ extension SetupController {
                             precondition([self.setupFolderStatus, self.gameLibraryOverviewRows, self.transferLibraryButton, self.retireLibraryButton]
                                             .allSatisfy { $0.isDescendant(of: library) },
                                          "Game library includes the former Library storage controls")
+                            // A button's own title only: newer AppKit draws it with an internal text field subview.
                             func texts(_ view: NSView) -> [String] {
-                                ((view as? NSButton).map { [$0.title] } ?? (view as? NSTextField).map { [$0.stringValue] } ?? []) +
-                                    view.subviews.flatMap { texts($0) }
+                                if let button = view as? NSButton { return [button.title] }
+                                return ((view as? NSTextField).map { [$0.stringValue] } ?? []) + view.subviews.flatMap { texts($0) }
                             }
                             let pageTexts: [String] = texts(library)
                             let refreshCount: Int = pageTexts.filter { $0 == "Refresh connected drives" }.count
