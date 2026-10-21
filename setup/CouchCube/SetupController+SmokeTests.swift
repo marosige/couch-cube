@@ -893,11 +893,10 @@ extension SetupController {
                         precondition(!self.tableView(self.sidebar, shouldSelectRow: index), "Sidebar section headings must not navigate")
                     }
                     precondition(self.systemSwitches.count == 17 && self.activeControllerRows.arrangedSubviews.count == 5)
-                    precondition(self.consoleRows.arrangedSubviews.count == 4,
-                                 "The all-consoles row, then one card each for Nintendo, PlayStation and SEGA")
-                    precondition(self.consoleBulkToggles.map(\.scope) == ["all consoles", "Nintendo consoles", "PlayStation consoles",
-                                 "SEGA consoles", "Nintendo home consoles", "Nintendo handhelds"],
-                                 "Show/hide-all switches for the page, each section and each subsection")
+                    precondition(self.consoleRows.arrangedSubviews.count == 3,
+                                 "One card each for Nintendo, PlayStation and SEGA")
+                    precondition(self.consoleBulkToggles.map(\.scope) == ["Nintendo consoles", "PlayStation consoles", "SEGA consoles"],
+                                 "One show/hide-all switch per manufacturer")
                     let readyBIOS = BIOSStatus(state: "present", summary: "", files: [])
                     for (enabled, installed, bios, expected) in [
                         (false, false, readyBIOS, NSColor.systemGray),
@@ -1919,32 +1918,30 @@ extension SetupController {
         func switchesMatch() -> Bool { zip(consoleSystems, systemSwitches).allSatisfy { ($0.enabled ? NSControl.StateValue.on : .off) == $1.state } }
         let all = Set(consoleSystems.map(\.id))
         let nintendo = home.union(handheld).intersection(all)
-        precondition(bulk("Nintendo home consoles").toggle.state == .on && bulk("Nintendo home consoles").count.isHidden)
-        precondition(bulk("Nintendo handhelds").toggle.state == .off && bulk("Nintendo handhelds").count.isHidden)
+        // One switch per manufacturer; no "all consoles" or sub-group switches.
+        precondition(consoleBulkToggles.map(\.scope) == ["Nintendo consoles", "PlayStation consoles", "SEGA consoles"])
         precondition(bulk("Nintendo consoles").toggle.state == .off && !bulk("Nintendo consoles").count.isHidden &&
                      bulk("Nintendo consoles").count.stringValue == "\(home.count) of \(nintendo.count)", "Mixed groups show a count")
-        precondition(bulk("all consoles").toggle.accessibilityLabel() == "Show all all consoles, \(home.count) of \(all.count) shown" ||
-                     bulk("all consoles").toggle.accessibilityLabel()?.contains("\(home.count) of \(all.count) shown") == true)
-        // Subsection level; parents recompute instantly.
-        press("Nintendo handhelds")
+        precondition(bulk("Nintendo consoles").toggle.accessibilityLabel()?.contains("\(home.count) of \(nintendo.count) shown") == true)
+        // Clicking a mixed toggle shows the whole group.
+        press("Nintendo consoles")
         precondition(current() == nintendo && switchesMatch() && bulk("Nintendo consoles").toggle.state == .on &&
-                     bulk("Nintendo consoles").count.isHidden && bulk("all consoles").toggle.state == .off)
+                     bulk("Nintendo consoles").count.isHidden)
         precondition(pendingEmulatorInstall == nil && pendingAppStoreID == nil, "Showing consoles never installs anything")
-        // Clicking a mixed toggle shows all.
-        precondition(!bulk("all consoles").count.isHidden)
-        press("all consoles")
+        press("PlayStation consoles")
+        press("SEGA consoles")
         precondition(current() == all && switchesMatch() && consoleBulkToggles.allSatisfy { $0.toggle.state == .on && $0.count.isHidden })
-        // Section level hides only its own systems.
+        // A group switch hides only its own systems.
         press("PlayStation consoles")
         let playStation = bulk("PlayStation consoles").ids
-        precondition(current() == all.subtracting(playStation) && bulk("all consoles").toggle.state == .off)
-        // An individual switch updates every parent at once.
+        precondition(current() == all.subtracting(playStation))
+        // An individual switch updates its group at once.
         let gb = consoleSystems.firstIndex { $0.id == "gb" }!
         systemSwitches[gb].state = .off
         toggleSystem(systemSwitches[gb])
-        precondition(bulk("Nintendo handhelds").count.stringValue == "\(handheld.count - 1) of \(handheld.count)" &&
+        precondition(bulk("Nintendo consoles").count.stringValue == "\(nintendo.count - 1) of \(nintendo.count)" &&
                      bulk("Nintendo consoles").toggle.state == .off)
-        press("Nintendo handhelds")
+        press("Nintendo consoles")
         let expected = all.subtracting(playStation)
         precondition(current() == expected && saves.isEmpty, "Bulk and single toggles wait for a pause")
         precondition(consoleRows.arrangedSubviews.map(ObjectIdentifier.init) == rowsBefore &&
@@ -1954,15 +1951,14 @@ extension SetupController {
         saves[0].done(0, "")
         precondition(consolePersistedEnabled == expected)
         // Hide everything, then fail: the last saved choices and the group states come back.
-        press("all consoles")
-        precondition(current() == all, "All on except PlayStation was mixed; the click shows all")
-        press("all consoles")
+        press("Nintendo consoles")
+        press("SEGA consoles")
         precondition(current().isEmpty && consoleBulkToggles.allSatisfy { $0.toggle.state == .off && $0.count.isHidden })
         saveSystems()
         precondition(saves.count == 2 && saves[1].enabled.isEmpty)
         saves[1].done(1, "Disk is read-only\n")
         precondition(current() == expected && switchesMatch() && bulk("PlayStation consoles").toggle.state == .off &&
-                     bulk("all consoles").toggle.state == .off && !bulk("all consoles").count.isHidden,
+                     bulk("Nintendo consoles").toggle.state == .on,
                      "A failed bulk save reverts the switches and the group states")
         precondition(consoleStatus.stringValue.hasPrefix("Couldn't save console selection"))
         precondition(consoleRows.arrangedSubviews.map(ObjectIdentifier.init) == rowsBefore)
