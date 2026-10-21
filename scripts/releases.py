@@ -1,12 +1,8 @@
-"""Public GitHub release discovery and verified portable-app staging."""
+"""Public GitHub release discovery for the in-app update check."""
 
-import hashlib
 import json
 from pathlib import Path
-import platform
-import plistlib
 import re
-import subprocess
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -102,58 +98,3 @@ def latest():
     return {"version": tag.removeprefix("v"), "available": version(tag) > version(config["version"]),
             "url": f"https://github.com/{config['repository']}/releases/tag/{tag}",
             "filename": filename, "assets": assets}
-
-
-def stage(directory, run):
-    config = configuration()
-    release = latest()
-    if version(release["version"]) < version(config["version"]):
-        raise ReleaseError("The published release is older than this app. Publish the current release before preparing an SSD.")
-    filename = release["filename"]
-    archive = fetch(release["assets"][filename]["browser_download_url"], 512 * 1024 ** 2)
-    digest = hashlib.sha256(archive).hexdigest()
-    github_digest = release["assets"][filename]["digest"].lower()
-    if github_digest != "sha256:" + digest:
-        raise ReleaseError("DMG checksum mismatch against GitHub's asset digest. Nothing will be erased.")
-    archive_path = directory / filename
-    archive_path.write_bytes(archive)
-    run(["/usr/bin/hdiutil", "verify", str(archive_path)], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    mount = directory / "image"
-    mount.mkdir()
-    run(["/usr/bin/hdiutil", "attach", "-readonly", "-nobrowse", "-mountpoint", str(mount), str(archive_path)],
-        stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    extracted = directory / "extracted"
-    extracted.mkdir()
-    try:
-        source = mount / config["app_name"]
-        if source.is_symlink() or not source.is_dir():
-            raise ReleaseError("DMG is missing a real Couch Cube app.")
-        for path in source.rglob("*"):
-            if path.is_symlink() and not path.resolve().is_relative_to(source.resolve()):
-                raise ReleaseError("DMG app has an escaping symbolic link.")
-            if not (path.is_file() or path.is_dir() or path.is_symlink()):
-                raise ReleaseError("DMG app contains an unsupported file type.")
-        run(["/usr/bin/ditto", str(source), str(extracted / config["app_name"])])
-    finally:
-        run(["/usr/bin/hdiutil", "detach", str(mount)], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    app = extracted / config["app_name"]
-    for path in app.rglob("*"):
-        if path.is_symlink() and not path.resolve().is_relative_to(app.resolve()):
-            raise ReleaseError("Extracted app has an escaping symbolic link.")
-    with (app / "Contents/Info.plist").open("rb") as file:
-        info = plistlib.load(file)
-    if info.get("CFBundleIdentifier") != config["bundle_id"] or info.get("CouchCubeVersion") != release["version"]:
-        raise ReleaseError("Downloaded app identity/version does not match the release.")
-    if info.get("MCCDistribution") != "portable":
-        if info.get("MCCDistribution") != "local":
-            raise ReleaseError("Unrecognized app distribution in the DMG.")
-    minimum = tuple(int(part) for part in info["LSMinimumSystemVersion"].split("."))
-    current = tuple(int(part) for part in platform.mac_ver()[0].split("."))
-    if current < minimum:
-        raise ReleaseError("The newest portable app needs a newer macOS. Nothing will be erased.")
-    run(["/usr/bin/codesign", "--verify", "--deep", "--strict", str(app)])
-    binary = app / "Contents/MacOS" / info["CFBundleExecutable"]
-    result = run(["/usr/bin/lipo", "-archs", str(binary)], stdout=subprocess.PIPE)
-    if "arm64" not in result.stdout.decode().split():
-        raise ReleaseError("The downloaded app does not support Apple Silicon.")
-    return app
