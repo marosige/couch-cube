@@ -42,6 +42,7 @@ cp "$ROOT/scripts/store_accounts.py" "$APP/Contents/Resources/scripts/store_acco
 cp "$ROOT/scripts/shop.py" "$APP/Contents/Resources/scripts/shop.py"
 cp "$ROOT/scripts/wishlist.py" "$APP/Contents/Resources/scripts/wishlist.py"
 cp "$ROOT/scripts/rates.py" "$APP/Contents/Resources/scripts/rates.py"
+cp "$ROOT/scripts/steam_library.py" "$APP/Contents/Resources/scripts/steam_library.py"
 cp "$ROOT/scripts/askpass.sh" "$APP/Contents/Resources/scripts/askpass.sh"
 chmod +x "$APP/Contents/Resources/scripts/askpass.sh"
 cp "$ROOT/config/release.json" "$APP/Contents/Resources/config/release.json"
