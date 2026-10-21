@@ -385,7 +385,8 @@ extension SetupController {
             })
             grid.rowSpacing = 6
             grid.columnSpacing = 14
-            grid.column(at: 0).xPlacement = .trailing
+            grid.column(at: 0).xPlacement = .leading
+            grid.column(at: 0).width = 96
             grid.setAccessibilityIdentifier("shopGameFacts")
             views.append(grid)
         }
