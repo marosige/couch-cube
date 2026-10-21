@@ -3232,6 +3232,20 @@ extension SetupController {
         let savedFrame = window.frame, savedPage = currentPage
         let appearance = window.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua ? "dark" : "light"
         window.setContentSize(NSSize(width: 1240, height: 860))
+        func icon(_ id: String) -> NSImage? { NSImage(contentsOf: Bundle.main.resourceURL!.appendingPathComponent("AppIcons/\(id).png")) }
+        func sample(_ title: String, _ subtitle: String, _ section: LauncherSection, _ iconID: String) -> LauncherItem {
+            LauncherItem(id: title, title: title, subtitle: subtitle, section: section, artwork: icon(iconID),
+                         wideArtwork: false, path: nil, launch: {})
+        }
+        launcherSmokeItems = ["Overcooked! 2", "Pummel Party", "LEGO Party", "Runbow", "Rocket League"].map { sample($0, "Steam", .steam, "steam") } +
+            [sample("Battle.net", "Windows · CrossOver", .windows, "battle-net"),
+             sample("Epic Games Launcher", "Epic Games for Mac", .launchers, "epic-games"),
+             sample("GOG Galaxy", "GOG games for Mac", .launchers, "gog-galaxy"),
+             sample("ES-DE", "Retro game TV menu", .retro, "es-de"),
+             sample("Dolphin", "GameCube · Wii", .retro, "dolphin"),
+             sample("Nintendo Switch", "Switch emulator", .retro, "switch")]
+        renderLauncher()
+        defer { launcherSmokeItems = nil; renderLauncher() }
         for page in sidebarPages where page >= 0 {
             selectPage(page)
             RunLoop.current.run(until: Date().addingTimeInterval(0.2))

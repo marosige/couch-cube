@@ -33,7 +33,7 @@ final class ScopePopUp: NSPopUpButton {
     func setToolTip(_ toolTip: String?, forSegment segment: Int) { item(at: segment)?.toolTip = toolTip }
 }
 
-final class ClickableRowView: NSView {
+class ClickableRowView: NSView {
     var onActivate: (() -> Void)?
     private(set) var hovering = false
     private(set) var pressed = false
@@ -290,8 +290,3 @@ final class StorageOverviewRow: NSView {
     }
 }
 
-final class HomeHeaderImageView: NSImageView {
-    override var intrinsicContentSize: NSSize {
-        NSSize(width: NSView.noIntrinsicMetric, height: NSView.noIntrinsicMetric)
-    }
-}

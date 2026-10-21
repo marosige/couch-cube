@@ -174,6 +174,13 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
     var homeSessionControllers: [String] = []
     var homeObservedConnections = Set<String>()
     let homePlayBackground = NSView()
+    let launcherSections = NSStackView()
+    let launcherSearch = NSSearchField()
+    static let launcherAppsKey = "launcherApps"
+    static let windowsClientIcons = ["win-steam": "steam", "win-epic": "epic-games", "win-gog": "gog-galaxy",
+                                     "win-ea": "ea", "win-battlenet": "battle-net"]
+    /// Smoke screenshots show sample tiles instead of whatever the build machine has installed.
+    var launcherSmokeItems: [LauncherItem]?
     var homeTiles: NSStackView!
     var sidebarAttention: [Int: NSColor] = [:]
     var sidebarTasks: [SidebarTask] = []
@@ -630,23 +637,9 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
         homeCards.spacing = 20
         playCard.widthAnchor.constraint(equalTo: controllerCard.widthAnchor).isActive = true
         playCard.heightAnchor.constraint(equalTo: controllerCard.heightAnchor).isActive = true
-        let brandHeader = NSView()
-        brandHeader.wantsLayer = true
-        brandHeader.layer?.cornerRadius = 16
-        brandHeader.layer?.masksToBounds = true
-        let portableHeader = Bundle.main.object(forInfoDictionaryKey: "MCCDistribution") as? String == "portable"
-        let headerName = portableHeader ? "HomeHeaderPortable.png" : "HomeHeader.png"
-        let brandImage = HomeHeaderImageView(image: NSImage(contentsOf: Bundle.main.resourceURL!.appendingPathComponent(headerName))!)
-        brandImage.imageScaling = .scaleAxesIndependently
-        brandImage.translatesAutoresizingMaskIntoConstraints = false
-        brandHeader.addSubview(brandImage)
-        pin(brandImage, to: brandHeader)
-        NSLayoutConstraint.activate([
-            brandHeader.heightAnchor.constraint(equalTo: brandHeader.widthAnchor, multiplier: 500.0 / 1680.0)
-        ])
         addPage("Play", content: column([
-            brandHeader,
-            homeCards
+            homeCards,
+            launcherSection()
         ]))
 
         for rows in [appMenuRows, appPCRows, appWindowsRows, appRetroRows] {
