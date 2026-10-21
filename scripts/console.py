@@ -1711,9 +1711,8 @@ def populated_systems(root):
         folder = root / "ROMs" / system
         if folder.is_symlink() or not folder.is_dir():
             continue
-        allowed = extensions.split("|")
-        count = sum(1 for file in folder.rglob("*")
-                    if file.is_file() and not file.is_symlink() and file.suffix.lower().lstrip(".") in allowed)
+        # Games, not files: a game folder with its updates, DLC or extra discs counts once.
+        count = len(playable_roms(folder, extensions.split("|")))
         if count:
             systems.append({"id": system, "name": name, "games": count, "path": str(folder)})
     return systems
@@ -1884,6 +1883,35 @@ def rom_games(folder, allowed):
     for targets in claimed.values():
         leftovers += [target for target in targets if target.resolve() not in used]
     return games, list(dict.fromkeys(leftovers))
+
+
+def rom_launch_file(members, allowed):
+    """The file to start for one game from rom_games: the file itself, or for a game folder (e.g. a Switch game
+    with its updates and DLC, or a GameCube folder) the largest playable file inside it. None when there is none."""
+    first = members[0]
+    if first.is_file():
+        return first
+    if first.is_symlink() or not first.is_dir():
+        return None
+    best, best_size = None, -1
+    for path in sorted(first.rglob("*")):
+        if path.name.startswith(".") or path.is_symlink() or not path.is_file() or path.suffix.lower().lstrip(".") not in allowed:
+            continue
+        size = path.stat().st_size
+        if size > best_size:
+            best, best_size = path, size
+    return best
+
+
+def playable_roms(folder, allowed):
+    """(name, file to start) for every game in one system folder, loose files and game folders alike."""
+    games, _ = rom_games(folder, allowed)
+    found = []
+    for name, members in games:
+        launch = rom_launch_file(members, allowed) if members else None
+        if launch is not None:
+            found.append((name, launch))
+    return found
 
 
 def launcher_roots(choice):
@@ -2260,10 +2288,8 @@ def library_games(storage, home=None):
         folder = storage.root / "ROMs" / system
         if system not in enabled or folder.is_symlink() or not folder.is_dir():
             continue
-        games, _ = rom_games(folder, extensions.split("|"))
-        for name, members in games:
-            if members and members[0].is_file():
-                roms.append({"system": system, "system_name": system_name, "name": name, "path": str(members[0])})
+        for name, launch in playable_roms(folder, extensions.split("|")):
+            roms.append({"system": system, "system_name": system_name, "name": name, "path": str(launch)})
     apps = []
     for kind, folder, depth in [("native", storage.root / "Native/Games", 1),
                                 ("windows", storage.root / "Windows/Wrappers", 1),

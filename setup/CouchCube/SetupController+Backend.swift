@@ -335,6 +335,8 @@ extension SetupController {
             let cachedReport = self.report
             let cachedSystems = self.consoleSystems.map { $0.id }
             self.updateSelection(preservingStatus: preserve)
+            // Play opens before the drives are known; load its library games once they are.
+            if self.currentPage == 0 { self.loadLauncherLibrary() }
             if preserve && ProcessInfo.processInfo.arguments.contains("--smoke-test") {
                 precondition(self.report?.state == cachedReport?.state,
                              "Refreshing unchanged storage must retain its last assessment")

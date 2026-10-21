@@ -50,6 +50,21 @@ class LibraryGamesTests(unittest.TestCase):
                                 ("crossover", "Rocket League", "Steam")},
                          "Installers and uninstallers are not games")
 
+    def test_game_folders_start_their_largest_playable_file(self):
+        (self.root / "ROMs/gc/Mario Kart Double Dash").mkdir(parents=True)
+        (self.root / "ROMs/gc/Mario Kart Double Dash/game.rvz").write_bytes(b"x" * 10)
+        (self.root / "ROMs/switch/Mario Party").mkdir(parents=True)
+        (self.root / "ROMs/switch/Mario Party/base.nsp").write_bytes(b"x" * 100)
+        (self.root / "ROMs/switch/Mario Party/update.nsp").write_bytes(b"x" * 5)
+        (self.root / "ROMs/switch/Empty folder").mkdir()
+        (self.root / console.MARKER).write_text(json.dumps({"systems": ["gc", "switch"]}))
+        report = console.library_games(FakeStorage(self.root), home=self.home)
+        roms = {(rom["system"], rom["name"]): Path(rom["path"]).name for rom in report["roms"]}
+        self.assertEqual(roms, {("gc", "Mario Kart Double Dash"): "game.rvz", ("switch", "Mario Party"): "base.nsp"},
+                         "A game folder is one game (updates and DLC beside it); folders without a game are skipped")
+        counts = {system["id"]: system["games"] for system in console.populated_systems(self.root)}
+        self.assertEqual((counts["gc"], counts["switch"]), (1, 1), "Counts games, not files")
+
     def test_symlinked_folders_are_not_followed(self):
         (self.home / "elsewhere/Fake.app").mkdir(parents=True)
         (self.home / "Applications/CrossOver/Linked").symlink_to(self.home / "elsewhere")

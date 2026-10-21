@@ -236,7 +236,10 @@ shown console in the library, started straight in its emulator with `emulate`; W
 Porting Kit ports in `Windows/Porting Kit`, wrappers in `Windows/Wrappers` and CrossOver's program
 shortcuts in `~/Applications/CrossOver` (installers and uninstallers skipped); Mac games in
 `Native/Games`; and apps added with **+** (UserDefaults `launcherApps`). The list comes from
-`library-games`, read-only and unmeasured. Tiles fill the width in a flow grid; click, Return or
+`library-games`, read-only and unmeasured, and loads again once the drives are known. A game can be a
+loose file or a folder (a Switch game with its updates and DLC, a GameCube game in its own folder): a
+folder is one game named after the folder and starts its largest playable file. Drive pages count games
+the same way, not files. Tiles fill the width in a flow grid; click, Return or
 VoiceOver opens them, and their menu offers Open, Show in Finder and, for added apps, Remove from Play. The search field filters by name.
 The Cube TV tile's artwork is drawn in code (`TVMenuArtwork.swift`) so it stays sharp at any size: the
 chosen menu's colors (Steam blue, ES-DE red, Cube TV purple when none is chosen), a soft glow and
@@ -559,7 +562,8 @@ without opening the drive. Click the row or its chevron to open the drive page:
 - **Steam**: games in Steam libraries on that drive, with **Play** and **Manage**
   (opens the game's page in Steam via `steam://nav/games/details/<appid>`) and
   **Open Steam Storage**.
-- **Retro games**: only systems that actually have games on that drive.
+- **Retro games**: only systems that actually have games on that drive, counted as games (a game folder
+  with updates, DLC or extra discs counts once).
 - **Game storage** (bottom): a bar plus a list showing each game's share of the games
   found on *that* drive — the denominator is the found games' total, not the drive's size.
   Two remembered checkboxes, usable together, change only the presentation (no rescan):
