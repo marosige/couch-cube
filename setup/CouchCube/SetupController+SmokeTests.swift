@@ -487,7 +487,7 @@ extension SetupController {
                         self.selectPage(page)
                         precondition(!self.navigationBar.isHidden && self.window === self.mainWindow)
                         precondition(self.sidebar.selectedRow == self.sidebarPages.firstIndex(of:
-                            (page == 2 || page == 3 || page == 4) ? 6 : page == 5 ? 6 : page == 9 ? self.inspectorParent : page == 12 ? self.driveDetailParent : page))
+                            (page == 2 || page == 3 || page == 4) ? 6 : page == 5 ? 6 : page == 9 ? self.inspectorParent : page == 12 ? self.driveDetailParent : page == 14 ? 13 : page))
                         if page == 13 { self.assertSmokeDeals() }
                         self.assertSmokePageScrolls()
                         if page == 7 {
