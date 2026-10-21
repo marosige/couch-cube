@@ -90,6 +90,7 @@ extension SetupController {
     }
 
     func renderStoreAccounts() {
+        defer { renderLauncher() }
         storeAccountsSummary.stringValue = storeAccounts.summary
         storeAccountsChecked.textColor = storeAccountsError == nil ? .secondaryLabelColor : .systemRed
         if let error = storeAccountsError {

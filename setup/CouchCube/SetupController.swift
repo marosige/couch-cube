@@ -18,7 +18,7 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
     var selectingPage = false
     let sidebarPages = [-1, 0, 8, 13, -1, 6, 1, 7, 10, 11]
     let sidebarTitles = ["Couch Cube", "Play", "Controllers", "Cube Shop", "Settings", "Game library", "App Store", "Retro consoles", "Console Mode", "App Settings"]
-    let sidebarSymbols = ["", "play.rectangle.fill", "gamecontroller.fill", "bag.fill", "", "books.vertical.fill", "storefront", "tv", "power", "app"]
+    let sidebarSymbols = ["", "play.rectangle.fill", "gamecontroller.fill", "bag.fill", "", "books.vertical.fill", "storefront", "tv", "power", "gearshape"]
     let screenTitle = NSTextField(labelWithString: "Play")
     // Deals: lazy, cached, read-only views of CheapShark store deals and GamerPower giveaways.
     lazy var dealsRead: ([String], @escaping (Int32, Data, String) -> Void) -> Void = { [weak self] arguments, completed in
@@ -174,6 +174,13 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
     var homeSessionControllers: [String] = []
     var homeObservedConnections = Set<String>()
     let homePlayBackground = NSView()
+    let launcherSections = NSStackView()
+    let launcherSearch = NSSearchField()
+    static let launcherAppsKey = "launcherApps"
+    static let windowsClientIcons = ["win-steam": "steam", "win-epic": "epic-games", "win-gog": "gog-galaxy",
+                                     "win-ea": "ea", "win-battlenet": "battle-net"]
+    /// Smoke screenshots show sample tiles instead of whatever the build machine has installed.
+    var launcherSmokeItems: [LauncherItem]?
     var homeTiles: NSStackView!
     var sidebarAttention: [Int: NSColor] = [:]
     var sidebarTasks: [SidebarTask] = []
@@ -397,7 +404,7 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
         "Homebrew is needed only to install missing apps from here. Finish its Terminal installer, return here, then click the app's Install button. macOS may ask for administrator approval.")
     let autoLaunchToggle = NSSwitch()
     let autoLaunchDelay = NSTextField(string: "30")
-    let autoLaunchStatus = NSTextField(wrappingLabelWithString: "Open Console Mode to check automatic startup.")
+    let autoLaunchStatus = NSTextField(wrappingLabelWithString: "")
     var autoLaunchLoaded = false
     enum OverviewCheck: CaseIterable { case storage, menu, consoles, automatic, steam, apps }
     var overviewChecks = Set<OverviewCheck>()
@@ -630,23 +637,9 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
         homeCards.spacing = 20
         playCard.widthAnchor.constraint(equalTo: controllerCard.widthAnchor).isActive = true
         playCard.heightAnchor.constraint(equalTo: controllerCard.heightAnchor).isActive = true
-        let brandHeader = NSView()
-        brandHeader.wantsLayer = true
-        brandHeader.layer?.cornerRadius = 16
-        brandHeader.layer?.masksToBounds = true
-        let portableHeader = Bundle.main.object(forInfoDictionaryKey: "MCCDistribution") as? String == "portable"
-        let headerName = portableHeader ? "HomeHeaderPortable.png" : "HomeHeader.png"
-        let brandImage = HomeHeaderImageView(image: NSImage(contentsOf: Bundle.main.resourceURL!.appendingPathComponent(headerName))!)
-        brandImage.imageScaling = .scaleAxesIndependently
-        brandImage.translatesAutoresizingMaskIntoConstraints = false
-        brandHeader.addSubview(brandImage)
-        pin(brandImage, to: brandHeader)
-        NSLayoutConstraint.activate([
-            brandHeader.heightAnchor.constraint(equalTo: brandHeader.widthAnchor, multiplier: 500.0 / 1680.0)
-        ])
         addPage("Play", content: column([
-            brandHeader,
-            homeCards
+            homeCards,
+            launcherSection()
         ]))
 
         for rows in [appMenuRows, appPCRows, appWindowsRows, appRetroRows] {
@@ -838,26 +831,22 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
                 tvMenuStatus
             ]),
             card("Automatic console mode", subtitle: nil, views: [
-                settingsRow("Start after login", subtitle: "Open the TV menu when a controller is connected.",
+                settingsRow("Start after login", subtitle: "Opens the TV menu when a controller is connected.",
                             symbol: "power", color: .systemGreen, trailing: autoLaunchToggle),
                 row([text("Wait after login:"), autoLaunchDelay, text("seconds")]),
-                text("Runs once after login. A connected keyboard or mouse skips console mode for that login. With no controller, it waits until one connects. Keep Couch Cube and its game drive available. Turn off Steam's own login startup.", size: 12, secondary: true),
+                text("A keyboard or mouse skips it for that login. Turn off Steam's own login startup.", size: 12, secondary: true),
                 autoLaunchStatus,
-                button("Save automatic console mode", #selector(saveAutoLaunch))
+                button("Save", #selector(saveAutoLaunch))
             ]),
-            card("Start straight into your console", subtitle: "macOS controls accounts, automatic login and screen locking.", views: [
-                text("1. Optional: in Users & Groups, create a Standard user named Couch Cube with its own password. Keep your private administrator account. A passwordless account is not needed.", size: 13),
-                text("2. Put Couch Cube in /Applications, then sign in to the gaming account. Open Couch Cube there, choose game storage, sign in to Steam or your other launchers, and save automatic console mode. Settings and saves belong to that account; an existing private-account library is not moved or shared automatically.", size: 13),
-                text("3. In Users & Groups, choose the gaming account under Automatically log in as. Enter its password in macOS, not Couch Cube. Organization policies or an Apple Account login password may prevent automatic login.", size: 13),
-                row([button("Open Users & Groups", #selector(openUsersAndGroups)),
-                     button("Apple login guide", #selector(openAutomaticLoginGuide))])
-            ]),
-            card("Privacy and screen lock", subtitle: nil, views: [
-                text("Automatic login is unavailable while FileVault is on. Turning FileVault off reduces startup protection for the entire Mac, including your private account. A separate gaming account is useful separation, not a security boundary against someone with physical access. Keep FileVault on if private data protection is more important than unattended startup.", size: 13),
-                text("Waking from sleep can still require a password. Review Require password after screen saver begins or display is turned off in Lock Screen. Reducing this protection lets anyone nearby use the gaming account. macOS may restrict this setting, including when iPhone Mirroring uses automatic authentication.", size: 13),
-                row([button("Open FileVault Settings", #selector(openFileVaultSettings)),
-                     button("Open Lock Screen Settings", #selector(openLockScreenSettings))]),
-                text("Couch Cube does not create accounts, store login passwords, change FileVault or enable macOS automatic login. The setup above is optional and performed in System Settings.", size: 12, secondary: true)
+            card("Start without signing in", subtitle: "Optional. Done in System Settings; Couch Cube never stores passwords.", views: [
+                text("1. Create a Standard user for gaming in Users & Groups.", size: 13),
+                text("2. Sign in as that user, open Couch Cube there and turn on automatic console mode.", size: 13),
+                text("3. In Users & Groups, choose that user for Automatically log in as.", size: 13),
+                text("Automatic login needs FileVault off, which lowers protection for the whole Mac. Keep it on if that matters more.", size: 12, secondary: true),
+                row([button("Users & Groups", #selector(openUsersAndGroups)),
+                     button("FileVault", #selector(openFileVaultSettings)),
+                     button("Lock Screen", #selector(openLockScreenSettings)),
+                     button("Apple guide", #selector(openAutomaticLoginGuide))])
             ])
         ]))
         guidedSetupToggle.state = guidedSetup ? .on : .off
@@ -875,7 +864,7 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
                 settingsRow("Guided setup", subtitle: "Show one sidebar step at a time. Turn off to see every task.",
                             symbol: "checklist", color: .systemBlue, trailing: guidedSetupToggle),
                 separator(),
-                settingsRow("App location", subtitle: "Find this copy of Couch Cube.", symbol: "app",
+                settingsRow("App location", subtitle: "Find this copy of Couch Cube.", symbol: "folder",
                             color: .systemGray, trailing: button("Show in Finder", #selector(revealApp))),
                 separator(),
                 settingsRow("Installer copy", subtitle: "Keep a download on your game drive.", symbol: "square.and.arrow.down",

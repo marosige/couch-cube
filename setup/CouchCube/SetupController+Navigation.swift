@@ -195,7 +195,11 @@ extension SetupController {
         if page == 1 { loadApps() }
         if page == 7 { loadSystems() }
         if page == 5 || page == 6 { loadSteamStatus() }
-        if page == 0 { refreshGeneral() }
+        if page == 0 {
+            refreshGeneral()
+            if steamReport == nil { loadSteamStatus() }
+            if storeAccounts.phase == .idle { loadStoreAccounts() }
+        }
     }
 
     func numberOfRows(in tableView: NSTableView) -> Int { sidebarTitles.count }

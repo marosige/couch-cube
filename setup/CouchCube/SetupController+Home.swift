@@ -45,6 +45,7 @@ extension SetupController {
         if report == nil && !overviewCheckFailures.isEmpty { homeMenuLabel.stringValue = "Couldn't check your console." }
         playAction.isEnabled = task == nil && ready && frontend != nil
         renderHomeControllers()
+        renderLauncher()
         let frontendID = frontend == "es-de" ? "es-de.png" : "steam.jpg"
         homePlayBackground.layer?.contentsGravity = frontend == "es-de" ? .resizeAspect : .resizeAspectFill
         homePlayBackground.layer?.backgroundColor = NSColor(srgbRed: 0.025, green: 0.30, blue: 0.40, alpha: 1).cgColor

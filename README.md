@@ -28,7 +28,8 @@ Couch Cube is in early testing (alpha): back up your data first. Some game playe
 
 ## What you get
 
-- **Play** — one Home screen that opens Steam Big Picture or ES-DE, your TV menu.
+- **Play** — open your TV menu (Steam Big Picture or ES-DE), or start any game from one launcher:
+  Steam games, Windows launchers like Battle.net, Mac launchers, emulators and apps you add.
 - **Controllers** — see, name, order and test up to 4 controllers; pairing stays in macOS Bluetooth settings.
 - **Game library** — keep games on this Mac or on an external SSD you can take to another Mac.
 - **App Store** — install, update and remove Steam, store launchers and emulators (via Homebrew where possible).

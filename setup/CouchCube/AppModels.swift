@@ -174,5 +174,5 @@ func appRowStatus(_ app: ManagedApp, operation: AppOperation?, unknown: Bool, ch
     if unknown { return (checking ? "Checking..." : "Not checked", checking ? .systemBlue : .systemGray, checking) }
     let hasUpdate = app.installed && app.managed && app.update?.isEmpty == false
     return app.installed ? (hasUpdate ? ("Installed · Update available", .systemYellow, false) : ("Installed", .systemGreen, false))
-        : ("Not installed", .systemRed, false)
+        : ("Not installed", .systemGray, false)
 }
