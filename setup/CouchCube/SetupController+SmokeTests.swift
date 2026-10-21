@@ -3125,6 +3125,7 @@ extension SetupController {
                      cellText(critics, "shopRatingDeal") == nil, "Critics Pick: Metacritic only, in the Metacritic column")
         precondition(views(skyrim).first { $0.accessibilityIdentifier() == "shopRatingSteam" }!.toolTip == "Steam reviews: Very Positive (85%)")
         smokeCaptureShop()
+        smokeCapturePages()
         // Every tab fits the narrowest window.
         let savedFrame = window.frame
         window.setContentSize(window.contentMinSize)
@@ -3222,6 +3223,45 @@ extension SetupController {
         }
         if let savedCurrency { defaults.set(savedCurrency, forKey: shopCurrencyKey) } else { defaults.removeObject(forKey: shopCurrencyKey) }
         rerenderShop()
+        window.setFrame(savedFrame, display: false)
+    }
+
+    /// With COUCH_CUBE_SMOKE_CAPTURE set, saves every sidebar page (top and bottom) as PNG for design review.
+    func smokeCapturePages() {
+        guard let folder = ProcessInfo.processInfo.environment["COUCH_CUBE_SMOKE_CAPTURE"] else { return }
+        let savedFrame = window.frame, savedPage = currentPage
+        let appearance = window.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua ? "dark" : "light"
+        window.setContentSize(NSSize(width: 1240, height: 860))
+        for page in sidebarPages where page >= 0 {
+            selectPage(page)
+            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+            let view = window.contentView!
+            view.layoutSubtreeIfNeeded()
+            let scroll = tabs.tabViewItems[page].view as? NSScrollView
+            let end = max(0, (scroll?.documentView?.bounds.height ?? 0) - (scroll?.contentView.bounds.height ?? 0))
+            for (part, y) in end > 0 ? [("top", 0.0), ("bottom", end)] : [("top", 0.0)] {
+                if let scroll {
+                    scroll.contentView.scroll(to: NSPoint(x: 0, y: y))
+                    scroll.reflectScrolledClipView(scroll.contentView)
+                }
+                window.effectiveAppearance.performAsCurrentDrawingAppearance {
+                    guard let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { return }
+                    view.cacheDisplay(in: view.bounds, to: rep)
+                    let image = NSImage(size: view.bounds.size)
+                    image.lockFocus()
+                    NSColor.windowBackgroundColor.setFill()
+                    view.bounds.fill()
+                    rep.draw(in: view.bounds, from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
+                    image.unlockFocus()
+                    guard let tiff = image.tiffRepresentation, let out = NSBitmapImageRep(data: tiff) else { return }
+                    let title = screenTitle.stringValue.lowercased().replacingOccurrences(of: " ", with: "-")
+                    let file = URL(fileURLWithPath: folder).appendingPathComponent("page-\(appearance)-\(page)-\(title)-\(part).png")
+                    try? out.representation(using: .png, properties: [:])?.write(to: file)
+                }
+            }
+            scroll?.contentView.scroll(to: .zero)
+        }
+        selectPage(savedPage)
         window.setFrame(savedFrame, display: false)
     }
 

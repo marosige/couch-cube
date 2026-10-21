@@ -18,6 +18,9 @@ Keep every reply very short: a few lines, results only, no long explanations.
   Runs on the bundled Python 3.13 and must also run on macOS's `/usr/bin/python3` (3.9).
 - `tests/` – `unittest` suite (no third-party packages). Some tests read Swift sources statically.
 - `README.md` – user-facing. `DESIGN.md` – page-by-page UI/behavior spec; keep it in sync with UI changes.
+  `ROADMAP.md` – the owner's goal and milestones; read it before planning features.
+- UI review without a Mac: the **Screenshots** workflow (runs on pushes to `claude/**`) uploads a PNG of
+  every page in light and dark mode; download the artifact and look at it.
 - `docs/` – GitHub Pages website (couchcube.marosi.me), served from `main:/docs`.
 
 ## Checks
