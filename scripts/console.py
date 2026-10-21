@@ -1090,6 +1090,10 @@ def settings_content(storage):
 
 def refresh_generated(storage, state):
     storage.check()
+    # Libraries made before every console had a folder get the missing ones (existing folders are untouched).
+    for system in SYSTEMS:
+        if not storage.read_path("ROMs/" + system).exists():
+            storage.mkdir("ROMs/" + system)
     files = generated_files(storage, state.get("games", []), selected_systems(state))
     settings = settings_content(storage)
     managed = state.get("managed", {})
@@ -1212,7 +1216,8 @@ def initialize(storage, systems=None):
         "Native/Games", "Native/Assets", "Windows/Wrappers", "Windows/Installers", "Windows/Porting Kit",
         "Frontend", "Config", "Runtime", "Launchers",
     ]
-    folders += ["ROMs/" + system for system in selected_systems(state)]
+    # Every console gets its ROM folder, ready to fill before the console is turned on in Consoles.
+    folders += ["ROMs/" + system for system in SYSTEMS]
     for folder in folders:
         storage.mkdir(folder)
     refresh_generated(storage, state)
@@ -1995,6 +2000,8 @@ def drive_games(identifier):
                 continue
             try:
                 games, leftovers = rom_games(folder, extensions.split("|"))
+                # Couch Cube's own "console turned off" marker isn't a game file.
+                leftovers = [path for path in leftovers if Path(path).name != "noload.txt"]
             except OSError as exc:
                 errors.append(f"{folder}: {exc}")
                 continue

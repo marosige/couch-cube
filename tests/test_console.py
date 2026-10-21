@@ -72,10 +72,11 @@ class StorageTests(unittest.TestCase):
         self.assertEqual(shlex.split(output.getvalue()),
                          ["BIOS_ROOT=" + str(self.storage.root / "BIOS/retroarch")])
 
-    def test_new_library_starts_with_no_consoles_or_unwanted_folders(self):
+    def test_new_library_starts_with_no_consoles_but_every_rom_folder(self):
         state = console.initialize(self.storage)
         self.assertEqual(state["systems"], [])
-        self.assertEqual(list((self.storage.root / "ROMs").iterdir()), [])
+        self.assertEqual({path.name for path in (self.storage.root / "ROMs").iterdir()}, set(console.SYSTEMS),
+                         "Every console has a ROM folder to fill before it's turned on")
 
     def test_console_selection_includes_switch_and_preserves_disabled_games(self):
         self.initialize()
