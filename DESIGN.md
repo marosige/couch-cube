@@ -207,7 +207,7 @@ All have tooltips and accessible labels. App logos are bundled for uninstalled a
 installed apps use their own macOS icons. An available update keeps Remove alongside it;
 the status shows a yellow dot and **Installed · Update available**.
 App Store groups each category in its own rounded card, ordered **TV menus**,
-**PC games**, **Windows games**, then **Retro games**.
+**PC games**, **Windows games**, then **Retro game emulators**.
 Choose the default TV menu in **Settings → Console Mode → Default TV menu**; it has no separate
 sidebar page. Install or remove menu applications in App Store.
 The default is selected with a native pop-up menu; unavailable menus cannot be selected.

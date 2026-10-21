@@ -125,7 +125,7 @@ extension SetupController {
 
     func appCategoryTitle(for rows: NSStackView) -> String {
         rows === appMenuRows ? "TV menus" : rows === appPCRows ? "PC games" :
-            rows === appWindowsRows ? "Windows games" : "Retro games"
+            rows === appWindowsRows ? "Windows games" : "Retro game emulators"
     }
 
     func appCategoryCard(_ title: String, rows: NSStackView, extra: [NSView] = []) -> NSBox {
@@ -163,8 +163,6 @@ extension SetupController {
     func renderApps() {
         for rows in [appMenuRows, appPCRows, appWindowsRows, appRetroRows] { clearRows(rows) }
         var hiddenApps: [ObjectIdentifier: Int] = [:]
-        let order = ["steam", "gog-galaxy", "ea", "epic-games", "battle-net", "curseforge", "es-de", "retroarch-metal", "dolphin", "pcsx2", "rpcs3", "cemu-wiiu", "switch", "porting-kit", "crossover"]
-        appStates.sort { (order.firstIndex(of: $0.id) ?? 100) < (order.firstIndex(of: $1.id) ?? 100) }
         for (index, app) in appStates.enumerated() {
             for placement in appPlacements(app) {
                 if !appPlacementVisible(app, placement) {
@@ -761,7 +759,7 @@ extension SetupController {
     func showAppInStore(_ id: String) {
         highlightedAppID = id
         let category = id == "steam" || id == "es-de" ? "TV menus" : computerGameApps.contains(id) ? "PC games" :
-            ["porting-kit", "crossover"].contains(id) ? "Windows games" : "Retro games"
+            ["porting-kit", "crossover"].contains(id) ? "Windows games" : "Retro game emulators"
         if appStates.first(where: { $0.id == id })?.installed != true && collapsedAppCategories.contains(category),
            let toggle = appCategoryToggles[category] {
             toggleAppCategory(toggle)

@@ -281,7 +281,20 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
     var logWindow: NSWindow?
     var report: Assessment?
     var libraryControls: [NSControl] = []
-    var appStates: [ManagedApp] = []
+    /// Always kept in display order: rows' buttons carry an index into this list, and the backend's order differs,
+    /// so an unsorted refresh that keeps the rendered rows would point every button at another app.
+    var appStates: [ManagedApp] = [] {
+        didSet {
+            let order = Self.appOrder
+            let sorted = appStates.enumerated().sorted {
+                let left = order.firstIndex(of: $0.element.id) ?? order.count, right = order.firstIndex(of: $1.element.id) ?? order.count
+                return left != right ? left < right : $0.offset < $1.offset
+            }.map(\.element)
+            if sorted.map(\.id) != appStates.map(\.id) { appStates = sorted }
+        }
+    }
+    static let appOrder = ["steam", "gog-galaxy", "ea", "epic-games", "battle-net", "curseforge", "es-de", "retroarch-metal", "dolphin",
+                           "pcsx2", "rpcs3", "cemu-wiiu", "switch", "porting-kit", "crossover"]
     var appsChecking = false
     /// Startup preload of App Store data; runs in the background as soon as no other command is running.
     var appsPreloadPending = false
@@ -693,7 +706,7 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
             appCategoryCard("TV menus", rows: appMenuRows),
             appCategoryCard("PC games", rows: appPCRows),
             appCategoryCard("Windows games", rows: appWindowsRows, extra: [windowsGuideButton()]),
-            appCategoryCard("Retro games", rows: appRetroRows),
+            appCategoryCard("Retro game emulators", rows: appRetroRows),
             helperAdvice,
             helperButton
         ])
