@@ -86,6 +86,20 @@ func lowestEverDiscount(low: Double, normal: Double?) -> Int? {
     return max(1, Int(((1 - low / normal) * 100).rounded()))
 }
 
+/// Steam's store facts for a game page (scripts/shop.py steam_details).
+struct SteamDetails: Decodable, Equatable {
+    let appId: String
+    let found: Bool
+    var description: String? = nil
+    var genres: [String]? = nil
+    var developers: [String]? = nil
+    var release: String? = nil
+    var screenshots: [String]? = nil
+    var storageBytes: Int64? = nil
+    var controller: String? = nil
+    var couch: [String]? = nil
+}
+
 struct ShopGameReply: Decodable {
     let game: ShopGame?
     let errors: [String]
@@ -108,6 +122,8 @@ struct ShopDetail {
     var payload: [String: String] = [:]
     var loading = false
     var error: String?
+    var steam: SteamDetails?
+    var steamLoading = false
 }
 
 struct ShopGame: Decodable, Equatable {

@@ -178,6 +178,7 @@ struct GiveawaysReply: Decodable {
 
 let cheapSharkHosts: Set<String> = ["www.cheapshark.com"]
 let gamerPowerHosts: Set<String> = ["www.gamerpower.com"]
+let youTubeHosts: Set<String> = ["www.youtube.com"]
 
 /// Deals only ever open as https links on the services' own hosts (CheapShark forwards to the store itself).
 func safeDealURL(_ value: String?, hosts: Set<String>? = nil) -> URL? {

@@ -2468,6 +2468,9 @@ def main():
     shop_search_parser.add_argument("--query", required=True)
     shop_search_parser.add_argument("--country", default="US")
     shop_search_parser.add_argument("--refresh", action="store_true")
+    steam_details_parser = sub.add_parser("shop-steam")
+    steam_details_parser.add_argument("--app", required=True)
+    steam_details_parser.add_argument("--refresh", action="store_true")
     shop_game_parser = sub.add_parser("shop-game")
     shop_game_parser.add_argument("--id", required=True)
     shop_game_parser.add_argument("--refresh", action="store_true")
@@ -2611,6 +2614,12 @@ def main():
             print(json_text(shop_tools().steam_platforms(ids, args.refresh)))
         elif args.command == "shop-search":
             print(json_text(shop_search(args.query, args.country, args.refresh)))
+        elif args.command == "shop-steam":
+            shop = shop_tools()
+            try:
+                print(json_text(shop.steam_details(args.app, args.refresh)))
+            except (shop.ShopError, shop.deals.DealsError) as exc:
+                raise SetupError(str(exc)) from None
         elif args.command == "shop-game":
             print(json_text(shop_game(args.id, args.refresh)))
         elif args.command == "wishlist":

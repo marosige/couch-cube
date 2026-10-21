@@ -86,6 +86,13 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
     var shopDetails: [String: ShopDetail] = [:]
     var shopDetailKey: String?
     let shopDetailContent = NSStackView()
+    /// The game page's picture gallery: the cover first, then Steam's screenshots.
+    var shopGalleryIndex = 0
+    var shopGalleryImages: [String] = []
+    weak var shopGalleryView: RemoteImageView?
+    weak var shopGalleryPrevious: NSButton?
+    weak var shopGalleryNext: NSButton?
+    weak var shopGalleryCounter: NSTextField?
     let shopScope = ScopePopUp(labels: ["My Stores", "All Stores"])
     let shopScopeHint = NSTextField(wrappingLabelWithString: "")
     let shopScopeBar = NSStackView()

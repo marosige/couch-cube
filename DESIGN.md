@@ -39,11 +39,15 @@ that a game runs on a Mac. The page is wider than the settings pages (up to 960 
   name) under it; and when known the all-time low: "Lowest ever $7.99 (−47%)" with the price in your
   Shop currency and the discount it was, or a green "All-time low" when today's price is the record.
   Search lists one row per game (best price and how many stores); ratings live on the game page.
-- **Game page** (opened by any row or card; Back/Forward and ⌘[ ⌘] return to the same list): big
-  art, title, badges (Mac/Windows, Installed, Steam rating, Metacritic), a price card with the pill,
+- **Game page** (opened by any row or card; Back/Forward and ⌘[ ⌘] return to the same list): a
+  gallery (the cover, then Steam's screenshots, with ‹ › arrows dimmed at either end and "2 / 8"), title, badges (Mac/Windows, Installed, Steam rating, Metacritic), a price card with the pill,
   price, usual price, all-time low, target and heart, and one main button ("View at GOG", "Get It on
   Epic Games Store"); then **Where to Buy** with every store cheapest first, Lowest on the cheapest.
   A page opened from a single deal or the wishlist loads every store with `shop-game --id`.
+  **Gameplay Videos** opens a YouTube search for "<game> gameplay" in the browser. **About** (Steam games,
+  `shop-steam --app`, cached a week) shows the short description, genre, developer, release date,
+  controller support, couch play (split screen, local co-op, Remote Play Together) and the size with the
+  free space in your game library, orange when it doesn't fit.
 - **Links** open your default browser only: CheapShark's `cheapshark.com/redirect` for stores
   (their terms require it, Steam included), gamerpower.com for giveaways, apps.apple.com for the
   Mac App Store. Any other host or scheme is refused. No in-app browser, no store-app deep links.
