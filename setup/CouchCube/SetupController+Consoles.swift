@@ -19,7 +19,7 @@ extension SetupController {
                 ("gb", "Game Boy"), ("gbc", "Game Boy Color"), ("gba", "Game Boy Advance"),
                 ("psx", "PlayStation"), ("ps2", "PlayStation 2"),
                 ("psp", "PlayStation Portable"), ("ps3", "PlayStation 3"),
-                ("megadrive", "Mega Drive / Genesis"), ("segacd", "Sega CD"), ("dreamcast", "Dreamcast")
+                ("megadrive", "Mega Drive / Genesis"), ("segacd", "Sega CD"), ("dreamcast", "Dreamcast"), ("gamegear", "Game Gear")
             ]
             consoleSystems = catalog.map {
                 let package = ["gc": "dolphin", "wii": "dolphin", "wiiu": "cemu-wiiu",
@@ -89,7 +89,7 @@ extension SetupController {
             rows.alignment = .leading
             rows.spacing = 0
             manufacturerRows[manufacturer] = rows
-            let groups = ConsoleArtwork.groups.map(\.title).filter { $0 == manufacturer || ($0.hasPrefix(manufacturer) && manufacturer == "Nintendo") }
+            let groups = ConsoleArtwork.groups.map(\.title).filter { $0.hasPrefix(manufacturer) }
             let heading = consoleBulkRow(manufacturer, scope: manufacturer + " consoles", ids: ids(groups), size: 13)
             let box = card("", subtitle: nil, views: [heading, rows])
             consoleRows.addArrangedSubview(box)
@@ -98,11 +98,12 @@ extension SetupController {
         var previousGroup = ""
         for (index, system) in consoleSystems.enumerated() {
             let group = ConsoleArtwork.groups.first { $0.systems.contains(system.id) }?.title ?? "Other systems"
-            let manufacturer = group.hasPrefix("Nintendo") ? "Nintendo" : group
+            let manufacturer = ["Nintendo", "PlayStation", "SEGA"].first { group.hasPrefix($0) } ?? group
             guard let rows = manufacturerRows[manufacturer] else { continue }
             if group != previousGroup {
-                if manufacturer == "Nintendo" {
-                    let title = group == "Nintendo home consoles" ? "Home consoles" : "Handhelds"
+                do {
+                    // Every company card splits into Home consoles and Handhelds.
+                    let title = group.hasSuffix("home consoles") ? "Home consoles" : "Handhelds"
                     let heading = text(title, size: 12, secondary: true)
                     heading.font = .systemFont(ofSize: 12, weight: .semibold)
                     let container = NSView()

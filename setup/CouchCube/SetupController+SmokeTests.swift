@@ -892,7 +892,7 @@ extension SetupController {
                     for (index, page) in self.sidebarPages.enumerated() where page < 0 {
                         precondition(!self.tableView(self.sidebar, shouldSelectRow: index), "Sidebar section headings must not navigate")
                     }
-                    precondition(self.systemSwitches.count == 17 && self.activeControllerRows.arrangedSubviews.count == 5)
+                    precondition(self.systemSwitches.count == 18 && self.activeControllerRows.arrangedSubviews.count == 5)
                     precondition(self.consoleRows.arrangedSubviews.count == 3,
                                  "One card each for Nintendo, PlayStation and SEGA")
                     precondition(self.consoleBulkToggles.map(\.scope) == ["Nintendo consoles", "PlayStation consoles", "SEGA consoles"],
@@ -1368,7 +1368,7 @@ extension SetupController {
                     precondition(self.consoleSystems.map { $0.id } == orderedSystems,
                                  "Systems must stay grouped and ordered by original release")
                     let artwork = orderedSystems.compactMap { ConsoleArtwork.image(for: $0).tiffRepresentation }
-                    precondition(artwork.count == 17 && Set(artwork).count == 17,
+                    precondition(artwork.count == 18 && Set(artwork).count == 18,
                                  "Every system must have distinct, renderable original artwork")
                     precondition(orderedSystems.allSatisfy { !ConsoleArtwork.image(for: $0).isTemplate },
                                  "Console artwork must preserve its hardware colors")
