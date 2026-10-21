@@ -27,6 +27,7 @@ extension SetupController {
             guard code == 0 else {
                 self.overviewCheckFailures.insert(.automatic)
                 self.autoLaunchStatus.stringValue = "Cannot read login settings. Open Details for the error."
+                self.autoLaunchStatus.isHidden = false
                 self.activityNeeded()
                 return
             }
@@ -42,6 +43,7 @@ extension SetupController {
             } catch {
                 self.overviewCheckFailures.insert(.automatic)
                 self.autoLaunchStatus.stringValue = "Cannot read login settings: \(error.localizedDescription)"
+                self.autoLaunchStatus.isHidden = false
                 self.append(self.autoLaunchStatus.stringValue + "\n")
                 self.activityNeeded()
             }
@@ -51,15 +53,18 @@ extension SetupController {
     @objc func saveAutoLaunch() {
         guard autoLaunchLoaded else {
             autoLaunchStatus.stringValue = "Login settings haven't loaded. Reopen Console Mode to try again."
+            autoLaunchStatus.isHidden = false
             return
         }
         let enabled = autoLaunchToggle.state == .on
         guard !enabled || (selected != nil && report?.state == "valid layout" && report?.issues.isEmpty == true) else {
             autoLaunchStatus.stringValue = "Choose Settings → Game library before enabling automatic console mode."
+            autoLaunchStatus.isHidden = false
             return
         }
         guard let delay = Int(autoLaunchDelay.stringValue), (5...300).contains(delay) else {
             autoLaunchStatus.stringValue = "Enter a whole number between 5 and 300 seconds."
+            autoLaunchStatus.isHidden = false
             return
         }
         var arguments = ["login", "--confirm", "--delay", String(delay)]
@@ -69,6 +74,7 @@ extension SetupController {
             if code == 0 { self.loadAutoLaunch(); if enabled { self.setLoginItem(false) } }
             else {
                 self.autoLaunchStatus.stringValue = "Couldn't save console mode. Open Details for the error."
+                self.autoLaunchStatus.isHidden = false
                 self.activityNeeded()
             }
         }
@@ -127,11 +133,17 @@ extension SetupController {
             if enabled { try SMAppService.mainApp.register() } else { try SMAppService.mainApp.unregister() }
         } catch {
             autoLaunchStatus.stringValue = "macOS didn't allow the login item: \(error.localizedDescription). Check System Settings \u{203A} General \u{203A} Login Items."
+            autoLaunchStatus.isHidden = false
         }
     }
 
     var consoleAfterLogin: String {
         autoLaunchToggle.state == .on ? "tv" : loginItemEnabled ? "window" : "none"
+    }
+
+    func addChoice(_ row: NSView, to list: NSStackView) {
+        list.addArrangedSubview(row)
+        row.widthAnchor.constraint(equalTo: list.widthAnchor).isActive = true
     }
 
     func renderConsoleMode() {
@@ -143,10 +155,10 @@ extension SetupController {
             ("watch", "Password once, then Apple Watch", "After a restart type it once; then your Apple Watch unlocks the Mac.", "applewatch", .systemBlue),
             ("auto", "Start without signing in", "The Mac opens straight into your gaming account.", "bolt.fill", .systemOrange)
         ] {
-            signInChoices.addArrangedSubview(choiceRow(title, subtitle: subtitle, symbol: symbol, color: color, selected: signIn == id, id: "signin-" + id) { [weak self] in
+            addChoice(choiceRow(title, subtitle: subtitle, symbol: symbol, color: color, selected: signIn == id, id: "signin-" + id) { [weak self] in
                 UserDefaults.standard.set(id, forKey: "consoleSignIn")
                 self?.renderConsoleMode()
-            })
+            }, to: signInChoices)
         }
         if signIn == "watch" {
             signInGuide.addArrangedSubview(text("Turn on \u{201C}Use Apple Watch to unlock\u{201D} in Touch ID & Password.", size: 12, secondary: true))
@@ -175,12 +187,13 @@ extension SetupController {
             ("window", "Open Couch Cube", "In its window, like any app.", "macwindow", .systemBlue),
             ("tv", "Open the TV menu", "When a controller is on and no keyboard or mouse is connected.", "tv.fill", .systemGreen)
         ] {
-            afterLoginChoices.addArrangedSubview(choiceRow(title, subtitle: subtitle, symbol: symbol, color: color, selected: after == id,
+            addChoice(choiceRow(title, subtitle: subtitle, symbol: symbol, color: color, selected: after == id,
                                                            enabled: autoLaunchLoaded, id: "after-" + id) { [weak self] in
                 self?.chooseAfterLogin(id)
-            })
+            }, to: afterLoginChoices)
         }
         consoleDelayRow.isHidden = after != "tv"
+        autoLaunchStatus.isHidden = autoLaunchStatus.stringValue.isEmpty
 
         clearRows(tvMenuChoices)
         for (id, title, subtitle, symbol, color) in [
@@ -188,7 +201,7 @@ extension SetupController {
             ("es-de", "ES-DE", "Your retro consoles and games.", "arcade.stick", .systemRed)
         ] {
             let installed = appStates.first { $0.id == id }?.installed ?? report.map { !$0.missing.contains(id) } ?? false
-            tvMenuChoices.addArrangedSubview(choiceRow(title, subtitle: installed ? subtitle : "Not installed \u{2014} get it in App Store.",
+            addChoice(choiceRow(title, subtitle: installed ? subtitle : "Not installed \u{2014} get it in App Store.",
                                                        symbol: symbol, color: color, selected: effectiveFrontend == id,
                                                        id: "menu-" + id) { [weak self] in
                 guard let self else { return }
@@ -199,11 +212,11 @@ extension SetupController {
                 } else {
                     self.showAppStoreRow(id)
                 }
-            })
+            }, to: tvMenuChoices)
         }
-        tvMenuChoices.addArrangedSubview(choiceRow("Couch Cube TV", subtitle: "Couch Cube's own TV mode \u{2014} coming soon.",
+        addChoice(choiceRow("Couch Cube TV", subtitle: "Couch Cube's own TV mode \u{2014} coming soon.",
                                                    symbol: "sparkles.tv.fill", color: .systemPurple, selected: false,
-                                                   enabled: false, id: "menu-couchcube") {})
+                                                   enabled: false, id: "menu-couchcube") {}, to: tvMenuChoices)
     }
 
     func chooseAfterLogin(_ mode: String) {
@@ -212,6 +225,7 @@ extension SetupController {
         case "tv":
             guard selected != nil, report?.state == "valid layout", report?.issues.isEmpty == true else {
                 autoLaunchStatus.stringValue = "Set up your game library first (Settings \u{203A} Game library)."
+                autoLaunchStatus.isHidden = false
                 return
             }
             autoLaunchToggle.state = .on
