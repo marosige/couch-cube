@@ -95,7 +95,7 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
     weak var shopGalleryCounter: NSTextField?
     let shopScope = ScopePopUp(labels: ["My Stores", "All Stores"])
     let shopScopeHint = NSTextField(wrappingLabelWithString: "")
-    let shopMacOnlyToggle = NSButton(checkboxWithTitle: "Mac only", target: nil, action: nil)
+    let shopMacOnlyToggle = ScopePopUp(labels: ["All Games", "Mac Only"])
     var shopMacOnly: Bool { UserDefaults.standard.bool(forKey: "shopMacOnly") }
     let shopScopeBar = NSStackView()
     let shopCurrencyNote = NSTextField(wrappingLabelWithString: "")

@@ -60,13 +60,16 @@ extension SetupController {
         shopScopeBar.alignment = .centerY
         shopScopeBar.spacing = 10
         shopMacOnlyToggle.controlSize = .small
+        shopMacOnlyToggle.isBordered = false
         shopMacOnlyToggle.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
-        shopMacOnlyToggle.state = shopMacOnly ? .on : .off
+        shopMacOnlyToggle.setContentHuggingPriority(.required, for: .horizontal)
+        shopMacOnlyToggle.selectedSegment = shopMacOnly ? 1 : 0
+        shopMacOnlyToggle.setAccessibilityLabel("Show games for")
         shopMacOnlyToggle.target = self
         shopMacOnlyToggle.action = #selector(shopMacOnlyChanged)
         shopMacOnlyToggle.toolTip = "Hide games without a macOS version (no Windows compatibility apps needed)"
         shopMacOnlyToggle.setAccessibilityIdentifier("shopMacOnly")
-        shopScopeBar.setViews([shopMacOnlyToggle, shopScope], in: .leading)
+        shopScopeBar.setViews([shopScope, shopMacOnlyToggle], in: .leading)
         shopStatusLabel(shopCurrencyNote)
         shopCurrencyNote.setAccessibilityIdentifier("shopCurrencyNote")
         // Store header: one calm search field for every store on top, then the sections, with the store scope and refresh tucked at the right.
@@ -208,7 +211,7 @@ extension SetupController {
     // MARK: My Stores / All Stores
 
     @objc func shopMacOnlyChanged() {
-        UserDefaults.standard.set(shopMacOnlyToggle.state == .on, forKey: "shopMacOnly")
+        UserDefaults.standard.set(shopMacOnlyToggle.selectedSegment == 1, forKey: "shopMacOnly")
         rerenderShop()
     }
 
