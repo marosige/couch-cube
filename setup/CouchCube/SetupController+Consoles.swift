@@ -72,6 +72,7 @@ extension SetupController {
         clearRows(consoleRows)
         systemSwitches = []
         systemStatusLines = []
+        systemStoreLinks = []
         consoleBulkToggles = []
         let present = Set(consoleSystems.map(\.id))
         func ids(_ groups: [String]) -> Set<String> {
@@ -137,11 +138,14 @@ extension SetupController {
             info.tag = index
             info.toolTip = "Details"
             info.setAccessibilityLabel("Details for \(system.name)")
-            let controls = row([appStoreLink(for: system), info, toggle])
+            // The store shortcut only shows while the emulator is missing; Details always has it.
+            let store = appStoreLink(for: system)
+            systemStoreLinks.append(store)
+            let controls = row([store, info, toggle])
             let statusLine = row([])
             statusLine.distribution = .fill
-            fillSystemStatus(statusLine, system)
             systemStatusLines.append(statusLine)
+            fillSystemStatus(statusLine, system)
             let line = settingsRow(system.name,
                 subtitle: "",
                 symbol: "gamecontroller.fill", color: .secondaryLabelColor, trailing: controls,
@@ -218,6 +222,9 @@ extension SetupController {
 
     func fillSystemStatus(_ statusLine: NSStackView, _ system: ConsoleSystem) {
         statusLine.arrangedSubviews.forEach { $0.removeFromSuperview() }
+        if let index = systemStatusLines.firstIndex(where: { $0 === statusLine }), systemStoreLinks.indices.contains(index) {
+            systemStoreLinks[index].isHidden = emulatorInstalled(system) == true
+        }
         let emulator = emulatorStatus(system)
         let initialCheck = consolesChecking && !consolesLoaded
         var indicators: [NSView] = [statusIndicator(initialCheck ? emulatorName(system) : emulator.title,
@@ -273,12 +280,17 @@ extension SetupController {
          "pcsx2": "PCSX2", "rpcs3": "RPCS3", "dolphin": "Dolphin"][system.package] ?? system.package
     }
 
+    /// Whether the console's emulator is on this Mac; nil until it has been checked.
+    func emulatorInstalled(_ system: ConsoleSystem) -> Bool? {
+        let app = appsHaveResults ? appStates.first { $0.id == system.package } : nil
+        return system.emulator_installed ?? app?.installed ?? report.map { !$0.missing.contains(system.package) }
+    }
+
     func emulatorStatus(_ system: ConsoleSystem) -> (title: String, color: NSColor, help: String) {
         let name = emulatorName(system)
         guard system.enabled else { return (name, .systemGray, "Hidden from your game menu.") }
         let app = appsHaveResults ? appStates.first { $0.id == system.package } : nil
-        let installed = system.emulator_installed ?? app?.installed ??
-            report.map { !$0.missing.contains(system.package) }
+        let installed = emulatorInstalled(system)
         guard let installed = installed else { return (name, .systemGray, "Emulator not checked yet.") }
         guard installed else { return (name, .systemRed, "\(name) · Not installed. Install it in App Store.") }
         if app?.managed == true, app?.update?.isEmpty == false {

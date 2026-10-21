@@ -385,6 +385,8 @@ extension SetupController {
                                     precondition(menu.items.last?.action == #selector(self.removeAppFromMenu(_:)))
                                     precondition(menu.items.last?.tag == 0)
                                     precondition(controls.last?.toolTip == "More options for PCSX2")
+                                    precondition(menu.items[1].title == "Open" && menu.items[1].action == #selector(self.openAppFromMenu(_:)),
+                                                 "The … menu starts the app first")
                                     let updateItem = menu.items.first { $0.title == "Update" }
                                     precondition(updateItem?.action == #selector(self.updateAppFromMenu(_:)))
                                     precondition(updateItem?.isEnabled == update)
@@ -1444,6 +1446,8 @@ extension SetupController {
                         precondition(actions(self.consoleRows).contains(#selector(self.showEmulatorInAppStore(_:))) &&
                                      !actions(self.tabs.tabViewItems[7].view!).contains(#selector(self.showPlayers)),
                                      "Console rows link to App Store; the page has no bottom App Store button")
+                        precondition(self.systemStoreLinks.count == 1 && self.systemStoreLinks[0].isHidden,
+                                     "An installed emulator needs no store shortcut in its row; Details keeps it")
                         self.closeInspector()
                         self.appsChecking = false
                         self.renderApps()

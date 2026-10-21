@@ -1145,6 +1145,12 @@ def find_brew():
     raise SetupError("Homebrew is missing. Install from https://brew.sh yourself, then rerun setup. No installer was downloaded.")
 
 
+def brew_environment():
+    """Homebrew asks for the Mac password through a dialog (SUDO_ASKPASS) instead of a terminal it doesn't have."""
+    askpass = Path(__file__).with_name("askpass.sh")
+    return {**os.environ, "SUDO_ASKPASS": str(askpass)} if askpass.is_file() else None
+
+
 def install_packages(packages):
     if not packages:
         return
@@ -1159,7 +1165,7 @@ def install_packages(packages):
             print(f"Already installed: {package}", flush=True)
             continue
         print(f"Installing host component: {package}", flush=True)
-        run([brew, "install", "--cask", package])
+        run([brew, "install", "--cask", package], env=brew_environment())
 
 def app_status(check_updates=False, package=None):
     """Installed/managed/update state for every known app, or only `package` (a targeted post-install re-check)."""
@@ -1209,7 +1215,7 @@ def manage_app(package, action, confirm=False):
     status = next(item for item in app_status() if item["id"] == package)
     if not status["managed"]:
         raise SetupError("This app is not managed by Homebrew. Use Finder to move the app to Trash; preferences and games are kept.")
-    run([find_brew(), "upgrade" if action == "update" else "uninstall", "--cask", package])
+    run([find_brew(), "upgrade" if action == "update" else "uninstall", "--cask", package], env=brew_environment())
     print("App " + ("updated." if action == "update" else "removed. Games and preferences were kept."), flush=True)
 
 

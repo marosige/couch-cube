@@ -893,7 +893,14 @@ class AppManagementTests(unittest.TestCase):
         with patch.object(manager, "app_status", return_value=[{"id": "steam", "managed": True}]), \
                 patch.object(manager, "find_brew", return_value="/brew"), patch.object(manager, "run") as run:
             manager.manage_app("steam", "remove", True)
-        run.assert_called_once_with(["/brew", "uninstall", "--cask", "steam"])
+        run.assert_called_once_with(["/brew", "uninstall", "--cask", "steam"], env=manager.brew_environment())
+
+    def test_homebrew_asks_for_the_password_in_a_dialog(self):
+        environment = manager.brew_environment()
+        askpass = Path(environment["SUDO_ASKPASS"])
+        self.assertEqual(askpass.name, "askpass.sh")
+        self.assertTrue(os.access(askpass, os.X_OK), "sudo -A needs an executable helper")
+        self.assertIn("hidden answer", askpass.read_text())
 
     def test_unmanaged_app_not_removed_by_brew(self):
         with patch.object(manager, "app_status", return_value=[{"id": "rpcs3", "managed": False}]), \
