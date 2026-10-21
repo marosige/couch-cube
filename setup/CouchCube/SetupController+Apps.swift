@@ -31,7 +31,7 @@ extension SetupController {
         if appStates.isEmpty {
             appsHaveResults = false
             let catalog = [
-                ("steam", "Steam"), ("steamac", "FX Steam Launcher"), ("gog-galaxy", "GOG Galaxy"), ("ea", "EA app"),
+                ("steam", "Steam"), ("gog-galaxy", "GOG Galaxy"), ("ea", "EA app"),
                 ("epic-games", "Epic Games Launcher"), ("battle-net", "Battle.net"),
                 ("curseforge", "CurseForge"), ("es-de", "ES-DE"),
                 ("retroarch-metal", "RetroArch"), ("dolphin", "Dolphin"),
@@ -81,7 +81,7 @@ extension SetupController {
                 self.renderGeneral()
                 if self.collapsedAppCategories.isEmpty {
                     precondition(self.appMenuRows.arrangedSubviews.count == 4)
-                    precondition(self.appPCRows.arrangedSubviews.count == 14)
+                    precondition(self.appPCRows.arrangedSubviews.count == 12)
                     precondition(self.appWindowsRows.arrangedSubviews.count == 4 + 2 * self.windowsDownloads.count)
                     precondition(self.appRetroRows.arrangedSubviews.count == 12)
                 }
@@ -163,7 +163,7 @@ extension SetupController {
     func renderApps() {
         for rows in [appMenuRows, appPCRows, appWindowsRows, appRetroRows] { clearRows(rows) }
         var hiddenApps: [ObjectIdentifier: Int] = [:]
-        let order = ["steam", "steamac", "gog-galaxy", "ea", "epic-games", "battle-net", "curseforge", "es-de", "retroarch-metal", "dolphin", "pcsx2", "rpcs3", "cemu-wiiu", "switch", "porting-kit", "crossover"]
+        let order = ["steam", "gog-galaxy", "ea", "epic-games", "battle-net", "curseforge", "es-de", "retroarch-metal", "dolphin", "pcsx2", "rpcs3", "cemu-wiiu", "switch", "porting-kit", "crossover"]
         appStates.sort { (order.firstIndex(of: $0.id) ?? 100) < (order.firstIndex(of: $1.id) ?? 100) }
         for (index, app) in appStates.enumerated() {
             for placement in appPlacements(app) {

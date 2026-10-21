@@ -17,7 +17,6 @@
     "steam": "store.steampowered.com"
   },
   "upstreamArtwork": {
-    "steamac": "AppIcon.icns from FX Steam Launcher.app in https://github.com/fxgl/steamac/releases/download/v1.9.1/FX-Steam-Launcher-1.9.1.dmg (SHA-256 07a90ddfdf12ad0616c6a6bc2310114772ef5e23da47a926fee80c9edd29bcb5)",
     "retroarch-metal": "https://raw.githubusercontent.com/libretro/RetroArch/master/media/retroarch-96x96.png",
     "switch": "https://raw.githubusercontent.com/alula/Ryujinx/qlaunch/src/Ryujinx.UI.Common/Resources/Logo_Ryujinx.png"
   }

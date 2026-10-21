@@ -66,20 +66,18 @@ extension SetupController {
                 }))
             }
         }
-        for client in storeAccounts.report?.clients ?? [] where client.platform == "Windows" && client.state != "not_installed" {
-            let host = client.host.map { " · \($0)" } ?? ""
-            items.append(LauncherItem(id: client.id, title: client.name, subtitle: "Windows" + host, section: .windows,
-                                      artwork: launcherIcon(path: nil, bundledID: Self.windowsClientIcons[client.id]),
-                                      wideArtwork: false, path: nil, launch: { [weak self] in
-                self?.storeClientOpen(client.id) { _ in }
-            }))
+        // Each ROM starts straight in its console's emulator (no frontend in between).
+        for rom in launcherLibrary?.roms ?? [] {
+            items.append(LauncherItem(id: "rom-" + rom.path, title: rom.name, subtitle: rom.systemName, section: .retro,
+                                      artwork: ConsoleArtwork.image(for: rom.system), wideArtwork: false, path: rom.path,
+                                      launch: { [weak self] in self?.launchRom(rom) }))
         }
-        let macLaunchers = computerGameApps.subtracting(["curseforge"])
-        let retro = emulatorApps.union(["es-de"])
-        for app in appStates where app.installed && !app.path.isEmpty && (macLaunchers.contains(app.id) || retro.contains(app.id)) {
-            let section: LauncherSection = retro.contains(app.id) ? .retro : .launchers
-            items.append(LauncherItem(id: "app-" + app.id, title: app.name, subtitle: appPurposes[app.id] ?? "", section: section,
-                                      artwork: launcherIcon(path: app.path, bundledID: app.id), wideArtwork: false, path: app.path,
+        for app in launcherLibrary?.apps ?? [] {
+            let subtitle = ["native": "Mac", "windows": "Windows", "porting-kit": "Porting Kit",
+                            "crossover": "CrossOver" + (app.group.map { " \u{00B7} \($0)" } ?? "")][app.kind] ?? ""
+            items.append(LauncherItem(id: "app-" + app.path, title: app.name, subtitle: subtitle,
+                                      section: app.kind == "native" ? .mac : .windows,
+                                      artwork: NSWorkspace.shared.icon(forFile: app.path), wideArtwork: false, path: app.path,
                                       launch: { [weak self] in self?.openLauncherApp(app.path, name: app.name) }))
         }
         for path in launcherAddedPaths where FileManager.default.fileExists(atPath: path) {
@@ -91,6 +89,31 @@ extension SetupController {
         return items
     }
 
+    /// Games in the Couch Cube library (ROMs, Mac games, Windows wrappers, Porting Kit) and CrossOver shortcuts.
+    func loadLauncherLibrary() {
+        guard !ProcessInfo.processInfo.arguments.contains("--smoke-test"), selected != nil else { return }
+        runBackendInBackground(["library-games"]) { [weak self] code, data, _ in
+            guard let self, code == 0 else { return }
+            let decoder = JSONDecoder()
+            decoder.keyDecodingStrategy = .convertFromSnakeCase
+            self.launcherLibrary = try? decoder.decode(LibraryGames.self, from: data)
+            self.renderLauncher()
+        }
+    }
+
+    func launchRom(_ rom: LibraryGames.Rom) {
+        status.stringValue = "Starting \(rom.name)\u{2026}"
+        runBackendInBackground(["emulate", "--system", rom.system, "--rom", rom.path]) { [weak self] code, _, errors in
+            guard let self else { return }
+            self.status.stringValue = code == 0 ? "" : "Couldn't start \(rom.name): " +
+                self.backendErrorMessageText(errors)
+        }
+    }
+
+    func backendErrorMessageText(_ errors: String) -> String {
+        backendErrorMessage(errors, fallback: "the emulator didn't open. Check it in App Store.")
+    }
+
     func renderLauncher() {
         let query = launcherSearch.stringValue.trimmingCharacters(in: .whitespaces)
         let items = launcherItems().filter {
@@ -99,7 +122,7 @@ extension SetupController {
         clearRows(launcherSections)
         guard !items.isEmpty else {
             launcherSections.addArrangedSubview(text(query.isEmpty
-                ? "Your games appear here. Install Steam or a game launcher in App Store, or add any game with +."
+                ? "Your games appear here: Steam games, ROMs in your library and Windows games. Add any other game with +."
                 : "No games match \u{201C}\(query)\u{201D}.", size: 13, secondary: true))
             return
         }

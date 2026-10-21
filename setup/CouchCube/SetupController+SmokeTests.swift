@@ -348,15 +348,13 @@ extension SetupController {
                         self.renderApps()
                         self.renderTVMenus()
                         self.appsStatus.stringValue = "Installed versions. Updates are checked only when requested."
-                        precondition(Set(self.appStates.map { $0.id }) == Set(["steam", "steamac", "gog-galaxy", "ea", "epic-games", "battle-net", "curseforge", "es-de", "retroarch-metal", "dolphin", "porting-kit", "crossover", "pcsx2", "rpcs3", "cemu-wiiu", "switch"]))
+                        precondition(Set(self.appStates.map { $0.id }) == Set(["steam", "gog-galaxy", "ea", "epic-games", "battle-net", "curseforge", "es-de", "retroarch-metal", "dolphin", "porting-kit", "crossover", "pcsx2", "rpcs3", "cemu-wiiu", "switch"]))
                         for app in self.appStates {
                             let iconURL = Bundle.main.resourceURL!.appendingPathComponent("AppIcons/\(app.id).png")
                             precondition(NSImage(contentsOf: iconURL) != nil, "Missing app icon: \(app.id)")
                         }
                         let porting = self.appStates.firstIndex { $0.id == "porting-kit" }!
                         precondition(self.appStates[porting + 1].id == "crossover")
-                        let steamIndex = self.appStates.firstIndex { $0.id == "steam" }!
-                        precondition(self.appStates[steamIndex + 1].id == "steamac", "FX Steam Launcher sits right below Steam")
                         let battle = self.appStates.firstIndex { $0.id == "battle-net" }!
                         precondition(self.appStates[battle + 1].id == "curseforge")
                         func buttons(in view: NSView) -> [NSButton] {
@@ -1882,9 +1880,9 @@ extension SetupController {
         fetchApps(updates: false)
         precondition(reads.count == 3 && !appsChecking && appPCRows.arrangedSubviews.map(ObjectIdentifier.init) == appRows,
                      "Opening App Store again refreshes silently")
-        reads[2].done(0, appsJSON(["steamac"]))
+        reads[2].done(0, appsJSON(["gog-galaxy"]))
         reads[1].done(0, appsJSON([]))
-        precondition(appStates.first { $0.id == "steamac" }?.installed == true, "An older App Store read must not overwrite a newer one")
+        precondition(appStates.first { $0.id == "gog-galaxy" }?.installed == true, "An older App Store read must not overwrite a newer one")
     }
 
     func smokeTestConsoleBulkToggles() {
@@ -3266,13 +3264,16 @@ extension SetupController {
             LauncherItem(id: title, title: title, subtitle: subtitle, section: section, artwork: icon(iconID),
                          wideArtwork: false, path: nil, launch: {})
         }
-        launcherSmokeItems = ["Overcooked! 2", "Pummel Party", "LEGO Party", "Runbow", "Rocket League"].map { sample($0, "Steam", .steam, "steam") } +
-            [sample("Battle.net", "Windows · CrossOver", .windows, "battle-net"),
-             sample("Epic Games Launcher", "Epic Games for Mac", .launchers, "epic-games"),
-             sample("GOG Galaxy", "GOG games for Mac", .launchers, "gog-galaxy"),
-             sample("ES-DE", "Retro game TV menu", .retro, "es-de"),
-             sample("Dolphin", "GameCube · Wii", .retro, "dolphin"),
-             sample("Nintendo Switch", "Switch emulator", .retro, "switch")]
+        func console(_ title: String, _ system: String, _ name: String) -> LauncherItem {
+            LauncherItem(id: title, title: title, subtitle: name, section: .retro, artwork: ConsoleArtwork.image(for: system),
+                         wideArtwork: false, path: nil, launch: {})
+        }
+        launcherSmokeItems = ["Overcooked! 2", "Pummel Party", "LEGO Party", "Runbow", "Portal 2"].map { sample($0, "Steam", .steam, "steam") } +
+            [console("Mario Party 3", "n64", "Nintendo 64"), console("Super Mario World", "snes", "Super Nintendo"),
+             console("Mario Kart: Double Dash!!", "gc", "GameCube"),
+             sample("Warcraft II", "Porting Kit", .windows, "porting-kit"),
+             sample("Rocket League", "CrossOver \u{00B7} Steam", .windows, "crossover"),
+             sample("Celeste", "Mac", .mac, "steam")]
         renderLauncher()
         defer { launcherSmokeItems = nil; renderLauncher() }
         var pages = sidebarPages.filter { $0 >= 0 }

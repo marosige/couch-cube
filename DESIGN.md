@@ -201,13 +201,15 @@ is no deployment workflow. `docs/CNAME` keeps the custom domain `couchcube.maros
 fall back to Releases when a release asset is unavailable or GitHub's API cannot be reached.
 
 **One window, no wizard.** Home (Play) shows the Play and controller tiles side by side,
-then **Games**: the launcher. It lists, in this order, installed Steam games (header art read
-from Steam's local `appcache/librarycache`, never downloaded; Steam tools and runtimes are
-hidden), Windows launchers found in CrossOver/Whisky bottles, Mac launchers, retro front-ends
-and emulators from App Store, and apps added with **+** (saved per user in UserDefaults
-`launcherApps`). Tiles fill the width in a flow grid with Steam header proportions; click,
-Return or VoiceOver opens them (Steam games via `steam://rungameid/<id>`), and their menu offers
-Open, Show in Finder and, for added apps, Remove from Play. The search field filters by name.
+then **Games**: the launcher, with games only (launchers and emulators stay in App Store). In this
+order: installed Steam games (header art read from Steam's local `appcache/librarycache`, never
+downloaded; Steam tools and runtimes hidden) via `steam://rungameid/<id>`; retro games — every ROM of a
+shown console in the library, started straight in its emulator with `emulate`; Windows games —
+Porting Kit ports in `Windows/Porting Kit`, wrappers in `Windows/Wrappers` and CrossOver's program
+shortcuts in `~/Applications/CrossOver` (installers and uninstallers skipped); Mac games in
+`Native/Games`; and apps added with **+** (UserDefaults `launcherApps`). The list comes from
+`library-games`, read-only and unmeasured. Tiles fill the width in a flow grid; click, Return or
+VoiceOver opens them, and their menu offers Open, Show in Finder and, for added apps, Remove from Play. The search field filters by name.
 The Play tile uses a bundled Steam Big Picture image or EmulationStation artwork
 matching the chosen TV menu, with only the Play title over the image. The entire
 tile launches the menu; image sources are recorded in `assets/tv-menus/sources.json`.
@@ -418,12 +420,6 @@ SHA-256 are recorded. Authenticode signatures are not checked, because macOS has
 reliable verifier. Couch Cube never runs or installs these files: they show as
 **Downloaded** with Show in Finder, and need Porting Kit or CrossOver to run.
 These rows never create sidebar tasks, and an installed Windows launcher is never claimed.
-PC games also lists **FX Steam Launcher** ([fxgl/steamac](https://github.com/fxgl/steamac),
-v1.9.1) directly below Steam. It is a separate app that runs Valve's SteamOS in a
-lightweight VM for Windows Steam games; it needs Apple silicon and macOS 15 or newer
-(some DirectX 12 titles need macOS 26). Couch Cube detects `FX Steam Launcher.app`
-on its own (Steam.app does not count) and Install opens the official notarized
-release page; it is not installed automatically.
 Named sections and row separators organize apps and console families.
 Compact switches sit on the right. Status dots always have text: green means
 ready/connected, yellow means setup or connection is needed, and red marks a
