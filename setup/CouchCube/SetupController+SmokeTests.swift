@@ -435,7 +435,7 @@ extension SetupController {
                 let stack = self.detail.subviews.compactMap { $0 as? NSStackView }.first!
                 let discoveryOK = success && !self.volumes.isEmpty && self.window.isVisible
                     && self.selected != nil
-                    && self.tabs.numberOfTabViewItems == 14 && self.logWindow == nil
+                    && self.tabs.numberOfTabViewItems == 15 && self.logWindow == nil
                 precondition(self.sidebarPages.count == self.sidebarTitles.count &&
                              self.sidebarPages.count == self.sidebarSymbols.count)
                 precondition(!self.sidebarPages.contains(3) && !self.sidebarPages.contains(4),
