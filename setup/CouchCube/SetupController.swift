@@ -175,6 +175,7 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
     let updateAllButton = NSButton()
     let homeMenuLabel = NSTextField(wrappingLabelWithString: "Checking your console...")
     let homePlaySubtitle = NSTextField(labelWithString: "")
+    var homeArtworkMenu: String?? = .none
     let homeProgress = NSProgressIndicator()
     let homeControllerStatus = NSStackView()
     var homeControllerRowViews: [String: NSView] = [:]

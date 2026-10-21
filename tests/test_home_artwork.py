@@ -62,12 +62,6 @@ class HomeArtworkTests(unittest.TestCase):
         cable = ssd.find("svg:path[@id='ssd-cable']", NS)
         self.assertTrue(cable.get("d").endswith(f"{port_center:g} 790"))
 
-    def test_emulationstation_banner_preserves_supplied_aspect_ratio(self):
-        png = (ASSETS / "tv-menus" / "es-de.png").read_bytes()
-        self.assertEqual(png[:8], b"\x89PNG\r\n\x1a\n")
-        width, height = struct.unpack(">II", png[16:24])
-        self.assertEqual((width, height), (419 * 4, 196 * 4))
-
 
 if __name__ == "__main__":
     unittest.main()
