@@ -122,7 +122,7 @@ extension SetupController {
             [{"id":"snes","name":"Super Nintendo","games":3,"path":"/Volumes/G3/Couch Cube/ROMs/snes"}]
             """))
         let detailLabels = labels(driveDetailRows)
-        for heading in ["Couch Cube library", "Storage", "Drive size", "Used (all files)", "Couch Cube files", "Free space", "Steam", "Retro games", "Super Nintendo"] {
+        for heading in ["Couch Cube library", "Storage", "Drive size", "Used by other files", "Couch Cube files", "Free space", "Steam", "Retro games", "Super Nintendo"] {
             precondition(detailLabels.contains(heading), "Drive detail shows \(heading)")
         }
         precondition(!detailLabels.contains("Reading this drive..."))

@@ -603,18 +603,18 @@ extension SetupController {
                 line.distribution = .fill
                 return line
             }
-            // One bar: Couch Cube files, then everything else that's used; the rest of the track is free space.
+            // One bar: other used files, then Couch Cube files; the rest of the track is free space.
             let couch = min(max(capacity.couch, 0), capacity.used)
             let bar = GameStorageBar()
             bar.accessibilityPrefix = "Drive space"
-            bar.segments = [(title: "Couch Cube files", bytes: couch, color: couchColor),
-                            (title: "Other files", bytes: max(capacity.used - couch, 0), color: otherColor),
+            bar.segments = [(title: "Other files", bytes: max(capacity.used - couch, 0), color: otherColor),
+                            (title: "Couch Cube files", bytes: couch, color: couchColor),
                             (title: "Free", bytes: max(capacity.total - capacity.used, 0), color: .clear)].filter { $0.bytes > 0 }
             bar.identifier = NSUserInterfaceItemIdentifier("drive-space-bar")
             add(detailSection("Storage", views: [
                 bar,
                 amount("Drive size", capacity.total, "drive-total"),
-                amount("Used (all files)", capacity.used, "drive-used", color: otherColor),
+                amount("Used by other files", max(capacity.used - couch, 0), "drive-used", color: otherColor),
                 amount("Couch Cube files", capacity.couch, "drive-couch", color: couchColor),
                 amount("Free space", capacity.free, "drive-free")
             ]))
