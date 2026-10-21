@@ -1671,7 +1671,14 @@ extension SetupController {
                             precondition(item.isEnabled == (self.appStates.first { $0.id == id }?.installed == true))
                         }
                     }
-                    precondition(self.defaultMenuPicker.isDescendant(of: self.tabs.tabViewItems[10].view!))
+                    precondition(self.tvMenuChoices.isDescendant(of: self.tabs.tabViewItems[10].view!) &&
+                                 self.tvMenuChoices.arrangedSubviews.count == 3 && self.signInChoices.arrangedSubviews.count == 3 &&
+                                 self.afterLoginChoices.arrangedSubviews.count == 3, "Console Mode asks three questions with three answers each")
+                    let menuRows = self.tvMenuChoices.arrangedSubviews
+                    precondition(menuRows.last?.accessibilityIdentifier() == "choice-menu-couchcube" &&
+                                 (menuRows.last as? ClickableRowView)?.onActivate == nil, "Couch Cube TV is shown but not selectable yet")
+                    let chosen = menuRows.filter { ($0.accessibilityValue() as? Int) == 1 }.map { $0.accessibilityIdentifier() }
+                    precondition(chosen == (self.effectiveFrontend.map { ["choice-menu-" + $0] } ?? []), "The checkmark follows the default menu: \(chosen)")
                     precondition(self.updateButton.isDescendant(of: self.tabs.tabViewItems[11].view!))
                     self.selectPage(11)
                     precondition(self.screenTitle.stringValue == "App Settings")

@@ -29,7 +29,7 @@ cp "$ROOT/build/Console.icns" "$APP/Contents/Resources/Console.icns"
 cp "$ROOT/assets/header.png" "$APP/Contents/Resources/HomeHeader.png"
 cp "$ROOT/assets/header-portable.png" "$APP/Contents/Resources/HomeHeaderPortable.png"
 xcrun swiftc -target arm64-apple-macos13.0 -swift-version 5 -module-cache-path "$ROOT/build/module-cache" \
-  -framework AppKit -framework GameController -framework CoreBluetooth -framework IOBluetooth \
+  -framework AppKit -framework GameController -framework CoreBluetooth -framework IOBluetooth -framework ServiceManagement \
   "$ROOT"/setup/CouchCube/*.swift -o "$APP/Contents/MacOS/ConsoleSetup"
 xcrun swiftc -target arm64-apple-macos13.0 -swift-version 5 -module-cache-path "$ROOT/build/module-cache" \
   -framework AppKit -framework GameController -framework IOKit \

@@ -417,6 +417,11 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
     let helperAdvice = NSTextField(wrappingLabelWithString:
         "Homebrew is needed only to install missing apps from here. Finish its Terminal installer, return here, then click the app's Install button. macOS may ask for administrator approval.")
     let autoLaunchToggle = NSSwitch()
+    let signInChoices = NSStackView()
+    let signInGuide = NSStackView()
+    let afterLoginChoices = NSStackView()
+    let tvMenuChoices = NSStackView()
+    var consoleDelayRow = NSStackView()
     let autoLaunchDelay = NSTextField(string: "30")
     let autoLaunchStatus = NSTextField(wrappingLabelWithString: "")
     var autoLaunchLoaded = false
@@ -847,31 +852,24 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
         addPage("Details", content: column([
             card("Details", subtitle: nil, views: [inspectorRows])
         ]))
+        // Console Mode answers three questions in the order they happen: getting in, what starts, and what opens.
+        for list in [signInChoices, signInGuide, afterLoginChoices, tvMenuChoices] {
+            list.orientation = .vertical
+            list.alignment = .leading
+            list.spacing = 2
+        }
+        signInGuide.spacing = 8
+        signInGuide.edgeInsets = NSEdgeInsets(top: 6, left: 8, bottom: 0, right: 8)
+        autoLaunchDelay.target = self
+        autoLaunchDelay.action = #selector(consoleDelayChanged)
+        consoleDelayRow = row([text("Wait"), autoLaunchDelay, text("seconds after signing in, so the Mac can settle.", secondary: true)])
+        consoleDelayRow.edgeInsets = NSEdgeInsets(top: 4, left: 8, bottom: 0, right: 8)
         addPage("Console Mode", content: column([
-            card("Default TV menu", subtitle: "The menu Play and automatic console mode open.", views: [
-                settingsRow("TV menu", subtitle: "Install menus in App Store.", symbol: "tv.fill",
-                            color: .systemBlue, trailing: defaultMenuPicker),
-                tvMenuStatus
-            ]),
-            card("Automatic console mode", subtitle: nil, views: [
-                settingsRow("Start after login", subtitle: "Opens the TV menu when a controller is connected.",
-                            symbol: "power", color: .systemGreen, trailing: autoLaunchToggle),
-                row([text("Wait after login:"), autoLaunchDelay, text("seconds")]),
-                text("A keyboard or mouse skips it for that login. Turn off Steam's own login startup.", size: 12, secondary: true),
-                autoLaunchStatus,
-                button("Save", #selector(saveAutoLaunch))
-            ]),
-            card("Start without signing in", subtitle: "Optional. Done in System Settings; Couch Cube never stores passwords.", views: [
-                text("1. Create a Standard user for gaming in Users & Groups.", size: 13),
-                text("2. Sign in as that user, open Couch Cube there and turn on automatic console mode.", size: 13),
-                text("3. In Users & Groups, choose that user for Automatically log in as.", size: 13),
-                text("Automatic login needs FileVault off, which lowers protection for the whole Mac. Keep it on if that matters more.", size: 12, secondary: true),
-                row([button("Users & Groups", #selector(openUsersAndGroups)),
-                     button("FileVault", #selector(openFileVaultSettings)),
-                     button("Lock Screen", #selector(openLockScreenSettings)),
-                     button("Apple guide", #selector(openAutomaticLoginGuide))])
-            ])
+            card("1  Turning it on", subtitle: "How do you get past the login screen?", views: [signInChoices, signInGuide]),
+            card("2  After you sign in", subtitle: "What starts by itself?", views: [afterLoginChoices, consoleDelayRow, autoLaunchStatus]),
+            card("3  On the TV", subtitle: "Which menu Play and the TV mode open.", views: [tvMenuChoices, tvMenuStatus])
         ]))
+        renderConsoleMode()
         guidedSetupToggle.state = guidedSetup ? .on : .off
         guidedSetupToggle.controlSize = .small
         guidedSetupToggle.target = self

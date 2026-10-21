@@ -601,6 +601,7 @@ extension SetupController {
             defaultMenuPicker.itemArray.contains { $0.representedObject != nil && $0.isEnabled }
         tvMenuStatus.stringValue = selectedIndex == nil ? "Install Steam or ES-DE in App Store to get started." : ""
         tvMenuStatus.isHidden = tvMenuStatus.stringValue.isEmpty
+        renderConsoleMode()
     }
 
     @objc func defaultMenuChanged(_ sender: NSPopUpButton) {
