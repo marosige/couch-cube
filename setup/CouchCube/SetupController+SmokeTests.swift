@@ -2799,6 +2799,8 @@ extension SetupController {
         // Search → wishlist with real clicks while the search field is editing: the heart must survive and toggle.
         // Real mouse events through the window, like a user's click: hit testing, responder chain and button tracking.
         func click(_ view: NSView, expecting target: NSView? = nil) {
+            // A freshly rebuilt view has no frame until layout; scrolling to it before that would aim at the top.
+            window.contentView!.layoutSubtreeIfNeeded()
             view.scrollToVisible(view.bounds)
             window.contentView!.layoutSubtreeIfNeeded()
             let point = view.convert(NSPoint(x: view.bounds.midX, y: view.bounds.midY), to: nil)
