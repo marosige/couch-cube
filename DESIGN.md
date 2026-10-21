@@ -146,7 +146,7 @@ There is no separate Play page. Steam setup is a guide reached from Game library
 Additional rows appear only for setup problems, missing game apps or status errors.
 App categories and settings retain distinct rounded native NSBox groups with
 system colors and subtle separators in both appearances.
-App Store rows show the app name, Installed/Not installed and a short purpose;
+App Store rows show the app name, Installed/Not installed (green / gray dot; red only for a failure) and a short purpose;
 the full list appears immediately during app checks, with pulsing blue status dots.
 Previously checked statuses remain visible; unknown statuses show Checking.
 Consoles also shows its full list immediately, with pulsing blue emulator dots
