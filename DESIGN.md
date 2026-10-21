@@ -432,7 +432,9 @@ waiting: the list is updated in place, and the latest choices are saved in the
 background shortly after you stop. If saving fails, the switches return to the
 last saved selection and the error is shown.
 One switch on each company card (Nintendo, PlayStation, SEGA) shows or hides every console
-on that card at once; Nintendo's Home consoles/Handhelds are plain headings. A group switch is on only when all its consoles are shown; a mixed
+on that card at once; each card splits into Home consoles and Handhelds (plain headings).
+Systems: Nintendo (NES, SNES, N64, GameCube, Wii, Wii U, Switch; Game Boy, Color, Advance), PlayStation
+(1, 2, 3; PSP) and SEGA (Mega Drive, Sega CD, Dreamcast; Game Gear). A group switch is on only when all its consoles are shown; a mixed
 group is off with an "N of M" count, and switching it shows all. Group switches use the same
 instant in-place update and a single batched background save (failures revert them too), and
 showing consoles never installs anything.

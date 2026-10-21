@@ -12,8 +12,10 @@ enum ConsoleArtwork {
     static let groups: [(title: String, systems: [String])] = [
         ("Nintendo home consoles", ["nes", "snes", "n64", "gc", "wii", "wiiu", "switch"]),
         ("Nintendo handhelds", ["gb", "gbc", "gba"]),
-        ("PlayStation", ["psx", "ps2", "psp", "ps3"]),
-        ("SEGA", ["megadrive", "segacd", "dreamcast"])
+        ("PlayStation home consoles", ["psx", "ps2", "ps3"]),
+        ("PlayStation handhelds", ["psp"]),
+        ("SEGA home consoles", ["megadrive", "segacd", "dreamcast"]),
+        ("SEGA handhelds", ["gamegear"])
     ]
 
     // Body colors follow each system's best-known retail edition. Very dark plastics are
@@ -34,6 +36,7 @@ enum ConsoleArtwork {
         case "psx": colors = (0xBEBFC3, 0xCACCD0)
         case "ps2", "psp", "ps3": colors = (0x23252B, 0x5A5E68)
         case "megadrive", "segacd": colors = (0x232428, 0x5B5E66)
+        case "gamegear": colors = (0x2B2C31, 0x666A73)
         case "dreamcast": colors = (0xEEEDE8, 0xF3F2EE)
         default: return .secondaryLabelColor
         }
@@ -151,6 +154,7 @@ enum ConsoleArtwork {
             case "ps3": solid(6, 3, 20, 26, 7)
             case "megadrive": solid(2, 8, 28, 18, 6)
             case "segacd": solid(2, 4, 28, 14, 4); solid(2, 20, 28, 9, 2)
+            case "gamegear": solid(1, 7, 30, 18, 6)
             case "dreamcast":
                 solid(3, 5, 26, 23, 4)
                 accent("orange").setFill()
@@ -253,6 +257,12 @@ enum ConsoleArtwork {
                 stroke(12, 13, 20, 13)
                 box(5, 22, 7, 3, 1)
                 box(20, 22, 7, 3, 1)
+            case "gamegear":
+                box(1, 7, 30, 18, 6)
+                box(10, 10, 12, 11, 1)
+                pad(5, 15)
+                dot(25, 13, 1.8)
+                dot(28, 16, 1.8)
             case "segacd":
                 box(2, 4, 28, 14, 4)
                 disc(11, 6, 10)

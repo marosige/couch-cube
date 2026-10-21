@@ -77,6 +77,7 @@ SYSTEMS = {
     "psp": ("PlayStation Portable", "iso|cso|pbp", "ppsspp"),
     "megadrive": ("Mega Drive / Genesis", "md|bin|zip|7z", "genesis_plus_gx"),
     "segacd": ("Sega CD", "cue|chd|m3u", "genesis_plus_gx"),
+    "gamegear": ("Game Gear", "gg|zip|7z", "genesis_plus_gx"),
     "dreamcast": ("Dreamcast", "gdi|cdi|chd|m3u", "flycast"),
     "wiiu": ("Wii U", "wua|wud|wux|rpx", "cemu-wiiu"),
     "ps2": ("PlayStation 2", "iso|chd|cso|bin", "pcsx2"),
