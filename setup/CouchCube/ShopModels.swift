@@ -100,6 +100,7 @@ struct SteamDetails: Decodable, Equatable {
     var couch: [String]? = nil
     var platforms: [String]? = nil
     var deck: String? = nil
+    var features: [String]? = nil
 }
 
 struct ShopGameReply: Decodable {

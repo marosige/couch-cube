@@ -51,8 +51,10 @@ that a game runs on a Mac. The page is wider than the settings pages (up to 960 
   A page opened from a single deal or the wishlist loads every store with `shop-game --id`.
   **Gameplay Videos** opens a YouTube search for "<game> gameplay" in the browser. **About** (Steam games,
   `shop-steam --app`, cached a week) shows the short description, genre, developer, release date,
-  controller support, couch play (split screen, local co-op, Remote Play Together) and the size with the
-  free space in your game library, orange when it doesn't fit.
+  controller support and couch play (split screen, local co-op, Remote Play Together), always listed
+  (gray "Not listed by Steam" / "No local multiplayer listed" when missing), then Yes/No for
+  single-player, online co-op, online versus, TV streaming (Remote Play on TV), cloud saves, Family
+  Sharing and achievements, and the size with the free space in your game library, orange when it doesn't fit.
 - **Links** open your default browser only: CheapShark's `cheapshark.com/redirect` for stores
   (their terms require it, Steam included), gamerpower.com for giveaways, apps.apple.com for the
   Mac App Store. Any other host or scheme is refused. No in-app browser, no store-app deep links.

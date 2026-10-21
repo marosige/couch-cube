@@ -366,12 +366,22 @@ extension SetupController {
         if let genres = steam.genres, !genres.isEmpty { facts.append(("Genre", genres.joined(separator: ", "), nil)) }
         if let developers = steam.developers, !developers.isEmpty { facts.append(("Developer", developers.joined(separator: ", "), nil)) }
         if let release = steam.release { facts.append(("Released", release, nil)) }
-        if let controller = steam.controller {
-            facts.append(("Controllers", controller == "full" ? "Full controller support" : "Partial controller support",
-                          controller == "full" ? .systemGreen : nil))
-        }
-        if let couch = steam.couch, !couch.isEmpty {
-            facts.append(("Couch play", couch.map { $0.replacingOccurrences(of: "Shared/", with: "") }.joined(separator: ", "), .systemGreen))
+        // Couch-relevant facts are always listed, so a missing feature reads as "no" instead of being invisible.
+        if steam.found {
+            let controller = steam.controller
+            facts.append(("Controllers", controller == "full" ? "Full controller support" : controller == "partial" ? "Partial controller support"
+                          : "Not listed by Steam", controller == "full" ? .systemGreen : controller == nil ? .secondaryLabelColor : nil))
+            let couch = steam.couch ?? []
+            facts.append(("Couch play", couch.isEmpty ? "No local multiplayer listed"
+                          : couch.map { $0.replacingOccurrences(of: "Shared/", with: "") }.joined(separator: ", "),
+                          couch.isEmpty ? .secondaryLabelColor : .systemGreen))
+            let features = Set(steam.features ?? [])
+            for (name, feature) in [("Single-player", "Single-player"), ("Online co-op", "Online Co-op"), ("Online versus", "Online PvP"),
+                                    ("TV streaming", "Remote Play on TV"), ("Cloud saves", "Steam Cloud"),
+                                    ("Family Sharing", "Family Sharing"), ("Achievements", "Steam Achievements")] {
+                let has = features.contains(feature)
+                facts.append((name, has ? "Yes" : "No", has ? nil : .secondaryLabelColor))
+            }
         }
         if let size = steam.storageBytes {
             let free = shopLibraryFreeSpace()

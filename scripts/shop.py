@@ -425,6 +425,9 @@ def platform_status(platforms):
 # Steam categories that matter on a couch: several people on one Mac.
 COUCH_CATEGORIES = {"Shared/Split Screen", "Shared/Split Screen PvP", "Shared/Split Screen Co-op",
                     "Local Co-op", "Local Multi-Player", "Local Multiplayer", "Remote Play Together"}
+# Other Steam store features the game page lists (always shown, "No" when Steam doesn't list them).
+FEATURE_CATEGORIES = ["Single-player", "Online Co-op", "Online PvP", "Remote Play on TV", "Steam Cloud",
+                      "Family Sharing", "Steam Achievements"]
 STORAGE = re.compile(r"(?:Storage|Hard Drive|Hard Disk Space|Disk Space)\s*:?\s*(?:</strong>)?\s*([\d.,]+)\s*(GB|MB|TB)", re.I)
 
 
@@ -497,6 +500,7 @@ def steam_details(app_id, refresh=False, now=None, opener=None):
             "screenshots": screenshots[:12], "storage_bytes": storage_bytes([r for r in requirements if r]),
             "controller": controller if controller in ("full", "partial") else None,
             "couch": [name for name in names("categories") if name in COUCH_CATEGORIES],
+            "features": [name for name in FEATURE_CATEGORIES if name in names("categories")],
             "platforms": [name for key, name in (("mac", "Mac"), ("windows", "Windows"), ("linux", "Linux"))
                           if platforms.get(key) is True],
             "deck": steam_deck_status(app_id, refresh, now, opener),

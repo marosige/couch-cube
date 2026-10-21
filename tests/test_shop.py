@@ -197,6 +197,7 @@ class ShopTests(unittest.TestCase):
         self.assertEqual(len(facts["screenshots"]), 2, "Only https screenshots")
         self.assertEqual(facts["platforms"], ["Mac", "Windows", "Linux"])
         self.assertEqual(facts["deck"], "Verified")
+        self.assertEqual(facts["features"], ["Single-player"])
         self.assertFalse(missing["found"])
         with self.assertRaises(shop.ShopError):
             shop.steam_details("abc", opener=Opener(), now=1000)
