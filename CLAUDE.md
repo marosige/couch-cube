@@ -19,8 +19,8 @@ Keep every reply very short: a few lines, results only, no long explanations.
 - `tests/` – `unittest` suite (no third-party packages). Some tests read Swift sources statically.
 - `README.md` – user-facing. `DESIGN.md` – page-by-page UI/behavior spec; keep it in sync with UI changes.
   `ROADMAP.md` – the owner's goal and milestones; read it before planning features.
-- UI review without a Mac: the **Screenshots** workflow (runs on pushes to `claude/**`) uploads a PNG of
-  every page in light and dark mode; download the artifact and look at it.
+- UI review without a Mac: the **Screenshots** workflow (runs on pushes to `claude/**`) pushes a PNG of
+  every page in light and dark mode to the `ci-screenshots` branch; `git fetch origin ci-screenshots` and look.
 - `docs/` – GitHub Pages website (couchcube.marosi.me), served from `main:/docs`.
 
 ## Checks
