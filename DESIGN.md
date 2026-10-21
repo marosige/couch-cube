@@ -295,8 +295,8 @@ once then Apple Watch (links to Touch ID & Password), or start without signing i
 read from macOS; the System Settings steps show only for this choice). **2 After you sign in** —
 nothing, open Couch Cube in its window (a macOS Login Item via SMAppService), or open the TV menu when
 a controller is on and no keyboard or mouse is connected (the LaunchAgent, with its wait in seconds).
-**3 On the TV** — Steam Big Picture, ES-DE (a missing one leads to App Store) or Couch Cube TV
-(shown, coming soon). Game library also sets up and switches the drive; App Settings groups app updates,
+**3 On the TV** — Steam Big Picture, ES-DE (a missing one leads to App Store) or Cube TV Home
+(Couch Cube's own, shown as coming soon). The Play tile is titled **Cube TV**, with the chosen menu beneath. Game library also sets up and switches the drive; App Settings groups app updates,
 app location, installer copy, uninstall and gaming cleanup.
 Nothing is installed or erased until you confirm it. Storage is checked on launch,
 explicit refresh, volume changes and returning Home, not whenever the app gains focus.

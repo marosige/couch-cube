@@ -23,7 +23,7 @@ Couch Cube should feel like Apple made it: simple, native, obvious to anyone who
    Settings and Game library: only the essentials, short and friendly, nothing scary;
    Cube Shop: a modern Mac game store (storefront Home, one game row style, game pages); confirm SSD,
    Console Mode and controller hotplug on a real Mac (→ beta).
-2. **Couch Cube TV mode** — a full-screen, Apple TV–style home screen driven by controller:
+2. **Cube TV** (Couch Cube's own TV mode) — a full-screen, Apple TV–style home screen driven by controller:
    - one grid of all games: Steam (Mac), Windows games via compatibility layers (CrossOver,
      Steam in a VM…), Epic/GOG/Battle.net, emulator games (incl. Switch);
    - folders/collections (e.g. "Party", "4 players", "Retro");

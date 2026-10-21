@@ -174,6 +174,7 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
     let tvMenuStatus = NSTextField(wrappingLabelWithString: "")
     let updateAllButton = NSButton()
     let homeMenuLabel = NSTextField(wrappingLabelWithString: "Checking your console...")
+    let homePlaySubtitle = NSTextField(labelWithString: "")
     let homeProgress = NSProgressIndicator()
     let homeControllerStatus = NSStackView()
     var homeControllerRowViews: [String: NSView] = [:]
@@ -591,7 +592,8 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
         playCard.boxType = .custom
         playCard.titlePosition = .noTitle
         playCard.contentViewMargins = .zero
-        let playTitle = text("Play", size: 22)
+        // The tile is Cube TV: it opens whichever TV menu you chose in Console Mode, named underneath.
+        let playTitle = text("Cube TV", size: 22)
         playTitle.font = .systemFont(ofSize: 22, weight: .bold)
         playTitle.textColor = .white
         playTitle.shadow = NSShadow()
@@ -609,7 +611,10 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
         shade.wantsLayer = true
         shade.layer?.backgroundColor = NSColor.black.withAlphaComponent(0.25).cgColor
         shade.layer?.cornerRadius = 16
-        for view in [homePlayBackground, shade, playTitle, play] {
+        homePlaySubtitle.font = .systemFont(ofSize: 13, weight: .semibold)
+        homePlaySubtitle.textColor = NSColor.white.withAlphaComponent(0.85)
+        homePlaySubtitle.shadow = playTitle.shadow
+        for view in [homePlayBackground, shade, playTitle, homePlaySubtitle, play] {
             view.translatesAutoresizingMaskIntoConstraints = false
             playCard.contentView!.addSubview(view)
         }
@@ -619,6 +624,8 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
         NSLayoutConstraint.activate([
             playTitle.topAnchor.constraint(equalTo: playCard.contentView!.topAnchor, constant: 16),
             playTitle.leadingAnchor.constraint(equalTo: playCard.contentView!.leadingAnchor, constant: 16),
+            homePlaySubtitle.topAnchor.constraint(equalTo: playTitle.bottomAnchor, constant: 2),
+            homePlaySubtitle.leadingAnchor.constraint(equalTo: playTitle.leadingAnchor),
             playCard.heightAnchor.constraint(greaterThanOrEqualToConstant: 240)
         ])
         let openControllersButton = headerIconButton("list.bullet", label: "Open Controllers", action: #selector(showControllers))
