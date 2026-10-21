@@ -214,6 +214,11 @@ extension SetupController {
             let popup = NSPopUpButton(frame: .zero, pullsDown: true)
             popup.addItem(withTitle: "")
             popup.item(at: 0)?.image = NSImage(systemSymbolName: "ellipsis", accessibilityDescription: "More options")
+            let open = NSMenuItem(title: "Open", action: #selector(openAppFromMenu(_:)), keyEquivalent: "")
+            open.target = self
+            open.tag = index
+            open.image = NSImage(systemSymbolName: "play.fill", accessibilityDescription: nil)
+            popup.menu?.addItem(open)
             let update = NSMenuItem(title: "Update", action: #selector(updateAppFromMenu(_:)), keyEquivalent: "")
             update.target = self
             update.tag = index
@@ -243,6 +248,21 @@ extension SetupController {
         control.heightAnchor.constraint(greaterThanOrEqualToConstant: 26).isActive = true
         actions.append(control)
         return control
+    }
+
+    @objc func openAppManagementSettings() {
+        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AppBundles") {
+            NSWorkspace.shared.open(url)
+        }
+    }
+
+    @objc func openAppFromMenu(_ sender: NSMenuItem) {
+        guard appStates.indices.contains(sender.tag), !appStates[sender.tag].path.isEmpty else { return }
+        let app = appStates[sender.tag]
+        NSWorkspace.shared.openApplication(at: URL(fileURLWithPath: app.path), configuration: NSWorkspace.OpenConfiguration()) { _, error in
+            guard let error else { return }
+            DispatchQueue.main.async { self.appsStatus.stringValue = "Couldn't open \(app.name): \(error.localizedDescription)" }
+        }
     }
 
     @objc func removeAppFromMenu(_ sender: NSMenuItem) {
@@ -762,14 +782,15 @@ extension SetupController {
             }
             return
         }
-        let alert = NSAlert()
-        alert.messageText = app.installed ? "Remove \(app.name)?" : "Install \(app.name)?"
-        alert.informativeText = app.installed
-            ? "Quit \(app.name) first. The app will be removed. Game libraries, saves and preferences are kept. To remove another app, select it separately."
-            : "Homebrew will install this app on this Mac. It won't install games or sign in to accounts."
-        alert.addButton(withTitle: app.installed ? "Remove app" : "Install app")
-        alert.addButton(withTitle: "Cancel")
-        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        // Get installs right away (it's what the button says); only removing asks first.
+        if app.installed {
+            let alert = NSAlert()
+            alert.messageText = "Remove \(app.name)?"
+            alert.informativeText = "Your games, saves and settings are kept."
+            alert.addButton(withTitle: "Remove")
+            alert.addButton(withTitle: "Cancel")
+            guard alert.runModal() == .alertFirstButtonReturn else { return }
+        }
         if app.installed && !app.managed {
             NSWorkspace.shared.recycle([URL(fileURLWithPath: app.path)]) { _, error in
                 DispatchQueue.main.async {
@@ -789,12 +810,7 @@ extension SetupController {
             appsStatus.stringValue = "Quit \(app.name) before updating."
             return
         }
-        let alert = NSAlert()
-        alert.messageText = "Update \(app.name)?"
-        alert.informativeText = "Quit the app first. Homebrew will download and install the update."
-        alert.addButton(withTitle: "Update")
-        alert.addButton(withTitle: "Cancel")
-        if alert.runModal() == .alertFirstButtonReturn { manage(app, action: "update") }
+        manage(app, action: "update")
     }
 
     func manage(_ app: ManagedApp, action: String) {
@@ -847,6 +863,7 @@ extension SetupController {
             let name = verified?.name ?? self.appStates.first { $0.id == id }?.name ?? id
             if succeeded && reached {
                 self.appOperations[id] = nil
+                self.appManagementHint.isHidden = true
             } else {
                 let verb = action == "remove" ? "remove" : action == "update" ? "update" : "install"
                 self.appOperations[id] = AppOperation(action: action, phase: nil,
@@ -854,6 +871,7 @@ extension SetupController {
                 self.appsStatus.stringValue = verified == nil
                     ? "Couldn't check \(name) after the \(verb). Reopen App Store to check again."
                     : "Couldn't \(verb) \(name). Try again, or choose View > Activity for details."
+                self.appManagementHint.isHidden = verified == nil
             }
             // Any full app check still in flight predates this verified state.
             self.appsLoadGeneration += 1

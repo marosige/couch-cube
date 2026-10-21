@@ -153,6 +153,10 @@ Additional rows appear only for setup problems, missing game apps or status erro
 App categories and settings retain distinct rounded native NSBox groups with
 system colors and subtle separators in both appearances.
 App Store rows show the app name, Installed/Not installed (green / gray dot; red only for a failure) and a short purpose;
+Get and Update start at once (no confirmation); only Remove asks. The … menu has Open, Update and Remove….
+When Homebrew needs administrator rights (Steam's updater, for example) macOS's password dialog appears
+through a `SUDO_ASKPASS` helper (`scripts/askpass.sh`); Couch Cube never stores the password. After a
+failed operation a hint links to Privacy & Security › App Management, which macOS may require.
 the full list appears immediately during app checks, with pulsing blue status dots.
 Previously checked statuses remain visible; unknown statuses show Checking.
 Consoles also shows its full list immediately, with pulsing blue emulator dots

@@ -2,6 +2,7 @@
 """Read-only DMG/app verification; never runs setup or erase."""
 from pathlib import Path
 import json
+import os
 import plistlib
 import subprocess
 import sys
@@ -57,6 +58,7 @@ def verify_app(app, working_directory, distribution="local"):
     assert (resources / "scripts/shop.py").is_file()
     assert (resources / "scripts/wishlist.py").is_file()
     assert (resources / "scripts/rates.py").is_file()
+    assert os.access(resources / "scripts/askpass.sh", os.X_OK)
     assert (resources / "config/release.json").is_file()
     assert (resources / "config/bios-map.csv").is_file()
     assert (resources / "Install Homebrew.command").is_file()

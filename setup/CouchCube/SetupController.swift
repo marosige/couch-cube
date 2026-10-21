@@ -179,6 +179,8 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
     var homeObservedConnections = Set<String>()
     let homePlayBackground = NSView()
     let launcherSections = NSStackView()
+    /// Shown after an app operation fails: macOS's App Management permission is the usual cause.
+    let appManagementHint = NSStackView()
     let launcherSearch = NSSearchField()
     static let launcherAppsKey = "launcherApps"
     static let windowsClientIcons = ["win-steam": "steam", "win-epic": "epic-games", "win-gog": "gog-galaxy",
@@ -653,8 +655,17 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
         }
         helperButton = button("Install Homebrew...", #selector(homebrew))
         helperAdvice.textColor = .secondaryLabelColor
+        let appManagementText = text("macOS may block Couch Cube from updating or removing apps. Turn on Couch Cube in Privacy & Security \u{203A} App Management, then try again.", size: 12, secondary: true)
+        appManagementHint.addArrangedSubview(appManagementText)
+        appManagementHint.addArrangedSubview(button("Open App Management", #selector(openAppManagementSettings)))
+        appManagementHint.orientation = .vertical
+        appManagementHint.alignment = .leading
+        appManagementHint.spacing = 6
+        appManagementHint.isHidden = true
+        appManagementHint.setAccessibilityIdentifier("appManagementHint")
         let apps = column([
             row([appsStatus, updateAllButton]),
+            appManagementHint,
             appCategoryCard("TV menus", rows: appMenuRows),
             appCategoryCard("PC games", rows: appPCRows),
             appCategoryCard("Windows games", rows: appWindowsRows),
