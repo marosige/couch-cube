@@ -55,10 +55,13 @@ func steamHeaderArtwork(appid: String, steamRoot: URL = FileManager.default.home
     return nil
 }
 
-/// Lays out equally sized tiles left to right, wrapping into rows; its height follows the width it gets.
+/// Lays out equally sized tiles in rows that fill the available width; its height follows that width.
+/// Tiles keep Steam's header-art proportions (460 × 215) plus room for two lines of text.
 final class TileFlowView: NSView {
-    var tileSize = NSSize(width: 184, height: 128)
+    var minimumTileWidth: CGFloat = 168
     var spacing: CGFloat = 16
+    static let artRatio: CGFloat = 215.0 / 460.0
+    static let textHeight: CGFloat = 42
     override var isFlipped: Bool { true }
 
     func setTiles(_ tiles: [NSView]) {
@@ -71,12 +74,14 @@ final class TileFlowView: NSView {
         invalidateIntrinsicContentSize()
     }
 
-    private var columns: Int { max(1, Int((bounds.width + spacing) / (tileSize.width + spacing))) }
+    private var columns: Int { max(1, Int((bounds.width + spacing) / (minimumTileWidth + spacing))) }
+    private var tileWidth: CGFloat { max(minimumTileWidth, (bounds.width - CGFloat(columns - 1) * spacing) / CGFloat(columns)) }
+    private var tileHeight: CGFloat { (tileWidth * Self.artRatio).rounded() + Self.textHeight }
 
     override var intrinsicContentSize: NSSize {
         let rows = (subviews.count + columns - 1) / columns
         return NSSize(width: NSView.noIntrinsicMetric,
-                      height: rows == 0 ? 0 : CGFloat(rows) * tileSize.height + CGFloat(rows - 1) * spacing)
+                      height: rows == 0 ? 0 : CGFloat(rows) * tileHeight + CGFloat(rows - 1) * spacing)
     }
 
     override func setFrameSize(_ newSize: NSSize) {
@@ -88,9 +93,9 @@ final class TileFlowView: NSView {
     override func layout() {
         super.layout()
         for (index, tile) in subviews.enumerated() {
-            tile.frame = NSRect(x: CGFloat(index % columns) * (tileSize.width + spacing),
-                                y: CGFloat(index / columns) * (tileSize.height + spacing),
-                                width: tileSize.width, height: tileSize.height)
+            tile.frame = NSRect(x: CGFloat(index % columns) * (tileWidth + spacing),
+                                y: CGFloat(index / columns) * (tileHeight + spacing),
+                                width: tileWidth, height: tileHeight)
         }
     }
 }
@@ -99,7 +104,7 @@ final class TileFlowView: NSView {
 final class LauncherTile: ClickableRowView {
     let item: LauncherItem
 
-    init(item: LauncherItem, artHeight: CGFloat) {
+    init(item: LauncherItem) {
         self.item = item
         super.init(frame: .zero)
         layer?.cornerRadius = 10
@@ -143,7 +148,7 @@ final class LauncherTile: ClickableRowView {
             plate.topAnchor.constraint(equalTo: topAnchor),
             plate.leadingAnchor.constraint(equalTo: leadingAnchor),
             plate.trailingAnchor.constraint(equalTo: trailingAnchor),
-            plate.heightAnchor.constraint(equalToConstant: artHeight),
+            plate.heightAnchor.constraint(equalTo: plate.widthAnchor, multiplier: TileFlowView.artRatio),
             title.topAnchor.constraint(equalTo: plate.bottomAnchor, constant: 6),
             title.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 2),
             title.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -2),

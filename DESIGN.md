@@ -186,9 +186,14 @@ is no deployment workflow. `docs/CNAME` keeps the custom domain `couchcube.maros
 `docs/icon.png` is a copy of `assets/icon-512.png`, so update both together. Downloads
 fall back to Releases when a release asset is unavailable or GitHub's API cannot be reached.
 
-**One window, no wizard.** Home uses a Discover-style layout: a full-width illustrated
-slim header showing only the bottom of a centered 16:9 TV, without text, then
-Play and controller tiles side by side.
+**One window, no wizard.** Home (Play) shows the Play and controller tiles side by side,
+then **Games**: the launcher. It lists, in this order, installed Steam games (header art read
+from Steam's local `appcache/librarycache`, never downloaded; Steam tools and runtimes are
+hidden), Windows launchers found in CrossOver/Whisky bottles, Mac launchers, retro front-ends
+and emulators from App Store, and apps added with **+** (saved per user in UserDefaults
+`launcherApps`). Tiles fill the width in a flow grid with Steam header proportions; click,
+Return or VoiceOver opens them (Steam games via `steam://rungameid/<id>`), and their menu offers
+Open, Show in Finder and, for added apps, Remove from Play. The search field filters by name.
 The Play tile uses a bundled Steam Big Picture image or EmulationStation artwork
 matching the chosen TV menu, with only the Play title over the image. The entire
 tile launches the menu; image sources are recorded in `assets/tv-menus/sources.json`.

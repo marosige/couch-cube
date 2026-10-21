@@ -110,7 +110,7 @@ extension SetupController {
             title.font = .systemFont(ofSize: 15, weight: .semibold)
             let flow = TileFlowView()
             flow.setTiles(group.map { item in
-                let tile = LauncherTile(item: item, artHeight: 86)
+                let tile = LauncherTile(item: item)
                 tile.identifier = NSUserInterfaceItemIdentifier("launcher-" + item.id)
                 tile.menu = launcherMenu(for: item)
                 return tile
