@@ -271,8 +271,8 @@ or automatic console mode still points to the old library. It never empties Tras
 An interrupted transfer keeps the source and reports any staging/destination
 folder to inspect before retrying; it does not silently delete partial files.
 App Store manages software; Retro consoles manages visible systems and BIOS checks.
-In Retro consoles, the All consoles, manufacturer and Nintendo family headings have a switch that
-shows or hides every console beneath them in one batch (a mixed group shows "3 of 7"); showing
+In Retro consoles, each manufacturer card (Nintendo, PlayStation, SEGA) has one switch that
+shows or hides every console on it in one batch (a mixed group shows "3 of 7"); showing
 consoles never installs emulators.
 Game library shows where your games live and each drive's games, with a Steam setup guide.
 Console Mode holds the default TV menu, automatic launch and optional macOS login
@@ -412,9 +412,8 @@ Console switches respond instantly and can be flipped one after another without
 waiting: the list is updated in place, and the latest choices are saved in the
 background shortly after you stop. If saving fails, the switches return to the
 last saved selection and the error is shown.
-Switches at the top of the page (All consoles), on each company card (Nintendo, PlayStation,
-SEGA) and on the Nintendo Home consoles/Handhelds subsections show or hide every console
-beneath them at once. A group switch is on only when all its consoles are shown; a mixed
+One switch on each company card (Nintendo, PlayStation, SEGA) shows or hides every console
+on that card at once; Nintendo's Home consoles/Handhelds are plain headings. A group switch is on only when all its consoles are shown; a mixed
 group is off with an "N of M" count, and switching it shows all. Group switches use the same
 instant in-place update and a single batched background save (failures revert them too), and
 showing consoles never installs anything.

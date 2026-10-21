@@ -77,9 +77,6 @@ extension SetupController {
         func ids(_ groups: [String]) -> Set<String> {
             Set(ConsoleArtwork.groups.filter { groups.contains($0.title) }.flatMap(\.systems)).intersection(present)
         }
-        let allRow = consoleBulkRow("All consoles", scope: "all consoles", ids: present, size: 13)
-        consoleRows.addArrangedSubview(allRow)
-        allRow.widthAnchor.constraint(equalTo: consoleRows.widthAnchor).isActive = true
         let order = ConsoleArtwork.groups.flatMap { $0.systems }
         consoleSystems.sort {
             (order.firstIndex(of: $0.id) ?? 100) < (order.firstIndex(of: $1.id) ?? 100)
@@ -105,7 +102,8 @@ extension SetupController {
             if group != previousGroup {
                 if manufacturer == "Nintendo" {
                     let title = group == "Nintendo home consoles" ? "Home consoles" : "Handhelds"
-                    let heading = consoleBulkRow(title, scope: "Nintendo " + title.lowercased(), ids: ids([group]), size: 12)
+                    let heading = text(title, size: 12, secondary: true)
+                    heading.font = .systemFont(ofSize: 12, weight: .semibold)
                     let container = NSView()
                     heading.translatesAutoresizingMaskIntoConstraints = false
                     container.addSubview(heading)
