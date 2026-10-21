@@ -3077,7 +3077,7 @@ extension SetupController {
         let openedBeforeRow = opened().count
         click(dealTitle, expecting: dealRowView)
         precondition(opened().count == openedBeforeRow && currentPage == 14 && screenTitle.stringValue == "Portal 2", "Clicking the row opens its game page")
-        let pageText = labels(shopDetailContent).joined(separator: " ")
+        let pageText = labels(shopDetailContent).joined(separator: " ").replacingOccurrences(of: "\u{00A0}", with: " ")
         precondition(pageText.contains("Steam 98%") && pageText.contains("Metacritic 95") && pageText.contains("Installed"),
                      "Ratings live on the game page: \(pageText)")
         navigateHistory(-1)
