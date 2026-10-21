@@ -181,6 +181,7 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
     let launcherSections = NSStackView()
     /// Shown after an app operation fails: macOS's App Management permission is the usual cause.
     let appManagementHint = NSStackView()
+    var systemStoreLinks: [NSButton] = []
     let launcherSearch = NSSearchField()
     static let launcherAppsKey = "launcherApps"
     static let windowsClientIcons = ["win-steam": "steam", "win-epic": "epic-games", "win-gog": "gog-galaxy",

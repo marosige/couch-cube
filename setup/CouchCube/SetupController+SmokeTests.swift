@@ -1446,6 +1446,8 @@ extension SetupController {
                         precondition(actions(self.consoleRows).contains(#selector(self.showEmulatorInAppStore(_:))) &&
                                      !actions(self.tabs.tabViewItems[7].view!).contains(#selector(self.showPlayers)),
                                      "Console rows link to App Store; the page has no bottom App Store button")
+                        precondition(self.systemStoreLinks.count == 1 && self.systemStoreLinks[0].isHidden,
+                                     "An installed emulator needs no store shortcut in its row; Details keeps it")
                         self.closeInspector()
                         self.appsChecking = false
                         self.renderApps()
