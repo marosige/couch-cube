@@ -122,6 +122,7 @@ extension SetupController {
         let compat = compatibilityBadge(compatibility(steamAppId: detail.steamAppId, appStore: detail.appStoreId != nil && detail.gameId == nil))
         if let compat { badges.append(compat.badge); tips.append(compat.tip) }
         if detail.installed { badges.append(("checkmark.circle.fill", "Installed", .systemGreen)) }
+        if let owned = ownedBadge(detail.steamAppId, installed: detail.installed) { badges.append(owned) }
         if let percent = detail.ratings.steamPercent {
             badges.append(("hand.thumbsup.fill", "Steam \(percent)%", Self.ratingColor(Double(percent), good: 80, fair: 50)))
             tips.append("Steam reviews: " + (detail.ratings.steamText.map { "\($0) (\(percent)%)" } ?? "\(percent)%"))

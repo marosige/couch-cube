@@ -268,6 +268,17 @@ struct WishlistItem: Decodable, Equatable {
     var insight: PriceInsight? = nil
 }
 
+/// `steam-link` / `steam-wishlist-sync`: the Mac Steam account (local files only), owned app IDs and the wishlist link.
+struct SteamLinkReply: Decodable, Equatable {
+    struct Account: Decodable, Equatable { let persona: String?; let account: String }
+    let account: Account?
+    let linked: Bool
+    let synced: Double?
+    let owned: [String]
+    var imported: Int? = nil
+    var error: String? = nil
+}
+
 struct WishlistReply: Decodable, Equatable {
     let items: [WishlistItem]
     let library: String?

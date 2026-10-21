@@ -27,7 +27,7 @@ PAGE_SIZE = 60
 # Fresh enough to reuse without asking: CheapShark refreshes prices about hourly and caches for 5–10 minutes.
 FRESH_SECONDS = {"deals": 10 * 60, "stores": 24 * 3600, "giveaways": 30 * 60, "search": 30 * 60, "games": 10 * 60,
                  "appstore": 6 * 3600, "rates": 12 * 3600, "platforms": 7 * 24 * 3600,
-                 "steamdetails": 7 * 24 * 3600}
+                 "steamdetails": 7 * 24 * 3600, "steamwishlist": 30 * 60, "steamapp": 7 * 24 * 3600}
 # A manual refresh inside this window reuses the cache, so repeated clicks never become repeated requests.
 REFRESH_FLOOR = 60
 SORTS = {"rating": "Deal Rating", "savings": "Savings", "price": "Price", "price-desc": "Price", "recent": "Recent",

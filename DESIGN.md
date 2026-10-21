@@ -72,7 +72,15 @@ clearing the field goes back. Rate source, attribution and store-filter details 
 - **Picks** on Home are made locally from discount, ratings, recency and your wishlist. Nothing about
   you is sent anywhere.
 - **Deals rows** show an Installed badge when a deal's Steam app ID matches a game installed in
-  a Steam library on this Mac.
+  a Steam library on this Mac, and an Owned badge (every Shop list and the game page) when the
+  Mac Steam account has the game: app IDs from Steam's own `userdata/<account>/config/localconfig.vdf`
+  (keys only) plus installed manifests.
+- **Steam wishlist** (App Settings › Cube Shop, a switch): no sign-in in Couch Cube. The account's
+  public SteamID comes from `loginusers.vdf`; when linked, opening Cube Shop asks Steam's keyless Web API
+  (`api.steampowered.com`, `IWishlistService/GetWishlist`) for the public wishlist and adds new games
+  (looked up on CheapShark by Steam app ID, 25 per open) to the Cube Shop wishlist. One way: a game
+  removed here is remembered (`steam-link.json`) and never re-added. A private wishlist reads as empty
+  with a hint to make Game details public.
 - **Expiry and Reminders.** Only GamerPower provides end dates (`end_date`, read as UTC because
   the API doesn't state a time zone; "N/A" means no badge). CheapShark has none, so store deals
   never show one (a source limit; nothing is guessed from sale start dates or price history). The
@@ -233,12 +241,11 @@ dots instead, one per severity: a red dot counts required tasks and a yellow dot
 counts recommended ones, so a page with both shows two dots with their own numbers.
 Hover a dot for the task list grouped by severity. Dots update in place: titles
 and icons keep their position whether a row shows none, one or two dots.
-**App Settings → Guided setup** (on by default) keeps the sidebar simple: only one
+Guided setup (always on, no setting) keeps the sidebar simple: only one
 page is marked at a time, in order Game library (storage first), App Store, Console Mode, Retro
 consoles, Controllers, App Settings. That page's dots include all its
 tasks, setup and maintenance alike (red and yellow counts can both show); the next page is marked once it is done. Every
-page stays freely reachable, and warnings inside pages are unchanged. Turn Guided
-setup off to see every page's dots at once. Guided markers appear only after the
+page stays freely reachable, and warnings inside pages are unchanged. Guided markers appear only after the
 startup checks finish, and the shown step stays put until its tasks are done; later
 results never make the marker jump to another page.
 Play is unavailable until storage and the selected TV menu are ready.
@@ -305,7 +312,7 @@ nothing, open Couch Cube in its window (a macOS Login Item via SMAppService), or
 a controller is on and no keyboard or mouse is connected (the LaunchAgent, with its wait in seconds).
 **3 On the TV** — Steam Big Picture, ES-DE (a missing one leads to App Store) or Cube TV Home
 (Couch Cube's own, shown as coming soon). The Play tile is titled **Cube TV**, with the chosen menu beneath. Game library also sets up and switches the drive; App Settings groups app updates,
-app location, installer copy, uninstall and gaming cleanup.
+app location, uninstall and gaming cleanup.
 Nothing is installed or erased until you confirm it. Storage is checked on launch,
 explicit refresh, volume changes and returning Home, not whenever the app gains focus.
 Home keeps its last results during background refreshes. App Store and Retro

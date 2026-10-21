@@ -607,6 +607,88 @@ def wishlist_check(country="US", refresh=False):
             "errors": prices["errors"]}
 
 
+STEAM_LINK = APP_SUPPORT / "steam-link.json"
+
+
+def steam_library_tools():
+    spec = importlib.util.spec_from_file_location("console_steam_library", Path(__file__).with_name("steam_library.py"))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def steam_account():
+    """The Mac Steam client's most recent account (from loginusers.vdf), or None."""
+    tools = store_accounts_tools()
+    accounts = tools.steam_accounts(Path.home() / "Library/Application Support/Steam")
+    return next((item for item in accounts if item.get("steam_id")), None)
+
+
+def steam_link_status(change=None):
+    """Steam account, owned games and whether the Couch Cube wishlist takes in the Steam wishlist."""
+    tools = steam_library_tools()
+    account = steam_account()
+    link = tools.read_link(STEAM_LINK)
+    if change == "on":
+        if not account:
+            raise SetupError("Sign in to Steam on this Mac first, then try again.")
+        if link.get("steam_id") != account["steam_id"]:
+            link = {"steam_id": account["steam_id"], "seen": [], "synced": None}
+        tools.write_link(STEAM_LINK, link)
+    elif change == "off":
+        try:
+            STEAM_LINK.unlink()
+        except FileNotFoundError:
+            pass
+        link = {}
+    linked = bool(account and link.get("steam_id") == account["steam_id"])
+    owned = sorted(set(tools.owned_app_ids(Path.home() / "Library/Application Support/Steam", account["steam_id"]))
+                   | installed_steam_app_ids()) if account else sorted(installed_steam_app_ids())
+    return {"account": account and {"persona": account["persona"], "account": account["account"]},
+            "linked": linked, "synced": link.get("synced") if linked else None, "owned": owned}
+
+
+def steam_wishlist_sync(refresh=False):
+    """Adds new games from the public Steam wishlist to the Couch Cube wishlist (one way; removals here stick)."""
+    tools, wish = steam_library_tools(), wishlist_tools()
+    status = steam_link_status()
+    if not status["linked"]:
+        return {**status, "imported": 0, "error": None}
+    link = tools.read_link(STEAM_LINK)
+    try:
+        app_ids, error = tools.wishlist_app_ids(link["steam_id"], refresh)
+    except tools.deals.DealsError as exc:
+        return {**status, "imported": 0, "error": str(exc)}
+    path, library = wishlist_location()
+    if path is None:
+        return {**status, "imported": 0, "error": "Connect your Couch Cube drive to update the wishlist."}
+    try:
+        known = {item.get("steam_app_id") for item in wish.read(path)["items"]}
+    except wish.WishlistError as exc:
+        return {**status, "imported": 0, "error": str(exc)}
+    items, seen, lookup_error = tools.new_items(app_ids, set(link["seen"]), known,
+                                                lambda app_id: tools.game_for_app(app_id, refresh))
+    added = 0
+    if items:
+        def change(data):
+            nonlocal added
+            keys = {entry["key"] for entry in data["items"]}
+            for raw in items:
+                item = wish.normalize_item(raw)
+                if item and item["key"] not in keys:
+                    keys.add(item["key"])
+                    data["items"].append(item)
+                    added += 1
+        try:
+            wish.mirror(library, wish.update(path, change))
+        except wish.WishlistError as exc:
+            return {**status, "imported": 0, "error": str(exc)}
+    tools.write_link(STEAM_LINK, {"steam_id": link["steam_id"], "seen": link["seen"] + seen, "synced": time.time()})
+    if not app_ids and not error:
+        error = "No games found on your Steam wishlist. If it isn't empty, set Game details to Public in Steam's privacy settings."
+    return {**steam_link_status(), "imported": added, "error": error or lookup_error}
+
+
 def copy_bundle_contents(source, directory_fd):
     for entry in source.iterdir():
         mode = entry.lstat().st_mode
@@ -2523,6 +2605,10 @@ def main():
     platforms_parser.add_argument("--refresh", action="store_true")
     rates_parser = sub.add_parser("rates")
     rates_parser.add_argument("--refresh", action="store_true")
+    steam_link = sub.add_parser("steam-link")
+    steam_link.add_argument("--set", choices=["on", "off"])
+    steam_sync = sub.add_parser("steam-wishlist-sync")
+    steam_sync.add_argument("--refresh", action="store_true")
     wish = sub.add_parser("wishlist")
     wish_action = wish.add_mutually_exclusive_group()
     wish_action.add_argument("--add", metavar="JSON")
@@ -2667,6 +2753,10 @@ def main():
                 raise SetupError(str(exc)) from None
         elif args.command == "shop-game":
             print(json_text(shop_game(args.id, args.refresh)))
+        elif args.command == "steam-link":
+            print(json_text(steam_link_status(args.set)))
+        elif args.command == "steam-wishlist-sync":
+            print(json_text(steam_wishlist_sync(args.refresh)))
         elif args.command == "wishlist":
             if args.add:
                 try:

@@ -46,7 +46,7 @@ class LoginUsersTests(unittest.TestCase):
         self.assertEqual([a["account"] for a in accounts], ["main_acct", "older_acct"])
         self.assertEqual(accounts[0]["persona"], 'Couch "Pro"')
         self.assertTrue(accounts[0]["most_recent"])
-        self.assertEqual(set(accounts[0]), {"account", "persona", "most_recent"})
+        self.assertEqual(set(accounts[0]), {"account", "persona", "most_recent", "steam_id"})
 
     def test_without_most_recent_flag_newest_timestamp_wins(self):
         text = LOGINUSERS.replace('"MostRecent"\t\t"1"', '"MostRecent"\t\t"0"')

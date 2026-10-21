@@ -612,6 +612,7 @@ extension SetupController {
         let compat = compatibilityBadge(compatibility(steamAppId: deal.steamAppId))
         if let compat { badges.append(compat.badge); tips.append(compat.tip) }
         if deal.installed { badges.append(("checkmark.circle.fill", "Installed", .systemGreen)) }
+        if let owned = ownedBadge(deal.steamAppId, installed: deal.installed) { badges.append(owned) }
         let salePrice = shopPrice(deal.salePrice, "USD")
         let heart = wishlistHeart(key: deal.gameId.map { "cs:" + $0 } ?? "title:" + deal.title.lowercased(), title: deal.title,
                                   payload: ["title": deal.title, "game_id": deal.gameId ?? "", "steam_app_id": deal.steamAppId ?? "", "thumb": deal.thumb ?? ""])

@@ -118,6 +118,10 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
     var searchTimer: Timer?
     var wishlist: WishlistReply?
     var wishlistLoading = false, wishlistCheckedAt: Date?
+    var steamLink: SteamLinkReply?
+    var steamLinkBusy = false
+    let steamLinkSwitch = NSSwitch()
+    let steamLinkNote = NSTextField(labelWithString: "")
     var wishlistPayloads: [String: (title: String, payload: [String: String])] = [:]
     /// The currency a store row's price is in, for a target set before the game is on the wishlist (with Original prices).
     var shopTargetCurrencies: [String: String] = [:]
@@ -200,10 +204,8 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
     var sidebarAttention: [Int: NSColor] = [:]
     var sidebarTasks: [SidebarTask] = []
     var sidebarTaskCounts: [Int: SidebarBadge] = [:]
-    let guidedSetupKey = "guidedSetup"
-    lazy var guidedSetup: Bool = ProcessInfo.processInfo.arguments.contains("--smoke-test") ? true :
-        (UserDefaults.standard.object(forKey: guidedSetupKey) as? Bool ?? true)
-    let guidedSetupToggle = NSSwitch()
+    /// The sidebar marks one setup step at a time (no setting: it ends by itself once everything is done).
+    var guidedSetup = true
     var couchCubeUpdateAvailable = false
     var controllerInputUnavailable = false
     let inspectorRows = NSStackView()
@@ -877,11 +879,6 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
             card("3  On the TV", subtitle: "Which menu Play and the TV mode open.", views: [tvMenuChoices, tvMenuStatus])
         ]))
         renderConsoleMode()
-        guidedSetupToggle.state = guidedSetup ? .on : .off
-        guidedSetupToggle.controlSize = .small
-        guidedSetupToggle.target = self
-        guidedSetupToggle.action = #selector(guidedSetupChanged)
-        guidedSetupToggle.setAccessibilityLabel("Guided setup")
         addPage("App Settings", content: column([
             card("App Settings", subtitle: nil, views: [
                 settingsRow("App updates", subtitle: "Check for a new version of Couch Cube.",
@@ -889,14 +886,8 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
                             trailing: row([button("Check...", #selector(checkUpdates)), updateButton]),
                             detail: updateStatus),
                 separator(),
-                settingsRow("Guided setup", subtitle: "One step at a time in the sidebar.",
-                            symbol: "checklist", color: .systemBlue, trailing: guidedSetupToggle),
-                separator(),
                 settingsRow("App location", subtitle: "Find this copy of Couch Cube.", symbol: "folder",
                             color: .systemGray, trailing: button("Show in Finder", #selector(revealApp))),
-                separator(),
-                settingsRow("Installer copy", subtitle: "Keep the installer on your game drive.", symbol: "square.and.arrow.down",
-                            color: .systemOrange, trailing: button("Copy installer...", #selector(copyDMG))),
                 separator(),
                 settingsRow("Remove Couch Cube", subtitle: "Your games, saves and other apps are kept.", symbol: "trash",
                             color: .systemGray, trailing: button("Uninstall...", #selector(uninstallCouchCube))),

@@ -41,7 +41,7 @@ def _unquote(lexeme):
 def parse_loginusers(text):
     """Accounts from Steam's loginusers.vdf, keeping only allowed non-secret keys.
 
-    Returns [{"persona", "account", "most_recent"}], most recent first. Malformed input returns []."""
+    Returns [{"persona", "account", "most_recent", "steam_id"}], most recent first. Malformed input returns []."""
     lexemes, offset = [], 0
     while offset < len(text):
         match = _LEXEME.match(text, offset)
@@ -58,7 +58,8 @@ def parse_loginusers(text):
                 return []
             path.append(key)
             if len(path) == 2 and path[0].lower() == "users":
-                current = {}
+                # The block's own key is the account's public SteamID64 (used for its public wishlist).
+                current = {"steam_id": key} if re.fullmatch(r"7656\d{13}", key) else {}
             key = None
         elif lexeme == "}":
             if not path or key is not None:
@@ -85,7 +86,7 @@ def parse_loginusers(text):
         except ValueError:
             stamp = 0
         accounts.append({"persona": user.get("personaname", "").strip() or None, "account": account,
-                         "most_recent": user.get("mostrecent") == "1", "timestamp": stamp})
+                         "most_recent": user.get("mostrecent") == "1", "timestamp": stamp, "steam_id": user.get("steam_id")})
     accounts.sort(key=lambda item: (not item["most_recent"], -item["timestamp"]))
     if accounts and not any(item["most_recent"] for item in accounts):
         accounts[0]["most_recent"] = True

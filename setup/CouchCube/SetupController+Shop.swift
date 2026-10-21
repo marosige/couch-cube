@@ -135,7 +135,7 @@ extension SetupController {
         dealsOpened = true
         shopTab.selectedSegment = 0
         loadRates(refresh: false)
-        if wishlistCheckedAt.map({ Date().timeIntervalSince($0) > 600 }) ?? true { checkWishlist(refresh: false) }
+        if wishlistCheckedAt.map({ Date().timeIntervalSince($0) > 600 }) ?? true { syncSteamWishlist() }
         shopTabChanged()
     }
 
@@ -343,6 +343,8 @@ extension SetupController {
             separator(),
             settingsRow("Add card/FX fee", subtitle: "Your card's fee, added to converted prices.", symbol: "percent",
                         color: .systemOrange, trailing: row([shopFeeField, text("%", size: 12)]), detail: nil),
+            separator(),
+            steamLinkRow(),
             shopRatesNote
         ])
     }
@@ -571,6 +573,7 @@ extension SetupController {
         var badges: [(symbol: String?, text: String, color: NSColor)] = []
         let compat = compatibilityBadge(compatibility(steamAppId: game.steamAppId, appStore: game.appStoreOffer != nil))
         if let compat { badges.append(compat.badge) }
+        if let owned = ownedBadge(game.steamAppId) { badges.append(owned) }
         if offers.count > 1 { badges.append((nil, "\(offers.count) stores", .secondaryLabelColor)) }
         let was = best.flatMap { item in item.offer.normalPrice.flatMap { $0 > item.offer.price ? shopPrice($0, item.offer.currency).text : nil } }
         let normal = game.offers.compactMap(\.normalPrice).max()
@@ -948,6 +951,7 @@ extension SetupController {
                             : "Target price: \(amount). Can't compare with \(item.best!.currency) prices until exchange rates load.")
             }
         }
+        if let owned = ownedBadge(item.steamAppId) { badges.append(owned) }
         if badges.isEmpty { badges.append((nil, item.best == nil ? "No price checked yet" : "Not on sale", .secondaryLabelColor)) }
         if let compat = compatibilityBadge(compatibility(steamAppId: item.steamAppId, appStore: item.appStoreId != nil)) {
             badges.append(compat.badge)
@@ -1113,6 +1117,9 @@ extension SetupController {
                 smokeWishlist[index]["target_currency"] = price == nil ? NSNull() : (value("--currency") ?? "USD")
             }
             return (0, json(report()))
+        case "steam-link", "steam-wishlist-sync":
+            return (0, json(["account": ["persona": "Gamer", "account": "gamer1"], "linked": arguments.contains("on"),
+                             "synced": NSNull(), "owned": [String](), "imported": 0, "error": NSNull()]))
         default: return (1, "ERROR: unknown command")
         }
     }
@@ -1122,5 +1129,78 @@ extension SetupController {
     @objc func loadMoreDeals() {
         guard dealsMode.selectedSegment == 0, storeDealsHasMore else { return }
         loadDeals(page: storeDealsPage + 1, refresh: false)
+    }
+}
+
+extension SetupController {
+    /// Steam on this Mac links without signing in here: the account comes from Steam's own files and its public wishlist
+    /// is merged into the Cube Shop wishlist (one way). Owned games get a badge in every Shop list.
+    func steamLinkRow() -> NSView {
+        steamLinkSwitch.controlSize = .small
+        steamLinkSwitch.target = self
+        steamLinkSwitch.action = #selector(steamLinkChanged)
+        steamLinkSwitch.setAccessibilityLabel("Add my Steam wishlist")
+        shopStatusLabel(steamLinkNote)
+        steamLinkNote.setAccessibilityIdentifier("steamLinkNote")
+        renderSteamLink()
+        loadSteamLink()
+        return settingsRow("Steam wishlist", subtitle: "Games on your Steam wishlist show up here too.", symbol: "heart.circle",
+                           color: .systemPink, trailing: steamLinkSwitch, detail: steamLinkNote)
+    }
+
+    func loadSteamLink(_ arguments: [String] = ["steam-link"], then: (() -> Void)? = nil) {
+        steamLinkBusy = true
+        renderSteamLink()
+        shopRead(arguments) { [weak self] code, data, errors in
+            guard let self else { return }
+            self.steamLinkBusy = false
+            if code == 0, let reply = decodeDeals(SteamLinkReply.self, data) {
+                let ownedChanged = reply.owned != self.steamLink?.owned
+                self.steamLink = reply
+                if ownedChanged { self.rerenderShop() }
+            } else if arguments.count > 1 {
+                self.steamLinkNote.stringValue = self.dealsErrorText(String(decoding: data, as: UTF8.self) + errors)
+            }
+            self.renderSteamLink(keepNote: code != 0)
+            then?()
+        }
+    }
+
+    func renderSteamLink(keepNote: Bool = false) {
+        let link = steamLink
+        steamLinkSwitch.state = link?.linked == true ? .on : .off
+        steamLinkSwitch.isEnabled = !steamLinkBusy && link?.account != nil
+        guard !keepNote else { return }
+        if steamLinkBusy && link == nil {
+            steamLinkNote.stringValue = ""
+        } else if let error = link?.error, link?.linked == true {
+            steamLinkNote.stringValue = error
+        } else if let account = link?.account {
+            let name = account.persona ?? account.account
+            var note = link?.linked == true ? "Linked to \(name)." : "Steam account: \(name)."
+            if let imported = link?.imported, imported > 0 { note += " Added \(imported) game\(imported == 1 ? "" : "s")." }
+            steamLinkNote.stringValue = note
+        } else {
+            steamLinkNote.stringValue = link == nil ? "" : "Sign in to Steam on this Mac to link it."
+        }
+    }
+
+    @objc func steamLinkChanged() {
+        let on = steamLinkSwitch.state == .on
+        loadSteamLink(["steam-link", "--set", on ? "on" : "off"]) { [weak self] in
+            if on { self?.syncSteamWishlist() }
+        }
+    }
+
+    /// Takes in new Steam wishlist games (when linked), then checks wishlist prices as before.
+    func syncSteamWishlist() {
+        guard steamLink?.linked == true else { checkWishlist(refresh: false); return }
+        loadSteamLink(["steam-wishlist-sync"]) { [weak self] in self?.checkWishlist(refresh: false) }
+    }
+
+    /// "Owned" for a Steam game this Mac's Steam account has (and isn't installed, which has its own badge).
+    func ownedBadge(_ steamAppId: String?, installed: Bool = false) -> (symbol: String?, text: String, color: NSColor)? {
+        guard !installed, let id = steamAppId, steamLink?.owned.contains(id) == true else { return nil }
+        return ("bag.fill", "Owned", .systemBlue)
     }
 }

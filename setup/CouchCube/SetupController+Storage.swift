@@ -1096,26 +1096,6 @@ extension SetupController {
         }
     }
 
-    @objc func copyDMG() {
-        guard let drive = selected else { return }
-        let panel = NSOpenPanel()
-        panel.title = "Select a release DMG to keep as a backup"
-        panel.allowedContentTypes = [UTType(filenameExtension: "dmg")!]
-        guard panel.runModal() == .OK, let source = panel.url else {
-            status.stringValue = "No installer selected; nothing copied or downloaded."
-            return
-        }
-        let alert = NSAlert()
-        alert.messageText = "Keep a release copy on this drive?"
-        alert.informativeText = "\(source.path)\n\nDestination: \(drive.root)/Installer/\n\nNo automatic download. Existing copies are not overwritten. Formatting this drive later also erases this installer. Host dependencies are still required on another Mac."
-        alert.addButton(withTitle: "Copy")
-        alert.addButton(withTitle: "Cancel")
-        guard alert.runModal() == .alertFirstButtonReturn else { return }
-        execute(["copy-installer", "--drive", drive.id, "--source", source.path, "--confirm"]) { code, _ in
-            self.status.stringValue = code == 0 ? "Verified installer copied to Installer." : "Installer not copied. See details."
-        }
-    }
-
     @objc func copyAppToSSD() {
         guard let drive = selected, drive.mode == "portable", task == nil else {
             status.stringValue = "Choose an external SSD first."

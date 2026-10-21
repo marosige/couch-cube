@@ -131,15 +131,6 @@ extension SetupController {
         }
     }
 
-    @objc func guidedSetupChanged() {
-        guidedSetup = guidedSetupToggle.state == .on
-        guidedPinnedPage = nil
-        if !ProcessInfo.processInfo.arguments.contains("--smoke-test") {
-            UserDefaults.standard.set(guidedSetup, forKey: guidedSetupKey)
-        }
-        renderGeneral()
-    }
-
     func installedAppCount(_ ids: Set<String>) -> Int {
         if let report = report { return ids.subtracting(report.missing).count }
         return appStates.filter { ids.contains($0.id) && $0.installed }.count
