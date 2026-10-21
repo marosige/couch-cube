@@ -59,3 +59,10 @@ let smokeRatesJSON = """
 {"base":"EUR","date":"2026-10-16","rates":{"EUR":"1","USD":"1.1253","HUF":"363.08","GBP":"0.84385"},"fetched":1700000000,"stale":false,
  "note":"ECB reference rate via Frankfurter, updated 2026-10-16; Revolut/bank rates may differ slightly."}
 """
+let smokeSteamDetailsJSON = """
+{"app_id":"620","found":true,"description":"The Perpetual Testing Initiative has been expanded to allow you to design co-op puzzles.",
+ "genres":["Action","Adventure"],"developers":["Valve"],"release":"18 Apr, 2011",
+ "screenshots":["https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/620/ss_1.jpg",
+                "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/620/ss_2.jpg"],
+ "storage_bytes":8589934592,"controller":"full","couch":["Shared/Split Screen Co-op"],"error":null}
+"""

@@ -2799,6 +2799,8 @@ extension SetupController {
         // Search → wishlist with real clicks while the search field is editing: the heart must survive and toggle.
         // Real mouse events through the window, like a user's click: hit testing, responder chain and button tracking.
         func click(_ view: NSView, expecting target: NSView? = nil) {
+            // A freshly rebuilt view has no frame until layout; scrolling to it before that would aim at the top.
+            window.contentView!.layoutSubtreeIfNeeded()
             view.scrollToVisible(view.bounds)
             window.contentView!.layoutSubtreeIfNeeded()
             let point = view.convert(NSPoint(x: view.bounds.midX, y: view.bounds.midY), to: nil)
@@ -3084,6 +3086,35 @@ extension SetupController {
         let pageText = labels(shopDetailContent).joined(separator: " ").replacingOccurrences(of: "\u{00A0}", with: " ")
         precondition(pageText.contains("Steam 98%") && pageText.contains("Metacritic 95") && pageText.contains("Installed"),
                      "Ratings live on the game page: \(pageText)")
+        // Steam's facts: the gallery (cover, then screenshots) with arrows, the About card and YouTube.
+        spin()
+        precondition(calls("shop-steam").last == ["shop-steam", "--app", "620"] && shopGalleryImages.count == 3,
+                     "Cover plus two screenshots: \(shopGalleryImages)")
+        precondition(shopGalleryPrevious?.isEnabled == false && shopGalleryNext?.isEnabled == true &&
+                     shopGalleryCounter?.stringValue.trimmingCharacters(in: .whitespaces) == "1 / 3", "The gallery starts on the cover")
+        shopGalleryNext!.performClick(nil)
+        shopGalleryNext!.performClick(nil)
+        precondition(shopGalleryIndex == 2 && shopGalleryNext?.isEnabled == false && shopGalleryPrevious?.isEnabled == true &&
+                     shopGalleryView?.source?.absoluteString.hasSuffix("ss_2.jpg") == true, "Arrows step through the screenshots")
+        let about = labels(shopDetailContent).joined(separator: " ")
+        precondition(about.contains("Full controller support") && about.contains("Split Screen Co-op") && about.contains("Valve") &&
+                     about.contains("GB"), "The About card: \(about)")
+        let videosBefore = opened().count
+        views(shopDetailContent).compactMap { $0 as? NSButton }.first { $0.accessibilityIdentifier() == "shopGameVideos" }!.performClick(nil)
+        precondition(opened().count == videosBefore + 1 && opened().last!.host == "www.youtube.com" &&
+                     opened().last!.absoluteString.contains("search_query=Portal%202%20gameplay"), "\(opened().last!)")
+        // The page's heart changes the wishlist and shows its new state at once.
+        let pageHeart = { views(self.shopDetailContent).compactMap { $0 as? NSButton }.first { $0.accessibilityIdentifier() == "wishlistHeart" }! }
+        let heartWasSaved = pageHeart().accessibilityLabel()!.hasPrefix("Remove ")
+        let wishCalls = calls("wishlist").count
+        pageHeart().performClick(nil)
+        spin()
+        precondition(calls("wishlist").count == wishCalls + 1 && pageHeart().accessibilityLabel()!.hasPrefix(heartWasSaved ? "Add " : "Remove "),
+                     "The game page heart toggles: \(pageHeart().accessibilityLabel() ?? "")")
+        pageHeart().performClick(nil)
+        spin()
+        smokeWishlist = savedHeartsWishlist
+        reloadWishlist()
         navigateHistory(-1)
         precondition(currentPage == 13 && shopTab.selectedSegment == 1)
         window.setFrame(roomyFrame, display: false)

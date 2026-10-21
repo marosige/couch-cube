@@ -1,0 +1,14 @@
+{"620": {"success": true, "data": {
+  "name": "Portal 2", "short_description": "The &quot;Perpetual Testing Initiative&quot; has been expanded to allow you to design <b>co-op puzzles</b>.",
+  "genres": [{"id": "1", "description": "Action"}, {"id": "25", "description": "Adventure"}],
+  "developers": ["Valve"], "release_date": {"coming_soon": false, "date": "18 Apr, 2011"},
+  "controller_support": "full",
+  "categories": [{"id": 2, "description": "Single-player"}, {"id": 9, "description": "Co-op"},
+                 {"id": 24, "description": "Shared/Split Screen"}, {"id": 39, "description": "Shared/Split Screen Co-op"}],
+  "platforms": {"windows": true, "mac": true, "linux": true},
+  "mac_requirements": {"minimum": "<strong>Minimum:</strong><br><ul><li><strong>Storage:</strong> 8 GB available space</li></ul>"},
+  "pc_requirements": {"minimum": "<ul><li><strong>Hard Drive:</strong> 9 GB available space</li></ul>"},
+  "screenshots": [{"id": 0, "path_full": "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/620/ss_1.jpg"},
+                  {"id": 1, "path_full": "http://insecure.example/ss_2.jpg"},
+                  {"id": 2, "path_full": "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/620/ss_3.jpg"}]}},
+ "999": {"success": false}}

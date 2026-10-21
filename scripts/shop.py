@@ -352,6 +352,68 @@ def platform_status(platforms):
     return None
 
 
+# Steam categories that matter on a couch: several people on one Mac.
+COUCH_CATEGORIES = {"Shared/Split Screen", "Shared/Split Screen PvP", "Shared/Split Screen Co-op",
+                    "Local Co-op", "Local Multi-Player", "Local Multiplayer", "Remote Play Together"}
+STORAGE = re.compile(r"(?:Storage|Hard Drive|Hard Disk Space|Disk Space)\s*:?\s*(?:</strong>)?\s*([\d.,]+)\s*(GB|MB|TB)", re.I)
+
+
+def plain_text(html):
+    """Steam's short description is HTML; keep only its text."""
+    text = re.sub(r"<[^>]+>", " ", html or "")
+    for entity, value in (("&amp;", "&"), ("&quot;", '"'), ("&#39;", "'"), ("&lt;", "<"), ("&gt;", ">"), ("&nbsp;", " ")):
+        text = text.replace(entity, value)
+    return " ".join(text.split())
+
+
+def storage_bytes(requirements):
+    """Disk space from Steam's minimum requirements ("Storage: 8 GB available space"); None when not stated."""
+    for block in requirements:
+        text = block.get("minimum") if isinstance(block, dict) else None
+        match = STORAGE.search(text) if isinstance(text, str) else None
+        if match:
+            amount = float(match.group(1).replace(",", "."))
+            return int(amount * {"MB": 1024 ** 2, "GB": 1024 ** 3, "TB": 1024 ** 4}[match.group(2).upper()])
+    return None
+
+
+def steam_details(app_id, refresh=False, now=None, opener=None):
+    """Store facts for a Steam game's Cube Shop page: screenshots, description, genres, developer, release date,
+    disk space, controller support and couch (local multiplayer) features. Cached for a week."""
+    app_id = str(app_id or "")
+    if not re.fullmatch(r"\d{1,10}", app_id) or app_id == "0":
+        raise ShopError("Unknown Steam game.")
+    url = STEAM_APPDETAILS + urllib.parse.urlencode({"appids": app_id, "l": "english"})
+    reply = deals.cached_fetch("steamdetails", "steam", url, STEAM_HOSTS, refresh, now, opener)
+    data = reply.get("data") if isinstance(reply.get("data"), dict) else {}
+    game = data.get(app_id) if isinstance(data.get(app_id), dict) else {}
+    details = game.get("data") if game.get("success") is True and isinstance(game.get("data"), dict) else None
+    if details is None:
+        return {"app_id": app_id, "found": False, "error": reply.get("error")}
+
+    def names(key, field="description"):
+        items = details.get(key) if isinstance(details.get(key), list) else []
+        values = [item.get(field) if isinstance(item, dict) else item for item in items]
+        return [" ".join(value.split()) for value in values if isinstance(value, str) and value.strip()]
+
+    screenshots = []
+    for shot in details.get("screenshots") or []:
+        link = deals.https_url(shot.get("path_full")) if isinstance(shot, dict) else None
+        if link:
+            screenshots.append(link)
+    platforms = details.get("platforms") if isinstance(details.get("platforms"), dict) else {}
+    requirements = [details.get("mac_requirements") if platforms.get("mac") is True else None, details.get("pc_requirements")]
+    release = details.get("release_date") if isinstance(details.get("release_date"), dict) else {}
+    controller = details.get("controller_support")
+    return {"app_id": app_id, "found": True, "description": plain_text(details.get("short_description"))[:600],
+            "genres": names("genres")[:4], "developers": names("developers", None)[:2],
+            "release": release.get("date") if isinstance(release.get("date"), str) else None,
+            "screenshots": screenshots[:12], "storage_bytes": storage_bytes([r for r in requirements if r]),
+            "controller": controller if controller in ("full", "partial") else None,
+            "couch": [name for name in names("categories") if name in COUCH_CATEGORIES],
+            "error": reply.get("error")}
+
+
 def steam_platform_url(app_id):
     return STEAM_APPDETAILS + urllib.parse.urlencode({"appids": app_id, "filters": "platforms"})
 

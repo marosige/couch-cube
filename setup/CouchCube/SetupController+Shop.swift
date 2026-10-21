@@ -801,8 +801,9 @@ extension SetupController {
 
     func refreshHearts() {
         func views(_ root: NSView) -> [NSView] { [root] + root.subviews.flatMap(views) }
-        guard let page = shopPageView else { return }
-        for button in views(page).compactMap({ $0 as? NSButton }) {
+        // The Shop lists and the game page both carry hearts and targets.
+        let roots: [NSView] = [shopPageView, shopDetailContent].compactMap { $0 }
+        for button in roots.flatMap(views).compactMap({ $0 as? NSButton }) {
             if button.accessibilityIdentifier() == "wishlistHeart" { configureHeart(button) }
             if button.accessibilityIdentifier() == "shopTarget" { configureShopTarget(button) }
         }
@@ -1070,6 +1071,8 @@ extension SetupController {
         switch arguments.first {
         case "rates": return (0, smokeRatesJSON)
         case "shop-search": return (0, smokeShopSearchJSON)
+        case "shop-steam":
+            return (0, value("--app") == "620" ? smokeSteamDetailsJSON : json(["app_id": value("--app") ?? "", "found": false]))
         case "shop-game":
             // The search fixture's games, by CheapShark ID; anything else is unknown.
             let search = try! JSONSerialization.jsonObject(with: Data(smokeShopSearchJSON.utf8)) as! [String: Any]

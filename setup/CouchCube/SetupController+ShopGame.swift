@@ -58,6 +58,11 @@ extension SetupController {
             detail.loading = true
             loadShopGame(key: detail.key, gameId: gameId)
         }
+        if let appId = detail.steamAppId, detail.steam == nil, !detail.steamLoading, shopDetails[detail.key]?.steamLoading != true {
+            detail.steamLoading = true
+            loadSteamDetails(key: detail.key, appId: appId)
+        }
+        if shopDetailKey != detail.key { shopGalleryIndex = 0 }
         shopDetails[detail.key] = detail
         shopDetailKey = detail.key
         renderShopGame()
@@ -84,26 +89,28 @@ extension SetupController {
         }
     }
 
+    /// Steam's screenshots and store facts (genre, developer, size, controller and couch play) for the page.
+    func loadSteamDetails(key: String, appId: String) {
+        shopRead(["shop-steam", "--app", appId]) { [weak self] code, data, _ in
+            guard let self, var detail = self.shopDetails[key] else { return }
+            detail.steamLoading = false
+            if code == 0, let facts = decodeDeals(SteamDetails.self, data), facts.found { detail.steam = facts }
+            self.shopDetails[key] = detail
+            if self.shopDetailKey == key { self.renderShopGame() }
+        }
+    }
+
     func renderShopGame() {
         schedulePlatformLookup()
         clearRows(shopDetailContent)
         guard let key = shopDetailKey, let detail = shopDetails[key] else { return }
         var views: [NSView] = []
 
-        // Big art: Steam's banner when the game is on Steam, otherwise the store's own picture.
-        let hero = RemoteImageView()
-        hero.aspectFill = detail.appStoreId == nil || detail.steamAppId != nil
-        hero.imageScaling = .scaleProportionallyUpOrDown
-        hero.wantsLayer = true
-        hero.layer?.cornerRadius = 12
-        hero.layer?.masksToBounds = true
-        hero.layer?.backgroundColor = NSColor.quaternaryLabelColor.cgColor
-        hero.setAccessibilityIdentifier("shopGameHero")
-        hero.setAccessibilityElement(false)
-        hero.heightAnchor.constraint(equalTo: hero.widthAnchor, multiplier: 353.0 / 616.0).isActive = true
-        hero.load(safeDealURL(steamArtURL(detail.steamAppId, "capsule_616x353.jpg") ?? detail.thumb),
-                  enabled: !ProcessInfo.processInfo.arguments.contains("--smoke-test"))
-        views.append(hero)
+        // Big art: Steam's banner when the game is on Steam, otherwise the store's own picture; then screenshots.
+        shopGalleryImages = ([steamArtURL(detail.steamAppId, "capsule_616x353.jpg") ?? detail.thumb] + (detail.steam?.screenshots ?? []))
+            .compactMap { $0 }.filter { safeDealURL($0) != nil }
+        shopGalleryIndex = min(shopGalleryIndex, max(0, shopGalleryImages.count - 1))
+        views.append(shopGallery(fill: detail.appStoreId == nil || detail.steamAppId != nil))
 
         let title = NSTextField(wrappingLabelWithString: detail.title)
         title.font = .systemFont(ofSize: 26, weight: .bold)
@@ -132,6 +139,7 @@ extension SetupController {
         }
 
         views.append(shopGamePriceCard(detail))
+        if let about = shopGameAboutCard(detail) { views.append(about) }
         if detail.giveaway == nil { views.append(shopGameStoresCard(detail)) }
         let note = text("Prices from CheapShark and the Mac App Store. Couch Cube never buys anything: every store opens in your browser.",
                         size: 11, secondary: true)
@@ -203,7 +211,15 @@ extension SetupController {
                                                           currency: sortedShopOffers(detail.offers).first?.offer.currency ?? "USD"))
         }
         priceLine.addArrangedSubview(heart)
-        let actions = row([action])
+        let videos = NSButton(title: "Gameplay Videos", target: self, action: #selector(shopGameVideos(_:)))
+        videos.image = NSImage(systemSymbolName: "play.rectangle.fill", accessibilityDescription: nil)
+        videos.imagePosition = .imageLeading
+        videos.bezelStyle = .rounded
+        videos.controlSize = .large
+        videos.identifier = NSUserInterfaceItemIdentifier(detail.title)
+        videos.toolTip = "Search YouTube for \u{201C}\(detail.title) gameplay\u{201D} in your browser"
+        videos.setAccessibilityIdentifier("shopGameVideos")
+        let actions = row([action, videos])
         return card("", subtitle: nil, views: [priceLine] + lines + [actions])
     }
 
@@ -233,6 +249,159 @@ extension SetupController {
         let box = card("Where to Buy", subtitle: nil, views: views)
         box.setAccessibilityIdentifier("shopGameStoresCard")
         return box
+    }
+
+    /// YouTube search for "<game> gameplay" in the default browser.
+    @objc func shopGameVideos(_ sender: NSButton) {
+        guard let title = sender.identifier?.rawValue else { return }
+        var components = URLComponents(string: "https://www.youtube.com/results")!
+        components.queryItems = [URLQueryItem(name: "search_query", value: title + " gameplay")]
+        openShopLink(components.url?.absoluteString, hosts: youTubeHosts)
+    }
+
+    /// The cover and screenshots, one at a time, with arrows on the sides (dimmed at either end) and "2 / 8".
+    func shopGallery(fill: Bool) -> NSView {
+        let container = NSView()
+        container.setAccessibilityIdentifier("shopGameGallery")
+        let image = RemoteImageView()
+        image.aspectFill = fill
+        image.imageScaling = .scaleProportionallyUpOrDown
+        image.wantsLayer = true
+        image.layer?.cornerRadius = 12
+        image.layer?.masksToBounds = true
+        image.layer?.backgroundColor = NSColor.quaternaryLabelColor.cgColor
+        image.setAccessibilityIdentifier("shopGameHero")
+        image.setAccessibilityElement(false)
+        func arrow(_ symbol: String, _ step: Int, _ label: String) -> NSButton {
+            let button = NSButton(image: NSImage(systemSymbolName: symbol, accessibilityDescription: label)!, target: self,
+                                  action: #selector(shopGalleryStep(_:)))
+            button.tag = step
+            button.isBordered = false
+            button.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 15, weight: .bold)
+            button.contentTintColor = .white
+            button.wantsLayer = true
+            button.layer?.backgroundColor = NSColor.black.withAlphaComponent(0.45).cgColor
+            button.layer?.cornerRadius = 17
+            button.setAccessibilityLabel(label)
+            button.setAccessibilityIdentifier(step < 0 ? "shopGalleryPrevious" : "shopGalleryNext")
+            button.widthAnchor.constraint(equalToConstant: 34).isActive = true
+            button.heightAnchor.constraint(equalToConstant: 34).isActive = true
+            return button
+        }
+        let previous = arrow("chevron.left", -1, "Previous picture"), next = arrow("chevron.right", 1, "Next picture")
+        let counter = NSTextField(labelWithString: "")
+        counter.font = .monospacedDigitSystemFont(ofSize: 11, weight: .semibold)
+        counter.textColor = .white
+        counter.wantsLayer = true
+        counter.layer?.backgroundColor = NSColor.black.withAlphaComponent(0.45).cgColor
+        counter.layer?.cornerRadius = 6
+        counter.alignment = .center
+        counter.setAccessibilityIdentifier("shopGalleryCounter")
+        for view in [image, previous, next, counter] {
+            view.translatesAutoresizingMaskIntoConstraints = false
+            container.addSubview(view)
+        }
+        NSLayoutConstraint.activate([
+            image.topAnchor.constraint(equalTo: container.topAnchor), image.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+            image.leadingAnchor.constraint(equalTo: container.leadingAnchor), image.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            image.heightAnchor.constraint(equalTo: image.widthAnchor, multiplier: 353.0 / 616.0),
+            previous.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 12),
+            previous.centerYAnchor.constraint(equalTo: container.centerYAnchor),
+            next.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -12),
+            next.centerYAnchor.constraint(equalTo: container.centerYAnchor),
+            counter.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -12),
+            counter.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -10),
+            counter.widthAnchor.constraint(greaterThanOrEqualToConstant: 44)
+        ])
+        shopGalleryView = image
+        shopGalleryPrevious = previous
+        shopGalleryNext = next
+        shopGalleryCounter = counter
+        showGalleryPicture()
+        return container
+    }
+
+    func showGalleryPicture() {
+        let count = shopGalleryImages.count
+        shopGalleryView?.image = nil
+        shopGalleryView?.load(count > 0 ? safeDealURL(shopGalleryImages[shopGalleryIndex]) : nil,
+                              enabled: !ProcessInfo.processInfo.arguments.contains("--smoke-test"))
+        // The cover keeps its own framing; screenshots are shown whole.
+        shopGalleryPrevious?.isHidden = count < 2
+        shopGalleryNext?.isHidden = count < 2
+        shopGalleryCounter?.isHidden = count < 2
+        shopGalleryPrevious?.isEnabled = shopGalleryIndex > 0
+        shopGalleryNext?.isEnabled = shopGalleryIndex < count - 1
+        shopGalleryPrevious?.alphaValue = shopGalleryIndex > 0 ? 1 : 0.35
+        shopGalleryNext?.alphaValue = shopGalleryIndex < count - 1 ? 1 : 0.35
+        shopGalleryCounter?.stringValue = " \(shopGalleryIndex + 1) / \(count) "
+        shopGalleryView?.setAccessibilityLabel(shopGalleryIndex == 0 ? "Cover" : "Screenshot \(shopGalleryIndex) of \(count - 1)")
+    }
+
+    @objc func shopGalleryStep(_ sender: NSButton) {
+        let next = shopGalleryIndex + sender.tag
+        guard shopGalleryImages.indices.contains(next) else { return }
+        shopGalleryIndex = next
+        showGalleryPicture()
+    }
+
+    /// A few facts about the game from Steam: what it is, who made it, how it plays on a couch, and whether it fits.
+    func shopGameAboutCard(_ detail: ShopDetail) -> NSView? {
+        guard let steam = detail.steam else {
+            return detail.steamLoading ? card("About", subtitle: nil, views: [text("Loading details from Steam\u{2026}", size: 12, secondary: true)]) : nil
+        }
+        var views: [NSView] = []
+        if let description = steam.description, !description.isEmpty { views.append(text(description, size: 13)) }
+        var facts: [(String, String, NSColor?)] = []
+        if let genres = steam.genres, !genres.isEmpty { facts.append(("Genre", genres.joined(separator: ", "), nil)) }
+        if let developers = steam.developers, !developers.isEmpty { facts.append(("Developer", developers.joined(separator: ", "), nil)) }
+        if let release = steam.release { facts.append(("Released", release, nil)) }
+        if let controller = steam.controller {
+            facts.append(("Controllers", controller == "full" ? "Full controller support" : "Partial controller support",
+                          controller == "full" ? .systemGreen : nil))
+        }
+        if let couch = steam.couch, !couch.isEmpty {
+            facts.append(("Couch play", couch.map { $0.replacingOccurrences(of: "Shared/", with: "") }.joined(separator: ", "), .systemGreen))
+        }
+        if let size = steam.storageBytes {
+            let free = shopLibraryFreeSpace()
+            var value = ByteCountFormatter.string(fromByteCount: size, countStyle: .file)
+            var color: NSColor?
+            if let free {
+                value += " \u{00B7} " + ByteCountFormatter.string(fromByteCount: free.bytes, countStyle: .file) + " free on " + free.name
+                if free.bytes < size { color = .systemOrange; value += " \u{2014} not enough space" }
+            }
+            facts.append(("Size", value, color))
+        }
+        if !facts.isEmpty {
+            let grid = NSGridView(views: facts.map { fact -> [NSView] in
+                let name = NSTextField(labelWithString: fact.0)
+                name.font = .systemFont(ofSize: 12)
+                name.textColor = .secondaryLabelColor
+                let value = NSTextField(wrappingLabelWithString: fact.1)
+                value.font = .systemFont(ofSize: 12, weight: .medium)
+                if let color = fact.2 { value.textColor = color }
+                return [name, value]
+            })
+            grid.rowSpacing = 6
+            grid.columnSpacing = 14
+            grid.column(at: 0).xPlacement = .leading
+            grid.column(at: 0).width = 96
+            grid.setAccessibilityIdentifier("shopGameFacts")
+            views.append(grid)
+        }
+        guard !views.isEmpty else { return nil }
+        return card("About", subtitle: nil, views: views)
+    }
+
+    /// Free space where your games live: the active Couch Cube library drive, otherwise this Mac's disk.
+    func shopLibraryFreeSpace() -> (bytes: Int64, name: String)? {
+        if let active = storageStatus?.active,
+           let drive = storageStatus?.locations.first(where: { $0.drive.id == active.id })?.drive {
+            return (drive.free, drive.mode == "local" ? "this Mac" : drive.name)
+        }
+        let values = try? URL(fileURLWithPath: NSHomeDirectory()).resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey])
+        return values?.volumeAvailableCapacityForImportantUsage.map { ($0, "this Mac") }
     }
 
     @objc func shopGameOpen(_ sender: NSButton) {
@@ -399,10 +568,20 @@ extension SetupController {
         texts.alignment = .leading
         texts.spacing = 8
         texts.setCustomSpacing(4, after: kicker)
-        for subview in [image, texts] {
+        let heart = wishlistHeart(key: deal.gameId.map { "cs:" + $0 } ?? "title:" + deal.title.lowercased(), title: deal.title,
+                                  payload: ["title": deal.title, "game_id": deal.gameId ?? "", "steam_app_id": deal.steamAppId ?? "", "thumb": deal.thumb ?? ""])
+        heart.wantsLayer = true
+        heart.layer?.backgroundColor = NSColor.windowBackgroundColor.withAlphaComponent(0.85).cgColor
+        heart.layer?.cornerRadius = 11
+        for subview in [image, texts, heart] {
             subview.translatesAutoresizingMaskIntoConstraints = false
             view.addSubview(subview)
         }
+        NSLayoutConstraint.activate([
+            heart.topAnchor.constraint(equalTo: image.topAnchor, constant: 8),
+            heart.trailingAnchor.constraint(equalTo: image.trailingAnchor, constant: -8),
+            heart.heightAnchor.constraint(equalToConstant: 22)
+        ])
         NSLayoutConstraint.activate([
             image.topAnchor.constraint(equalTo: view.topAnchor, constant: 10),
             image.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -10),

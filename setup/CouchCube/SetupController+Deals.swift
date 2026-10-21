@@ -697,6 +697,16 @@ extension SetupController {
         dealsReminderNote.textColor = error ? .systemRed : .secondaryLabelColor
         dealsReminderSettings.isHidden = !privacy
         dealsReminderBar.isHidden = false
+        // The note bar lives on the Shop lists; on a game page say it in a sheet so the click never seems to do nothing.
+        if currentPage == 14, !ProcessInfo.processInfo.arguments.contains("--smoke-test"), let window = mainWindow ?? self.window {
+            let alert = NSAlert()
+            alert.messageText = text
+            alert.alertStyle = error ? .warning : .informational
+            if privacy { alert.addButton(withTitle: "Open Settings"); alert.addButton(withTitle: "OK") }
+            alert.beginSheetModal(for: window) { response in
+                if privacy && response == .alertFirstButtonReturn { self.openReminderPrivacy() }
+            }
+        }
     }
 
     @objc func openReminderPrivacy() {
@@ -771,7 +781,7 @@ extension SetupController {
     /// Shop links open in the default browser, and only as https links on the expected service's own hosts.
     func openShopLink(_ value: String?, hosts: Set<String>) {
         guard let link = safeDealURL(value, hosts: hosts) else {
-            showReminderNote("This link isn't from CheapShark, GamerPower or the Mac App Store, so Couch Cube didn't open it.", error: true)
+            showReminderNote("This link isn't from CheapShark, GamerPower, the Mac App Store or YouTube, so Couch Cube didn't open it.", error: true)
             return
         }
         dealsOpener(link)

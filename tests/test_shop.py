@@ -49,6 +49,10 @@ class Opener:
             name = DEALS_FIX / "cheapshark-deals.json"
         elif parts.path == "/api/filter":
             name = DEALS_FIX / "gamerpower-giveaways.json"
+        elif parts.path == "/api/appdetails":
+            app = query["appids"][0]
+            data = json.loads((FIX / "steam-appdetails.json").read_text())
+            return Response(json.dumps({app: data.get(app, {"success": False})}).encode(), url)
         elif parts.path in ("/search", "/lookup"):
             name = FIX / "itunes-search.json"
         else:
@@ -164,6 +168,22 @@ class ShopTests(unittest.TestCase):
                          "Best offer 9.99 vs record 4.99")
         self.assertIsNone(games["200"]["history"])
         self.assertIsNone(games["200"]["insight"], "No record, no claim")
+
+    def test_steam_store_facts_for_the_game_page(self):
+        facts = shop.steam_details("620", opener=Opener(), now=1000)
+        missing = shop.steam_details("999", opener=Opener(), now=1000)
+        self.assertTrue(facts["found"])
+        self.assertEqual(facts["description"], 'The "Perpetual Testing Initiative" has been expanded to allow you to design co-op puzzles .')
+        self.assertEqual(facts["genres"], ["Action", "Adventure"])
+        self.assertEqual(facts["developers"], ["Valve"])
+        self.assertEqual(facts["release"], "18 Apr, 2011")
+        self.assertEqual(facts["storage_bytes"], 8 * 1024 ** 3, "The Mac requirement wins for Mac games")
+        self.assertEqual(facts["controller"], "full")
+        self.assertEqual(facts["couch"], ["Shared/Split Screen", "Shared/Split Screen Co-op"])
+        self.assertEqual(len(facts["screenshots"]), 2, "Only https screenshots")
+        self.assertFalse(missing["found"])
+        with self.assertRaises(shop.ShopError):
+            shop.steam_details("abc", opener=Opener(), now=1000)
 
     def test_single_game_for_the_game_page(self):
         report = shop.game("100", opener=Opener(), now=1000)
