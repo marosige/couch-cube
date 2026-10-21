@@ -250,9 +250,24 @@ extension SetupController {
         return control
     }
 
-    /// Makes the library's Windows/Porting Kit folder, shows it in Finder and puts its path on the clipboard,
-    /// ready to paste as Porting Kit's "Applications default path". Porting Kit's own setting isn't changed for you.
+    /// The Porting Kit folder pinned to Finder's sidebar by Couch Cube, while it is still there.
+    var pinnedPortingKitFolder: URL? {
+        guard let path = UserDefaults.standard.string(forKey: "portingKitPinnedFolder") else { return nil }
+        let url = URL(fileURLWithPath: path)
+        return ProcessInfo.processInfo.arguments.contains("--smoke-test") || FinderSidebar.contains(url) ? url : nil
+    }
+
+    /// Makes the library's Windows/Porting Kit folder and pins it to the top of Finder's sidebar (which Porting Kit's
+    /// folder dialog shows too), so it's one click away; Unpin Folder takes it off again. If macOS doesn't allow the
+    /// pin, the path goes on the clipboard instead. Porting Kit's own setting isn't changed for you.
     @objc func preparePortingKitFolder() {
+        if let pinned = pinnedPortingKitFolder {
+            FinderSidebar.unpin(pinned)
+            UserDefaults.standard.removeObject(forKey: "portingKitPinnedFolder")
+            appsStatus.stringValue = "Removed the Porting Kit folder from Finder's sidebar."
+            renderApps()
+            return
+        }
         guard let drive = selected else { return }
         runBackendInBackground(["porting-kit-folder", "--root", drive.root]) { [weak self] code, data, errors in
             guard let self else { return }
@@ -262,8 +277,14 @@ extension SetupController {
             }
             NSPasteboard.general.clearContents()
             NSPasteboard.general.setString(path, forType: .string)
-            NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)])
-            self.appsStatus.stringValue = "Path copied. In Porting Kit, choose Change for \u{201C}Applications default path\u{201D} and pick this folder. New ports then appear in Play."
+            if FinderSidebar.pin(URL(fileURLWithPath: path)) {
+                UserDefaults.standard.set(path, forKey: "portingKitPinnedFolder")
+                self.appsStatus.stringValue = "\u{201C}Porting Kit\u{201D} is now at the top of the sidebar in Finder and in Porting Kit's folder dialog. In Porting Kit, choose Change for \u{201C}Applications default path\u{201D} and pick it, then choose Unpin Folder here."
+            } else {
+                NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)])
+                self.appsStatus.stringValue = "Path copied. In Porting Kit, choose Change for \u{201C}Applications default path\u{201D}, press \u{2318}\u{21E7}G, paste and press Return. New ports then appear in Play."
+            }
+            self.renderApps()
         }
     }
 
@@ -555,8 +576,10 @@ extension SetupController {
         } else {
             if app.id == "porting-kit" && app.installed && selected != nil {
                 // Porting Kit asks where to put its ports; this makes the library folder and copies its path.
-                let folder = button("Games Folder", #selector(preparePortingKitFolder))
-                folder.toolTip = "Create Couch Cube \u{203A} Windows \u{203A} Porting Kit, show it and copy its path for Porting Kit's Applications path"
+                let pinned = pinnedPortingKitFolder != nil
+                let folder = button(pinned ? "Unpin Folder" : "Games Folder", #selector(preparePortingKitFolder))
+                folder.toolTip = pinned ? "Take the Porting Kit folder off Finder's sidebar"
+                    : "Create Couch Cube \u{203A} Windows \u{203A} Porting Kit and pin it to the top of Finder's sidebar for Porting Kit's Applications path"
                 folder.setAccessibilityIdentifier("portingKitFolder")
                 controls.addArrangedSubview(folder)
             }
