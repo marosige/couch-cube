@@ -2592,7 +2592,8 @@ def main():
     setup.add_argument("--no-host-config", action="store_true",
                        help="Keep selection on the drive only; do not save it in this Mac's home folder.")
     setup.add_argument("--install", nargs="*", choices=list(PACKAGES), default=[])
-    for action in ["env", "index", "steam", "retro", "console", "launch", "emulate", "register", "library-games"]:
+    for action in ["env", "index", "steam", "retro", "console", "launch", "emulate", "register", "library-games",
+                   "porting-kit-folder"]:
         command = sub.add_parser(action)
         command.add_argument("--root")
         if action == "launch":
@@ -2757,6 +2758,9 @@ def main():
                 emulate(storage, args.system, args.rom)
             elif args.command == "library-games":
                 print(json_text(library_games(storage)))
+            elif args.command == "porting-kit-folder":
+                storage.mkdir("Windows/Porting Kit")
+                print(json_text({"path": str(storage.root / "Windows/Porting Kit")}))
             else:
                 launch(storage, args.command, getattr(args, "id", None))
     except (SetupError, OSError, ValueError, KeyError, ET.ParseError, subprocess.CalledProcessError) as exc:
