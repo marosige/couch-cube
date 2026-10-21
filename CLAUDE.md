@@ -3,6 +3,7 @@
 Native macOS (AppKit, Apple Silicon, macOS 13+) app that turns a Mac into a couch gaming console.
 The owner is not a developer and communicates in Hungarian: answer in Hungarian, explain choices in
 plain words, and make technical decisions (including versioning) yourself.
+Keep every reply very short: a few lines, results only, no long explanations.
 
 ## Layout
 
