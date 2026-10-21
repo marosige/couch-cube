@@ -72,6 +72,44 @@ extension ISO8601DateFormatter {
     }()
 }
 
+/// Steam's own store art for a game: larger and sharper than CheapShark's small thumbnails.
+/// "header.jpg" is 460 × 215; "capsule_616x353.jpg" is the big banner used on game pages.
+func steamArtURL(_ appId: String?, _ kind: String = "header.jpg") -> String? {
+    guard let appId, !appId.isEmpty, appId.count < 12, appId.allSatisfy(\.isNumber) else { return nil }
+    return "https://cdn.cloudflare.steamstatic.com/steam/apps/\(appId)/\(kind)"
+}
+
+/// The all-time low in shop terms: how big a discount it was and what it cost, e.g. "Lowest ever $0.99 (−90%)".
+/// The percent needs the usual price; without it only the price is shown.
+func lowestEverDiscount(low: Double, normal: Double?) -> Int? {
+    guard let normal, normal > 0, low < normal else { return nil }
+    return max(1, Int(((1 - low / normal) * 100).rounded()))
+}
+
+struct ShopGameReply: Decodable {
+    let game: ShopGame?
+    let errors: [String]
+}
+
+/// Everything the Cube Shop game page shows, gathered from whichever list the game was opened from.
+/// Offers from CheapShark arrive later (shop-game) when only a single deal or a wishlist entry was known.
+struct ShopDetail {
+    let key: String
+    let title: String
+    var gameId: String?
+    var steamAppId: String?
+    var appStoreId: String?
+    var thumb: String?
+    var offers: [ShopOffer]
+    var insight: PriceInsight?
+    var ratings = SetupController.ShopRatings()
+    var installed = false
+    var giveaway: Giveaway?
+    var payload: [String: String] = [:]
+    var loading = false
+    var error: String?
+}
+
 struct ShopGame: Decodable, Equatable {
     let id: String
     let title: String

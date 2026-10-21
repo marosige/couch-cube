@@ -165,6 +165,16 @@ class ShopTests(unittest.TestCase):
         self.assertIsNone(games["200"]["history"])
         self.assertIsNone(games["200"]["insight"], "No record, no claim")
 
+    def test_single_game_for_the_game_page(self):
+        report = shop.game("100", opener=Opener(), now=1000)
+        self.assertEqual(report["game"]["title"], "Hollow Knight")
+        self.assertEqual([offer["price"] for offer in report["game"]["offers"]], [9.99, 9.99, 14.99])
+        self.assertEqual(report["game"]["history"]["low"], 4.99)
+        self.assertEqual(report["errors"], [])
+        self.assertIsNone(shop.game("12345", opener=Opener(), now=1000)["game"], "Unknown IDs are not invented")
+        with self.assertRaises(shop.ShopError):
+            shop.game("../1", opener=Opener(), now=1000)
+
 
 
 class SteamPlatformTests(unittest.TestCase):

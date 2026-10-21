@@ -375,49 +375,44 @@ extension SetupController {
         return (image, true)
     }
 
-    /// The store under the price, by its full name: gray with its logo, or on a sale a green tag with the discount
-    /// ("Steam −75%"). A game row covering several stores shows just the best discount.
-    func storeTag(_ store: String?, savings: Int? = nil) -> NSView {
-        let text = [store, savings.map { "\u{2212}\($0)%" }].compactMap { $0 }.joined(separator: " ")
-        let label = NSTextField(labelWithString: text)
-        label.font = .systemFont(ofSize: 11, weight: .medium)
-        label.textColor = savings != nil ? .systemGreen : .secondaryLabelColor
+    /// The store under the price, by its full name, gray with its small logo. The discount has its own pill.
+    func storeTag(_ store: String) -> NSView {
+        let label = NSTextField(labelWithString: store)
+        label.font = .systemFont(ofSize: 11)
+        label.textColor = .secondaryLabelColor
         label.lineBreakMode = .byTruncatingMiddle
         label.alignment = .right
         label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         label.setContentHuggingPriority(.required, for: .horizontal)
         label.setAccessibilityElement(false)
-        let icon: NSView
-        if savings != nil {
-            let image = NSImageView(image: NSImage(systemSymbolName: "tag.fill", accessibilityDescription: nil)?
-                .withSymbolConfiguration(.init(pointSize: 10, weight: .medium)) ?? NSImage())
-            image.contentTintColor = .systemGreen
-            image.setAccessibilityIdentifier("shopSaleTag")
-            icon = image
-        } else {
-            icon = storeIconView(store ?? "", size: 12)
-        }
-        let tag = NSStackView(views: [icon, label])
+        let tag = NSStackView(views: [storeIconView(store, size: 12), label])
         tag.orientation = .horizontal
         tag.alignment = .centerY
-        tag.spacing = 3
-        let spoken = [store, savings.map { "\($0)% off" }].compactMap { $0 }.joined(separator: ", ")
-        tag.toolTip = spoken
+        tag.spacing = 4
+        tag.toolTip = store
         tag.setAccessibilityIdentifier("shopStoreTag")
         tag.setAccessibilityElement(true)
         tag.setAccessibilityRole(.staticText)
-        tag.setAccessibilityLabel(spoken)
+        tag.setAccessibilityLabel(store)
         return tag
     }
 
-    /// The all-time-low note: a small third line under the price, green only at the record.
-    func insightLabel(_ insight: PriceInsight?) -> NSView? {
+    /// The all-time low in shop terms: "Lowest ever $0.99 (−90%)", or "All-time low" in green when today's price
+    /// is the record. `normal` is the usual price, needed for the percent.
+    func lowestText(_ insight: PriceInsight, normal: Double?) -> String {
+        if insight.kind == "record" { return "All-time low" }
+        if insight.low == 0 { return insight.text }
+        let percent = lowestEverDiscount(low: insight.low, normal: normal).map { " (\u{2212}\($0)%)" } ?? ""
+        return "Lowest ever " + shopPrice(insight.low, insight.currency).text + percent
+    }
+
+    func insightLabel(_ insight: PriceInsight?, normal: Double? = nil) -> NSView? {
         guard let insight else { return nil }
-        let label = NSTextField(labelWithString: insight.text)
+        let label = NSTextField(labelWithString: lowestText(insight, normal: normal))
         label.font = .systemFont(ofSize: 10, weight: insight.kind == "record" ? .semibold : .regular)
-        label.textColor = insight.kind == "record" ? .systemGreen : .tertiaryLabelColor
+        label.textColor = insight.kind == "record" ? .systemGreen : .secondaryLabelColor
         label.toolTip = insight.detail
-        label.setAccessibilityLabel(insight.text + ". " + insight.detail)
+        label.setAccessibilityLabel(label.stringValue + ". " + insight.detail)
         label.setAccessibilityIdentifier("shopPriceInsight")
         return label
     }
@@ -516,76 +511,40 @@ extension SetupController {
         return cell
     }
 
-    /// The right end of every shop row, in fixed-width columns that line up from row to row:
-    /// [Steam | Metacritic | Deal rating]  heart  [Lowest]  price (usual price beneath)  discount.
-    /// Rating columns appear when `ratings` is given and the marker column when `marker` is non-nil, even if empty,
-    /// so every row of a list reserves the same slots. Missing values leave their cell blank.
-    func priceCluster(heart: NSView?, price: ShopPrice?, priceText: String? = nil, was: String? = nil,
-                              savings: Int? = nil, highlight: Bool = false, marker: String?? = nil, ratings: ShopRatings? = nil,
-                              ratingOverlay: NSView? = nil, store: String? = nil, footer: NSView? = nil) -> NSView {
-        func column(_ views: [NSView], width: CGFloat, id: String) -> NSStackView {
-            let stack = NSStackView(views: views)
-            stack.orientation = .vertical
-            stack.alignment = .trailing
-            stack.spacing = 1
-            stack.setAccessibilityIdentifier(id)
-            stack.widthAnchor.constraint(equalToConstant: width).isActive = true
-            stack.setContentCompressionResistancePriority(.required, for: .horizontal)
-            stack.setHuggingPriority(.required, for: .horizontal)
-            return stack
-        }
-        var columns: [NSView] = []
-        if let ratings {
-            let widths = Self.shopRatingWidths
-            var cells: [NSView] = []
-            cells.append(ratingCell("hand.thumbsup.fill", ratings.steamPercent.map { "\($0)%" },
-                                      color: ratings.steamPercent.map { Self.ratingColor(Double($0), good: 80, fair: 50) } ?? .clear,
-                                      width: widths.steam, id: "shopRatingSteam",
-                                      tip: ratings.steamPercent.map { p in "Steam reviews: " + (ratings.steamText.map { "\($0) (\(p)%)" } ?? "\(p)%") }))
-            cells.append(ratingCell("m.square.fill", ratings.metacritic.map { "\($0)" },
-                                      color: ratings.metacritic.map { Self.ratingColor(Double($0), good: 75, fair: 50) } ?? .clear,
-                                      width: widths.metacritic, id: "shopRatingMetacritic",
-                                      tip: ratings.metacritic.map { "Metacritic score: \($0)" }))
-            cells.append(ratingCell("tag.fill", ratings.deal.map { String(format: "%.1f", $0) },
-                                      color: ratings.deal.map { Self.ratingColor($0, good: 8, fair: 5) } ?? .clear,
-                                      width: widths.deal, id: "shopRatingDeal",
-                                      tip: ratings.deal.map { String(format: "CheapShark deal rating: %.1f of 10", $0) }))
-            if let ratingOverlay {
-                // A row without ratings (a free game on Home) uses the empty rating area for its own control.
-                let stack = NSStackView(views: cells)
-                stack.spacing = 6
-                let area = NSView()
-                for view in [stack, ratingOverlay] {
-                    view.translatesAutoresizingMaskIntoConstraints = false
-                    area.addSubview(view)
-                }
-                NSLayoutConstraint.activate([
-                    stack.leadingAnchor.constraint(equalTo: area.leadingAnchor), stack.trailingAnchor.constraint(equalTo: area.trailingAnchor),
-                    stack.topAnchor.constraint(equalTo: area.topAnchor), stack.bottomAnchor.constraint(equalTo: area.bottomAnchor),
-                    ratingOverlay.trailingAnchor.constraint(equalTo: area.trailingAnchor),
-                    ratingOverlay.leadingAnchor.constraint(greaterThanOrEqualTo: area.leadingAnchor),
-                    ratingOverlay.centerYAnchor.constraint(equalTo: area.centerYAnchor),
-                    area.heightAnchor.constraint(greaterThanOrEqualTo: ratingOverlay.heightAnchor)
-                ])
-                columns.append(area)
-            } else {
-                columns += cells
-            }
-        }
-        if let heart {
-            let heartColumn = column([heart], width: Self.shopHeartWidth, id: "shopHeartColumn")
-            heartColumn.alignment = .centerX
-            columns.append(heartColumn)
-        }
-        // Search rows add a "Lowest" column beside the price; nil-in-optional keeps the column empty for alignment.
-        if let marker {
-            let badge = marker.map { dealBadge($0, color: .systemGreen) }
-            badge?.setAccessibilityIdentifier("shopLowest")
-            columns.append(column(badge.map { [$0] } ?? [], width: Self.shopMarkerWidth, id: "shopMarkerColumn"))
-        }
-        // Two right-aligned lines: the price, with the usual price struck through beside it on a sale; beneath it the
-        // store in gray, or a green tag with the store and the discount on a sale. A real end date or the all-time-low
-        // note goes on a small third line.
+    /// A green "−75%" pill, the one place a discount is shown in a row or on a game page.
+    func discountPill(_ savings: Int, size: CGFloat = 11) -> NSView {
+        let label = NSTextField(labelWithString: "\u{2212}\(savings)%")
+        label.font = .monospacedDigitSystemFont(ofSize: size, weight: .bold)
+        label.textColor = .white
+        label.alignment = .center
+        label.setAccessibilityElement(false)
+        let pill = NSView()
+        pill.wantsLayer = true
+        pill.layer?.backgroundColor = NSColor.systemGreen.cgColor
+        pill.layer?.cornerRadius = 5
+        label.translatesAutoresizingMaskIntoConstraints = false
+        pill.addSubview(label)
+        NSLayoutConstraint.activate([
+            label.leadingAnchor.constraint(equalTo: pill.leadingAnchor, constant: 6),
+            label.trailingAnchor.constraint(equalTo: pill.trailingAnchor, constant: -6),
+            label.topAnchor.constraint(equalTo: pill.topAnchor, constant: 2),
+            label.bottomAnchor.constraint(equalTo: pill.bottomAnchor, constant: -2)
+        ])
+        pill.setContentHuggingPriority(.required, for: .horizontal)
+        pill.setContentCompressionResistancePriority(.required, for: .horizontal)
+        pill.setAccessibilityElement(true)
+        pill.setAccessibilityRole(.staticText)
+        pill.setAccessibilityLabel("\(savings)% off")
+        pill.setAccessibilityIdentifier("shopDiscount")
+        pill.toolTip = "\(savings)% off the usual price"
+        return pill
+    }
+
+    /// The right end of every shop row: an optional discount pill, then a right-aligned block with the price (the
+    /// usual price struck through beside it), the store beneath it and, when known, the all-time low on a third line.
+    /// The block has a fixed width so prices line up from row to row.
+    func priceCluster(price: ShopPrice?, priceText: String? = nil, was: String? = nil, savings: Int? = nil,
+                      highlight: Bool = false, store: String? = nil, footer: NSView? = nil) -> NSView {
         var top: [NSView] = []
         if let shown = price ?? priceText.map({ ShopPrice(text: $0, original: $0, converted: false, value: nil) }) {
             top.append(priceLabel(shown, highlight: highlight))
@@ -596,7 +555,7 @@ extension SetupController {
                 .foregroundColor: NSColor.secondaryLabelColor,
                 .strikethroughStyle: NSUnderlineStyle.single.rawValue]))
             label.setAccessibilityIdentifier("shopWasPrice")
-            top.append(label)
+            top.insert(label, at: 0)
         }
         for case let label as NSTextField in top {
             label.lineBreakMode = .byTruncatingHead
@@ -609,26 +568,35 @@ extension SetupController {
         topLine.alignment = .firstBaseline
         topLine.spacing = 6
         topLine.setAccessibilityIdentifier("shopPriceLine")
-        let sale = savings.flatMap { $0 > 0 ? $0 : nil }
-        let storeLine: NSView? = store != nil || sale != nil ? storeTag(store, savings: sale) : nil
-        func slot(_ view: NSView?, height: CGFloat?) -> NSView {
+        func slot(_ view: NSView?) -> NSView {
             // A full-width line with its content pinned to the right edge.
             let line = NSStackView()
             line.orientation = .horizontal
             if let view { line.addView(view, in: .trailing) }
-            if let height { line.heightAnchor.constraint(equalToConstant: height).isActive = true }
             return line
         }
-        var lines = [slot(topLine, height: 17), slot(storeLine, height: 15)]
-        if let footer { lines.append(slot(footer, height: nil)) }
-        let block = column(lines, width: Self.shopOfferWidth, id: "shopPriceColumn")
-        for line in lines { line.widthAnchor.constraint(equalTo: block.widthAnchor).isActive = true }
+        var lines = [slot(topLine)]
+        if let store { lines.append(slot(storeTag(store))) }
+        if let footer { lines.append(slot(footer)) }
+        let block = NSStackView(views: lines)
+        block.orientation = .vertical
+        block.alignment = .trailing
         block.spacing = 2
-        columns.append(block)
-        let cluster = NSStackView(views: columns)
+        block.setAccessibilityIdentifier("shopPriceColumn")
+        block.widthAnchor.constraint(equalToConstant: Self.shopOfferWidth).isActive = true
+        block.setContentCompressionResistancePriority(.required, for: .horizontal)
+        block.setHuggingPriority(.required, for: .horizontal)
+        for line in lines { line.widthAnchor.constraint(equalTo: block.widthAnchor).isActive = true }
+        // The pill column is reserved in every row, so prices line up whether or not a game is on sale.
+        let pillColumn = NSStackView()
+        pillColumn.orientation = .horizontal
+        if let sale = savings, sale > 0 { pillColumn.addView(discountPill(sale), in: .trailing) }
+        pillColumn.widthAnchor.constraint(equalToConstant: Self.shopPercentWidth).isActive = true
+        pillColumn.setAccessibilityIdentifier("shopPercentColumn")
+        let cluster = NSStackView(views: [pillColumn, block])
         cluster.orientation = .horizontal
-        cluster.alignment = .centerY
-        cluster.spacing = 6
+        cluster.alignment = .top
+        cluster.spacing = 8
         cluster.setAccessibilityIdentifier("shopPriceCluster")
         cluster.setHuggingPriority(.required, for: .horizontal)
         return cluster
@@ -639,66 +607,69 @@ extension SetupController {
         var tips = [deal.store ?? "Store"]
         let compat = compatibilityBadge(compatibility(steamAppId: deal.steamAppId))
         if let compat { badges.append(compat.badge); tips.append(compat.tip) }
-        if let percent = deal.steamRatingPercent {
-            tips.append("Steam reviews: " + (deal.steamRating.map { "\($0) (\(percent)%)" } ?? "\(percent)%"))
-        }
-        if let metacritic = deal.metacritic { tips.append("Metacritic score: \(metacritic)") }
-        if let rating = deal.dealRating { tips.append(String(format: "CheapShark deal rating: %.1f of 10", rating)) }
         if deal.installed { badges.append(("checkmark.circle.fill", "Installed", .systemGreen)) }
-        let ratings = ShopRatings(steamPercent: deal.steamRatingPercent, steamText: deal.steamRating,
-                                  metacritic: deal.metacritic, deal: deal.dealRating)
         let salePrice = shopPrice(deal.salePrice, "USD")
         let heart = wishlistHeart(key: deal.gameId.map { "cs:" + $0 } ?? "title:" + deal.title.lowercased(), title: deal.title,
                                   payload: ["title": deal.title, "game_id": deal.gameId ?? "", "steam_app_id": deal.steamAppId ?? "", "thumb": deal.thumb ?? ""])
-        let trailing = [priceCluster(heart: nil, price: salePrice,
+        let trailing = [priceCluster(price: salePrice,
                                      was: deal.normalPrice.flatMap { $0 > deal.salePrice ? shopPrice($0, "USD").text : nil },
-                                     savings: deal.savings, ratings: ratings, store: deal.store)]
+                                     savings: deal.savings, store: deal.store)]
         if salePrice.converted { tips.append("Price: \(salePrice.spoken)") }
         var spoken = "\(deal.title), \(salePrice.spoken)"
         if let normal = deal.normalPrice, normal > deal.salePrice { spoken += ", was \(shopPrice(normal, "USD").spoken), \(deal.savings)% off" }
         spoken += (deal.installed ? ", installed" : "") + ". " + tips.dropFirst().joined(separator: ". ")
-        return dealRow(artwork: dealArtwork(deal.thumb), title: deal.title,
+        return dealRow(artwork: dealArtwork(steamArtURL(deal.steamAppId) ?? deal.thumb), title: deal.title,
                        detail: dealBadges(badges), detailTip: tips.joined(separator: "\n"), trailing: trailing,
-                       accessibility: "Open \(deal.title) deal at \(deal.store ?? "store"), " + spoken,
+                       accessibility: "Open \(deal.title) at \(deal.store ?? "store"), " + spoken,
                        actions: [shopTargetButton(key: heart.identifier!.rawValue, title: deal.title, currency: "USD"), heart]) { [weak self] in
-            self?.openShopLink(deal.url, hosts: cheapSharkHosts)
+            self?.showShopGame(self?.shopDetail(deal: deal))
         }
     }
 
-    /// `ratingColumns` reserves the (empty) rating columns when the row shares a list with store deals, as on Home.
-    func giveawayRow(_ giveaway: Giveaway, ratingColumns: Bool = false) -> NSView {
+    func giveawayRow(_ giveaway: Giveaway) -> NSView {
         var badges: [(symbol: String?, text: String, color: NSColor)] = []
         var tips: [String] = []
         if let type = giveaway.type { badges.append((nil, type, .secondaryLabelColor)); tips.append(type) }
         if !giveaway.platforms.isEmpty { tips.append("Platforms: " + giveaway.platforms.joined(separator: ", ")) }
-        // The store giving it away goes under the price, like every other row; plain "PC" says nothing about the store.
-        let giver = giveaway.platforms.first { !["pc", "drm-free"].contains($0.lowercased()) }
-        var trailing: [NSView] = []
         var reminder: NSButton?
         if let end = DealExpiry.parseGamerPowerEnd(giveaway.endDate), end > dealsNow() {
             tips.append("Ends " + DateFormatter.localizedString(from: end, dateStyle: .medium, timeStyle: .short))
-            let key = "giveaway:" + giveaway.id
-            if let id = dealReminders[key], reminderStore.access == .granted, !reminderStore.exists(id) {
-                dealReminders[key] = nil
-            }
-            let remind = RowControlButton(title: "", target: self, action: #selector(dealReminderClicked(_:)))
-            remind.identifier = NSUserInterfaceItemIdentifier(giveaway.id)
-            configureReminderButton(remind, giveaway: giveaway, end: end)
-            reminder = remind
+            reminder = reminderButton(giveaway, end: end)
         }
         // GamerPower lists the usual value in US dollars ("$19.99").
-        let worthPrice = giveaway.worth.flatMap { Double($0.replacingOccurrences(of: "$", with: "")) }.map { shopPrice($0, "USD") }
+        let worthPrice = giveawayWorth(giveaway)
         let heart = wishlistHeart(key: "title:" + giveaway.title.lowercased(), title: giveaway.title, payload: ["title": giveaway.title, "thumb": giveaway.thumb ?? ""])
-        trailing.append(priceCluster(heart: nil, price: nil, priceText: "Free", was: worthPrice?.text ?? giveaway.worth, highlight: true,
-                                     ratings: ratingColumns ? ShopRatings.none : nil, store: giver, footer: reminder))
+        let trailing = [priceCluster(price: nil, priceText: "Free", was: worthPrice?.text ?? giveaway.worth, highlight: true,
+                                     store: giveawayStore(giveaway), footer: reminder)]
         if let worthPrice, worthPrice.converted { tips.append("Usually \(worthPrice.spoken)") }
         return dealRow(artwork: dealArtwork(giveaway.thumb), title: giveaway.title,
                        detail: dealBadges(badges), detailTip: tips.joined(separator: "\n"), trailing: trailing,
                        accessibility: "Open \(giveaway.title) giveaway, free" + ((worthPrice?.spoken ?? giveaway.worth).map { ", usually \($0)" } ?? "")
                         + (tips.isEmpty ? "" : ". " + tips.joined(separator: ". ")),
                        actions: [heart]) { [weak self] in
-            self?.openShopLink(giveaway.url, hosts: gamerPowerHosts)
+            self?.showShopGame(self?.shopDetail(giveaway: giveaway))
         }
+    }
+
+    /// The store giving a game away; plain "PC" or "DRM-Free" says nothing about the store.
+    func giveawayStore(_ giveaway: Giveaway) -> String? {
+        giveaway.platforms.first { !["pc", "drm-free"].contains($0.lowercased()) }
+    }
+
+    func giveawayWorth(_ giveaway: Giveaway) -> ShopPrice? {
+        giveaway.worth.flatMap { Double($0.replacingOccurrences(of: "$", with: "")) }.map { shopPrice($0, "USD") }
+    }
+
+    /// The end date as its own control: click to add (or remove) a Reminders entry the day before it ends.
+    func reminderButton(_ giveaway: Giveaway, end: Date) -> NSButton {
+        let key = "giveaway:" + giveaway.id
+        if let id = dealReminders[key], reminderStore.access == .granted, !reminderStore.exists(id) {
+            dealReminders[key] = nil
+        }
+        let remind = RowControlButton(title: "", target: self, action: #selector(dealReminderClicked(_:)))
+        remind.identifier = NSUserInterfaceItemIdentifier(giveaway.id)
+        configureReminderButton(remind, giveaway: giveaway, end: end)
+        return remind
     }
 
     func configureReminderButton(_ button: NSButton, giveaway: Giveaway, end: Date) {

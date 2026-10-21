@@ -274,6 +274,18 @@ def search(query, country="US", refresh=False, now=None, opener=None):
             "errors": list(dict.fromkeys(errors))}
 
 
+def game(game_id, refresh=False, now=None, opener=None):
+    """One CheapShark game with every current store offer and its all-time low, for the Cube Shop game page."""
+    game_id = str(game_id or "")
+    if not game_id.isdigit():
+        raise ShopError("Unknown game.")
+    games, error = games_by_ids([game_id], refresh, now, opener)
+    found = games.get(game_id)
+    if found is None and error:
+        raise deals.DealsError(error)
+    return {"game": found, "errors": [error] if error else []}
+
+
 def wishlist_prices(items, country="US", refresh=False, now=None, opener=None):
     """Current best prices for wishlist items: CheapShark game IDs in batches of 25, App Store IDs via lookup."""
     game_ids = [item["game_id"] for item in items if item.get("game_id")]

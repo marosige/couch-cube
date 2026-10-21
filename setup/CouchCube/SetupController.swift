@@ -82,6 +82,10 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
     let shopNav = NSSegmentedControl(labels: ["Home", "Deals", "Free Games", "Wishlist"], trackingMode: .selectOne, target: nil, action: nil)
     static let shopNavTabs = [0, 1, 2, 4]
     var shopReturnTab = 0
+    /// Cube Shop game pages, by wishlist key; Back and Forward reopen them from here.
+    var shopDetails: [String: ShopDetail] = [:]
+    var shopDetailKey: String?
+    let shopDetailContent = NSStackView()
     let shopScope = ScopePopUp(labels: ["My Stores", "All Stores"])
     let shopScopeHint = NSTextField(wrappingLabelWithString: "")
     let shopScopeBar = NSStackView()
@@ -883,7 +887,13 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
         driveDetailRows.alignment = .leading
         driveDetailRows.spacing = 16
         addPage("Drive", content: column([driveDetailRows]))
-        addPage("Cube Shop", content: column([cubeShopPage()]))
+        // Cube Shop is a storefront: wider than the settings pages, so shelves show several games side by side.
+        addPage("Cube Shop", content: column([cubeShopPage()]), maxWidth: 960)
+        shopDetailContent.orientation = .vertical
+        shopDetailContent.alignment = .leading
+        shopDetailContent.spacing = 16
+        shopDetailContent.setAccessibilityIdentifier("shopGamePage")
+        addPage("Game", content: column([shopDetailContent]), maxWidth: 820)
         navigationBar.orientation = .vertical
         navigationBar.alignment = .leading
         let sidebarScroll = NSScrollView()
@@ -1071,11 +1081,11 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
         Set(UserDefaults.standard.stringArray(forKey: collapsedAppCategoriesKey) ?? [])
     var appCategoryToggles: [String: NSButton] = [:]
 
-    static let shopArtworkSize = NSSize(width: 80, height: 40)
+    static let shopArtworkSize = NSSize(width: 112, height: 52)
     static let shopHeadingSize: CGFloat = 19
     /// Extra room above each Home section after the first (on top of the heading's own 14 pt), so sections read as blocks.
     static let shopSectionGap: CGFloat = 14
-    static let shopHeartWidth: CGFloat = 22, shopPriceWidth: CGFloat = 96, shopPercentWidth: CGFloat = 78, shopOfferWidth: CGFloat = 180, shopMarkerWidth: CGFloat = 80, shopChildIndent: CGFloat = 40
+    static let shopHeartWidth: CGFloat = 22, shopPriceWidth: CGFloat = 96, shopPercentWidth: CGFloat = 56, shopOfferWidth: CGFloat = 190, shopMarkerWidth: CGFloat = 80, shopChildIndent: CGFloat = 40
 
     static let storeIconCache = NSCache<NSString, NSImage>()
 

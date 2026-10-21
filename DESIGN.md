@@ -25,25 +25,33 @@ Settings groups Game library, App Store, Retro consoles, Console Mode and App Se
 in that order. Game library also contains what used to be Library storage.
 
 **Cube Shop** (it replaced the Deals page and always opens on Home) is a native,
-read-only shop window for PC games: **Home**, **Deals**, **Free Games** and **Wishlist**, plus
-search results. It never buys anything, signs in anywhere or claims that a game
-runs on a Mac. Every row is one clickable row (hover, pointer, keyboard and VoiceOver) that
-opens your **default browser**: store deals use CheapShark's `cheapshark.com/redirect` link
-(their terms require it, Steam deals included), giveaways open on gamerpower.com, Mac App
-Store results open apps.apple.com (which hands off to the App Store app). Any other host or
-scheme is refused. There is no in-app browser and no store-app deep linking.
+read-only Mac game store for PC games: **Home**, **Deals**, **Free Games** and **Wishlist**, plus
+search results and a **game page** per game. It never buys anything, signs in anywhere or claims
+that a game runs on a Mac. The page is wider than the settings pages (up to 960 pt).
+
+- **Home** is a storefront: one featured banner (big Steam art, discount pill, price), then shelves
+  of cards: On Your Wishlist (wishlist games on sale or at your target), Top Deals, Price Drops and
+  Free to Keep, each with **See All** to the full list. Cards show art, title, Mac/Windows badge,
+  the discount pill and the price, with the wishlist heart on the art.
+- **One row style** everywhere else: art (Steam's own header art when the game is on Steam), the
+  title with its Mac/Windows badge, Set Target and the heart; on the right a green discount pill,
+  then a fixed-width price block: usual price struck through and the price; the store (logo and
+  name) under it; and when known the all-time low: "Lowest ever $7.99 (−47%)" with the price in your
+  Shop currency and the discount it was, or a green "All-time low" when today's price is the record.
+  Search lists one row per game (best price and how many stores); ratings live on the game page.
+- **Game page** (opened by any row or card; Back/Forward and ⌘[ ⌘] return to the same list): big
+  art, title, badges (Mac/Windows, Installed, Steam rating, Metacritic), a price card with the pill,
+  price, usual price, all-time low, target and heart, and one main button ("View at GOG", "Get It on
+  Epic Games Store"); then **Where to Buy** with every store cheapest first, Lowest on the cheapest.
+  A page opened from a single deal or the wishlist loads every store with `shop-game --id`.
+- **Links** open your default browser only: CheapShark's `cheapshark.com/redirect` for stores
+  (their terms require it, Steam included), gamerpower.com for giveaways, apps.apple.com for the
+  Mac App Store. Any other host or scheme is refused. No in-app browser, no store-app deep links.
+
 The header has one large search field ("Search games in every store") and, below it, the four
 sections with a quiet **My Stores / All Stores** popup and Refresh on the right. Searching
 (Return, or a short pause after two or more letters) shows results in place of the section;
-clearing the field goes back. Home shows a few games per section with a **See all ›** link.
-Rate source, attribution and store-filter details sit in small print at the bottom or in tooltips.
-
-Every row has the artwork, the title with its Mac/Windows badge, then Set Target and the
-wishlist heart (neither opens the store). On the right, the price block has two right-aligned
-lines: the price, with the usual price struck through beside it on a sale; under it the store by
-its full name, gray with its icon, or on a sale a green tag with the store and discount
-("Steam −75%"). A game row covering several stores shows only its lowest price and best discount;
-the stores are listed under it. A real end date or the all-time-low note goes on a small line below.
+clearing the field goes back. Rate source, attribution and store-filter details sit in small print.
 
 - **Sources.** [CheapShark](https://www.cheapshark.com) store deals and per-store prices (USD),
   [GamerPower](https://www.gamerpower.com) giveaways, and Apple's keyless
@@ -57,11 +65,10 @@ the stores are listed under it. A real end date or the all-time-low note goes on
 - **My Stores / All Stores.** Home, Deals and Free Games share one saved toggle. My Stores keeps
   the stores whose Mac app or Windows launcher is installed (detected like App Store does). With
   none installed, All Stores is used and a hint explains why.
-- **Home** shows Wishlist deals, Featured deals, Price drops and Free now, picked locally from
-  discount, ratings, recency and your wishlist. Nothing about you is sent anywhere.
+- **Picks** on Home are made locally from discount, ratings, recency and your wishlist. Nothing about
+  you is sent anywhere.
 - **Deals rows** show an Installed badge when a deal's Steam app ID matches a game installed in
-  a Steam library on this Mac. Every row of a list shares fixed columns: Steam rating, Metacritic
-  and deal rating (each left empty when a game lacks it), then the price block.
+  a Steam library on this Mac.
 - **Expiry and Reminders.** Only GamerPower provides end dates (`end_date`, read as UTC because
   the API doesn't state a time zone; "N/A" means no badge). CheapShark has none, so store deals
   never show one (a source limit; nothing is guessed from sale start dates or price history). The
@@ -71,8 +78,7 @@ the stores are listed under it. A real end date or the all-time-low note goes on
   first use; if denied, a note links to Privacy & Security › Reminders. A second click offers
   removal, and a reminder you delete in Reminders resets the badge.
 - **Search** runs on Return or after a short pause, combines identical searches and caches
-  replies. A game sold in one store is an ordinary row; a game in several stores gets a row with
-  its lowest price and, indented under it, one row per store, cheapest first and marked Lowest. CheapShark prices are
+  replies. CheapShark prices are
   USD and App Store prices use your storefront's currency, labelled; without a Shop currency the
   App Store rows are grouped after the USD stores instead of being mixed into the sort.
 - **Store icons.** Every store price without a discount has a small store icon (bundled launcher
