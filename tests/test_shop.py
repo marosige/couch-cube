@@ -185,6 +185,14 @@ class ShopTests(unittest.TestCase):
         with self.assertRaises(shop.ShopError):
             shop.steam_details("abc", opener=Opener(), now=1000)
 
+    def test_deals_get_their_all_time_low(self):
+        deals_list = [{"id": "a", "game_id": "100", "sale_price": 4.99}, {"id": "b", "game_id": "200", "sale_price": 1.0},
+                      {"id": "c", "game_id": None, "sale_price": 2.0}]
+        enriched = shop.with_insights(deals_list, opener=Opener(), now=1000)
+        self.assertEqual(enriched[0]["insight"]["kind"], "record", "4.99 equals Hollow Knight's recorded low")
+        self.assertNotIn("insight", enriched[1], "No history, no claim")
+        self.assertNotIn("insight", enriched[2])
+
     def test_single_game_for_the_game_page(self):
         report = shop.game("100", opener=Opener(), now=1000)
         self.assertEqual(report["game"]["title"], "Hollow Knight")

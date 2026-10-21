@@ -1109,7 +1109,7 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
     static let shopHeadingSize: CGFloat = 19
     /// Extra room above each Home section after the first (on top of the heading's own 14 pt), so sections read as blocks.
     static let shopSectionGap: CGFloat = 14
-    static let shopHeartWidth: CGFloat = 22, shopPriceWidth: CGFloat = 96, shopPercentWidth: CGFloat = 56, shopOfferWidth: CGFloat = 190, shopMarkerWidth: CGFloat = 80, shopChildIndent: CGFloat = 40
+    static let shopHeartWidth: CGFloat = 22, shopPriceWidth: CGFloat = 96, shopPercentWidth: CGFloat = 128, shopOfferWidth: CGFloat = 190, shopMarkerWidth: CGFloat = 80, shopChildIndent: CGFloat = 40
 
     static let storeIconCache = NSCache<NSString, NSImage>()
 

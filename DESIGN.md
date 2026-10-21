@@ -36,7 +36,7 @@ that a game runs on a Mac. The page is wider than the settings pages (up to 960 
 - **One row style** everywhere else: art (Steam's own header art when the game is on Steam), the
   title with its Mac/Windows badge, Set Target and the heart; on the right a green discount pill,
   then a fixed-width price block: usual price struck through and the price; the store (logo and
-  name) under it; and when known the all-time low: "Lowest ever $7.99 (−47%)" with the price in your
+  name) under it; and when known, under the discount pill, the all-time low: "Lowest $7.99 (−47%)" in your
   Shop currency and the discount it was, or a green "All-time low" when today's price is the record.
   Search lists one row per game (best price and how many stores); ratings live on the game page.
 - **Game page** (opened by any row or card; Back/Forward and ⌘[ ⌘] return to the same list): a

@@ -397,13 +397,13 @@ extension SetupController {
         return tag
     }
 
-    /// The all-time low in shop terms: "Lowest ever $0.99 (−90%)", or "All-time low" in green when today's price
+    /// The all-time low in shop terms: "Lowest $0.99 (−90%)", or "All-time low" in green when today's price
     /// is the record. `normal` is the usual price, needed for the percent.
     func lowestText(_ insight: PriceInsight, normal: Double?) -> String {
         if insight.kind == "record" { return "All-time low" }
         if insight.low == 0 { return insight.text }
         let percent = lowestEverDiscount(low: insight.low, normal: normal).map { " (\u{2212}\($0)%)" } ?? ""
-        return "Lowest ever " + shopPrice(insight.low, insight.currency).text + percent
+        return "Lowest " + shopPrice(insight.low, insight.currency).text + percent
     }
 
     func insightLabel(_ insight: PriceInsight?, normal: Double? = nil) -> NSView? {
@@ -544,7 +544,7 @@ extension SetupController {
     /// usual price struck through beside it), the store beneath it and, when known, the all-time low on a third line.
     /// The block has a fixed width so prices line up from row to row.
     func priceCluster(price: ShopPrice?, priceText: String? = nil, was: String? = nil, savings: Int? = nil,
-                      highlight: Bool = false, store: String? = nil, footer: NSView? = nil) -> NSView {
+                      highlight: Bool = false, store: String? = nil, footer: NSView? = nil, lowest: NSView? = nil) -> NSView {
         var top: [NSView] = []
         if let shown = price ?? priceText.map({ ShopPrice(text: $0, original: $0, converted: false, value: nil) }) {
             top.append(priceLabel(shown, highlight: highlight))
@@ -587,10 +587,14 @@ extension SetupController {
         block.setContentCompressionResistancePriority(.required, for: .horizontal)
         block.setHuggingPriority(.required, for: .horizontal)
         for line in lines { line.widthAnchor.constraint(equalTo: block.widthAnchor).isActive = true }
-        // The pill column is reserved in every row, so prices line up whether or not a game is on sale.
+        // The pill column is reserved in every row, so prices line up whether or not a game is on sale:
+        // the discount pill, and under it the all-time low ("All-time low" or "Lowest $7.99 (−47%)").
         let pillColumn = NSStackView()
-        pillColumn.orientation = .horizontal
-        if let sale = savings, sale > 0 { pillColumn.addView(discountPill(sale), in: .trailing) }
+        pillColumn.orientation = .vertical
+        pillColumn.alignment = .trailing
+        pillColumn.spacing = 4
+        if let sale = savings, sale > 0 { pillColumn.addArrangedSubview(discountPill(sale)) }
+        if let lowest { pillColumn.addArrangedSubview(lowest) }
         pillColumn.widthAnchor.constraint(equalToConstant: Self.shopPercentWidth).isActive = true
         pillColumn.setAccessibilityIdentifier("shopPercentColumn")
         let cluster = NSStackView(views: [pillColumn, block])
@@ -613,7 +617,8 @@ extension SetupController {
                                   payload: ["title": deal.title, "game_id": deal.gameId ?? "", "steam_app_id": deal.steamAppId ?? "", "thumb": deal.thumb ?? ""])
         let trailing = [priceCluster(price: salePrice,
                                      was: deal.normalPrice.flatMap { $0 > deal.salePrice ? shopPrice($0, "USD").text : nil },
-                                     savings: deal.savings, store: deal.store)]
+                                     savings: deal.savings, store: deal.store,
+                                     lowest: insightLabel(deal.insight, normal: deal.normalPrice))]
         if salePrice.converted { tips.append("Price: \(salePrice.spoken)") }
         var spoken = "\(deal.title), \(salePrice.spoken)"
         if let normal = deal.normalPrice, normal > deal.salePrice { spoken += ", was \(shopPrice(normal, "USD").spoken), \(deal.savings)% off" }

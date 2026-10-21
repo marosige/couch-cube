@@ -116,9 +116,8 @@ extension SetupController {
     }
 
     var consoleSignIn: String {
-        if automaticLoginUser != nil { return "auto" }
-        let saved = UserDefaults.standard.string(forKey: "consoleSignIn") ?? "password"
-        return saved == "auto" ? "password" : saved
+        // The saved choice wins, so "auto" can be picked to show its guide before macOS has it on.
+        UserDefaults.standard.string(forKey: "consoleSignIn") ?? (automaticLoginUser != nil ? "auto" : "password")
     }
 
     var loginItemEnabled: Bool {

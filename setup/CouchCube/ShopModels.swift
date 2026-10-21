@@ -79,7 +79,7 @@ func steamArtURL(_ appId: String?, _ kind: String = "header.jpg") -> String? {
     return "https://cdn.cloudflare.steamstatic.com/steam/apps/\(appId)/\(kind)"
 }
 
-/// The all-time low in shop terms: how big a discount it was and what it cost, e.g. "Lowest ever $0.99 (−90%)".
+/// The all-time low in shop terms: how big a discount it was and what it cost, e.g. "Lowest $0.99 (−90%)".
 /// The percent needs the usual price; without it only the price is shown.
 func lowestEverDiscount(low: Double, normal: Double?) -> Int? {
     guard let normal, normal > 0, low < normal else { return nil }

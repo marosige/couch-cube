@@ -308,6 +308,24 @@ def resolve_title(title, refresh=False, now=None, opener=None):
     return None
 
 
+def with_insights(deals_list, refresh=False, now=None, opener=None):
+    """Adds the all-time low to store deals: CheapShark's deal list has no price history, so the games are
+    looked up in batches of 25 (cached) and each deal's sale price is compared with the recorded low."""
+    ids = [deal["game_id"] for deal in deals_list if deal.get("game_id")]
+    if not ids:
+        return deals_list
+    try:
+        games, _ = games_by_ids(ids, refresh, now, opener)
+    except deals.DealsError:
+        return deals_list
+    result = []
+    for deal in deals_list:
+        history = games.get(deal.get("game_id") or "", {}).get("history")
+        insight = wishlist.price_insight(deal["sale_price"], "USD", history) if history else None
+        result.append({**deal, "insight": insight} if insight else deal)
+    return result
+
+
 def home(mine, scope="mine", refresh=False, installed=frozenset(), now=None, opener=None):
     """Featured deals, recent price drops and free games for the chosen scope, ranked locally."""
     use_mine = scope == "mine" and bool(mine)
@@ -336,6 +354,7 @@ def home(mine, scope="mine", refresh=False, installed=frozenset(), now=None, ope
     except deals.DealsError as exc:
         errors.append(str(exc))
         free = []
+    featured, drops = with_insights(featured, refresh, now, opener), with_insights(drops, refresh, now, opener)
     return {"scope": "mine" if use_mine else "all", "my_stores": mine, "featured": featured, "drops": drops,
             "free": free, "errors": list(dict.fromkeys(errors))}
 

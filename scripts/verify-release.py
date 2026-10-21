@@ -101,7 +101,9 @@ with tempfile.TemporaryDirectory(prefix="couch-cube-release-") as directory:
         visible = sorted(entry.name for entry in mount.iterdir() if not entry.name.startswith("."))
         assert visible == ["Applications", "CouchCube.app"], visible
         assert (mount / ".DS_Store").is_file(), "Installer window layout missing"
-        assert any((mount / ".background").glob("*.tiff")), "Installer background missing"
+        # dmgbuild stores it as .background.tiff (older tools used a .background folder).
+        assert (mount / ".background.tiff").is_file() or any((mount / ".background").glob("*.tif*")), \
+            "Installer background missing: " + ", ".join(sorted(entry.name for entry in mount.iterdir()))
         assert (mount / ".VolumeIcon.icns").is_file()
         assert (mount / ".VolumeIcon.icns").read_bytes() == (app / "Contents/Resources/Console.icns").read_bytes()
         local_icon = (app / "Contents/Resources/Console.icns").read_bytes()

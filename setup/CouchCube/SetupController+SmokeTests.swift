@@ -2789,7 +2789,7 @@ extension SetupController {
         rerenderShop()
         window.contentView!.layoutSubtreeIfNeeded()
         precondition(views(shopDetailContent).contains { $0.accessibilityIdentifier() == "shopGameHero" })
-        precondition(labels(shopDetailContent).contains("$9.99") && labels(shopDetailContent).contains("Lowest ever $7.99 (\u{2212}47%)"),
+        precondition(labels(shopDetailContent).contains("$9.99") && labels(shopDetailContent).contains("Lowest $7.99 (\u{2212}47%)"),
                      "The all-time low with its price and discount: \(labels(shopDetailContent))")
         let lowest = views(shopDetailContent).compactMap { $0 as? NSTextField }.filter { $0.accessibilityIdentifier() == "shopLowest" }.map(\.stringValue)
         precondition(lowest.map { $0.replacingOccurrences(of: "\u{00A0}", with: " ") } == ["Lowest USD"],
@@ -2914,14 +2914,14 @@ extension SetupController {
         navigateHistory(-1)
         // The all-time low: only CheapShark's record minimum, as a small line under the price, with the record in the tooltip.
         let insights = views(searchList).filter { $0.accessibilityIdentifier() == "shopPriceInsight" }.compactMap { $0 as? NSTextField }
-        precondition(insights.map(\.stringValue).sorted() == ["All-time low", "Lowest ever $7.99 (\u{2212}47%)"]
+        precondition(insights.map(\.stringValue).sorted() == ["All-time low", "Lowest $7.99 (\u{2212}47%)"]
                      && insights.allSatisfy { ($0.toolTip ?? "").contains("7.99 USD") || ($0.toolTip ?? "").contains("19.99 USD") }
                      && insights.allSatisfy { !($0.toolTip ?? "").lowercased().contains("average") && ($0.toolTip ?? "").contains("2025") }
                      && !views(searchList).filter { $0.accessibilityIdentifier() == "shopOffer" }.contains { views($0).contains { $0.accessibilityIdentifier() == "shopPriceInsight" } },
                      "All-time lows with their price and discount, on the game rows: \(insights.map(\.stringValue))")
         for insight in insights {
-            let column = insight.superview!.superview!
-            precondition(column.accessibilityIdentifier() == "shopPriceColumn" && column.subviews.last === insight.superview, "The note sits under the price and store")
+            precondition(insight.superview?.accessibilityIdentifier() == "shopPercentColumn",
+                         "The all-time low sits under the discount pill")
         }
         precondition(PriceInsight(kind: "above", percent: nil, low: 0, currency: "USD", date: nil).text == "Was free before"
                      && PriceInsight(kind: "above", percent: nil, low: 0, currency: "USD", date: nil).detail.contains("free"))

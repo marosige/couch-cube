@@ -579,7 +579,7 @@ extension SetupController {
                            detailTip: ([best.map { "Lowest price: \($0.price.spoken) at \($0.offer.store)" }, compat?.tip].compactMap { $0 }).joined(separator: "\n"),
                            trailing: [priceCluster(price: best?.price, was: was, savings: best?.offer.savings, highlight: best != nil,
                                                    store: best?.offer.store,
-                                                   footer: best?.offer.storeId != nil ? insightLabel(game.insight, normal: normal) : nil)],
+                                                   lowest: best?.offer.storeId != nil ? insightLabel(game.insight, normal: normal) : nil)],
                            accessibility: "Open \(game.title)\(spoken)" + (compat.map { ". " + $0.tip } ?? ""),
                            actions: [shopTargetButton(key: heart.identifier!.rawValue, title: game.title, currency: best?.offer.currency ?? "USD"), heart]) { [weak self] in
             self?.showShopGame(self?.shopDetail(game: game))
@@ -976,7 +976,7 @@ extension SetupController {
         let was = item.best.flatMap { best in best.normalPrice.flatMap { $0 > best.price ? shopPrice($0, best.currency).text : nil } }
         trailing += [priceCluster(price: bestPrice, priceText: bestPrice == nil ? "\u{2014}" : nil, was: was,
                                   savings: item.onSale ? item.best?.savings : nil, highlight: item.onSale,
-                                  store: item.best?.store, footer: insightLabel(item.insight, normal: item.best?.normalPrice))]
+                                  store: item.best?.store, lowest: insightLabel(item.insight, normal: item.best?.normalPrice))]
         let artURL = steamArtURL(item.steamAppId) ?? item.thumb
         let art: NSView = safeDealURL(artURL ?? "") == nil
             ? symbolArtwork(item.appStoreId != nil ? "apple.logo" : "gamecontroller", size: Self.shopArtworkSize.height, width: Self.shopArtworkSize.width)

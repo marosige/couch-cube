@@ -24,6 +24,8 @@ struct StoreDeal: Decodable, Equatable {
     let thumb: String?
     let url: String
     var gameId: String? = nil
+    /// The all-time low (shop.with_insights); nil when CheapShark has no record.
+    var insight: PriceInsight? = nil
 }
 
 struct DealStore: Decodable, Equatable {

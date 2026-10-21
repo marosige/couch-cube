@@ -470,7 +470,7 @@ def deals_report(source, page=0, sort=None, store=None, search=None, platform=No
     if source == "cheapshark":
         report = tools.store_deals(page, sort or "rating", store or (",".join(ids) if mine and ids else None),
                                    search, refresh, installed_steam_app_ids())
-        return {**report, **scope}
+        return {**report, "deals": shop.with_insights(report["deals"], refresh), **scope}
     report = tools.giveaways(platform, kind, sort or "date", refresh)
     if mine and labels:
         report["giveaways"] = [item for item in report["giveaways"] if shop.in_scope(item, labels)]
