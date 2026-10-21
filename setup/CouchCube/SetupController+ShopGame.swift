@@ -529,16 +529,13 @@ extension SetupController {
                 icon.contentTintColor = .secondaryLabelColor
                 parts.insert(icon, at: 0)
             }
-            let inner = NSStackView(views: parts)
-            inner.spacing = 4
-            let pill = NSBox()
-            pill.boxType = .custom
-            pill.titlePosition = .noTitle
-            pill.borderWidth = 0
-            pill.cornerRadius = 9
-            pill.fillColor = .quaternaryLabelColor
-            pill.contentViewMargins = NSSize(width: 8, height: 2)
-            pill.contentView = inner
+            let pill = NSStackView(views: parts)
+            pill.spacing = 4
+            pill.edgeInsets = NSEdgeInsets(top: 3, left: 8, bottom: 3, right: 8)
+            pill.wantsLayer = true
+            pill.layer?.cornerRadius = 9
+            pill.layer?.backgroundColor = NSColor.quaternaryLabelColor.cgColor
+            pill.setHuggingPriority(.required, for: .horizontal)
             return pill
         } + [NSView()])
         tags.spacing = 6
