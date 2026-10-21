@@ -138,28 +138,15 @@ extension SetupController {
             line.setAccessibilityIdentifier("dealBadges")
             views.append(line)
         }
-        // What kind of game it is, right under the name (Steam's genres), like a store's category tags.
+        // What kind of game it is and where it runs, right under the name, like a store's tags.
         if let genres = detail.steam?.genres, !genres.isEmpty {
-            let tags = row(genres.map { genre in
-                let tag = NSTextField(labelWithString: genre)
-                tag.font = .systemFont(ofSize: 11, weight: .medium)
-                tag.textColor = .secondaryLabelColor
-                let pill = NSBox()
-                pill.boxType = .custom
-                pill.titlePosition = .noTitle
-                pill.borderWidth = 0
-                pill.cornerRadius = 9
-                pill.fillColor = .quaternaryLabelColor
-                pill.contentViewMargins = NSSize(width: 8, height: 2)
-                pill.contentView = tag
-                return pill
-            } + [NSView()])
-            tags.spacing = 6
-            tags.setAccessibilityIdentifier("shopGameGenres")
-            tags.setAccessibilityElement(true)
-            tags.setAccessibilityLabel("Genre: " + genres.joined(separator: ", "))
-            views.append(tags)
+            views.append(shopTags(genres.map { (nil, $0) }, label: "Genre", id: "shopGameGenres"))
         }
+        var platforms: [(symbol: String?, text: String)] = (detail.steam?.platforms ?? []).map {
+            ([ "Mac": "laptopcomputer", "Windows": "pc", "Linux": "terminal"][$0], $0)
+        }
+        if let deck = detail.steam?.deck, deck != "Unsupported" { platforms.append(("gamecontroller", "Steam Deck " + deck)) }
+        if !platforms.isEmpty { views.append(shopTags(platforms, label: "Platforms", id: "shopGamePlatforms")) }
 
         views.append(shopGamePriceCard(detail))
         if let about = shopGameAboutCard(detail) { views.append(about) }
@@ -517,6 +504,38 @@ extension SetupController {
                         accessibility: "Open \(deal.title), \(price.spoken)" + (deal.savings > 0 ? ", \(deal.savings)% off" : "")) { [weak self] in
             self?.showShopGame(self?.shopDetail(deal: deal))
         }
+    }
+
+    /// A row of small rounded tags (genres, platforms), each with an optional SF Symbol.
+    func shopTags(_ items: [(symbol: String?, text: String)], label: String, id: String) -> NSView {
+        let tags = row(items.map { item in
+            let tag = NSTextField(labelWithString: item.text)
+            tag.font = .systemFont(ofSize: 11, weight: .medium)
+            tag.textColor = .secondaryLabelColor
+            var parts: [NSView] = [tag]
+            if let symbol = item.symbol, let image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil) {
+                let icon = NSImageView(image: image)
+                icon.symbolConfiguration = .init(pointSize: 10, weight: .medium)
+                icon.contentTintColor = .secondaryLabelColor
+                parts.insert(icon, at: 0)
+            }
+            let inner = NSStackView(views: parts)
+            inner.spacing = 4
+            let pill = NSBox()
+            pill.boxType = .custom
+            pill.titlePosition = .noTitle
+            pill.borderWidth = 0
+            pill.cornerRadius = 9
+            pill.fillColor = .quaternaryLabelColor
+            pill.contentViewMargins = NSSize(width: 8, height: 2)
+            pill.contentView = inner
+            return pill
+        } + [NSView()])
+        tags.spacing = 6
+        tags.setAccessibilityIdentifier(id)
+        tags.setAccessibilityElement(true)
+        tags.setAccessibilityLabel(label + ": " + items.map(\.text).joined(separator: ", "))
+        return tags
     }
 
     /// A Shop game (every store's offer) as a card: the cheapest offer's price, struck-through usual price when on sale.

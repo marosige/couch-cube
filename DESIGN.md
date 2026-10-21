@@ -37,14 +37,15 @@ that a game runs on a Mac. The page is wider than the settings pages (up to 960 
   CheapShark by Steam app ID (cached a week) so every card has every store's price. Cards show art, title, Mac/Windows badge,
   the discount pill and the price, with the wishlist heart on the art.
 - **One row style** everywhere else: art (Steam's own header art when the game is on Steam), the
-  title with its Mac/Windows badge, Set Target and the heart; on the right a green discount pill,
+  title with its Mac/Windows badge and the heart (Set Target is on the game page and the wishlist); on the right a green discount pill,
   then a fixed-width price block: usual price struck through and the price; the store (logo and
   name) under it; and when known, under the discount pill, the all-time low: "Lowest $7.99 (−47%)" in your
   Shop currency and the discount it was, or a green "All-time low" when today's price is the record.
   Search lists one row per game (best price and how many stores); ratings live on the game page.
 - **Game page** (opened by any row or card; Back/Forward and ⌘[ ⌘] return to the same list): a
   gallery (the cover, then Steam's screenshots, with ‹ › arrows dimmed at either end and "2 / 8"), title, badges (Mac/Windows, Installed, Owned, Steam rating, Metacritic), genre tags (Action,
-  RPG… from Steam), a price card with the pill,
+  RPG… from Steam), every platform (Mac, Windows, Linux, Steam Deck Verified/Playable from Steam's keyless
+  Deck report; rows only say Mac or Windows), a price card with the pill,
   price, usual price, all-time low, target and heart, and one main button ("View at GOG", "Get It on
   Epic Games Store"); then **Where to Buy** with every store cheapest first, Lowest on the cheapest.
   A page opened from a single deal or the wishlist loads every store with `shop-game --id`.

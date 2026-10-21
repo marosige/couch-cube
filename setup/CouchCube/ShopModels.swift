@@ -98,6 +98,8 @@ struct SteamDetails: Decodable, Equatable {
     var storageBytes: Int64? = nil
     var controller: String? = nil
     var couch: [String]? = nil
+    var platforms: [String]? = nil
+    var deck: String? = nil
 }
 
 struct ShopGameReply: Decodable {

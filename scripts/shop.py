@@ -447,6 +447,22 @@ def storage_bytes(requirements):
     return None
 
 
+STEAM_DECK_REPORT = "https://store.steampowered.com/saleaction/ajaxgetdeckappcompatibilityreport?"
+DECK_CATEGORIES = {1: "Unsupported", 2: "Playable", 3: "Verified"}
+
+
+def steam_deck_status(app_id, refresh=False, now=None, opener=None):
+    """Steam Deck compatibility ("Verified", "Playable", "Unsupported") from Steam's keyless report, or None."""
+    url = STEAM_DECK_REPORT + urllib.parse.urlencode({"nAppID": app_id, "l": "english"})
+    try:
+        reply = deals.cached_fetch("steamdetails", "steam", url, STEAM_HOSTS, refresh, now, opener)
+    except deals.DealsError:
+        return None
+    data = reply.get("data") if isinstance(reply.get("data"), dict) else {}
+    results = data.get("results") if isinstance(data.get("results"), dict) else {}
+    return DECK_CATEGORIES.get(results.get("resolved_category"))
+
+
 def steam_details(app_id, refresh=False, now=None, opener=None):
     """Store facts for a Steam game's Cube Shop page: screenshots, description, genres, developer, release date,
     disk space, controller support and couch (local multiplayer) features. Cached for a week."""
@@ -481,6 +497,9 @@ def steam_details(app_id, refresh=False, now=None, opener=None):
             "screenshots": screenshots[:12], "storage_bytes": storage_bytes([r for r in requirements if r]),
             "controller": controller if controller in ("full", "partial") else None,
             "couch": [name for name in names("categories") if name in COUCH_CATEGORIES],
+            "platforms": [name for key, name in (("mac", "Mac"), ("windows", "Windows"), ("linux", "Linux"))
+                          if platforms.get(key) is True],
+            "deck": steam_deck_status(app_id, refresh, now, opener),
             "error": reply.get("error")}
 
 

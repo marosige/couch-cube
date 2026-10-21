@@ -53,6 +53,8 @@ class Opener:
             app = query["appids"][0]
             data = json.loads((FIX / "steam-appdetails.json").read_text())
             return Response(json.dumps({app: data.get(app, {"success": False})}).encode(), url)
+        elif parts.path == "/saleaction/ajaxgetdeckappcompatibilityreport":
+            return Response(json.dumps({"success": 1, "results": {"resolved_category": 3}}).encode(), url)
         elif parts.path == "/api/featuredcategories":
             return Response(json.dumps({"top_sellers": {"items": [{"id": 1675200}, {"id": 367520}, {"id": 367520}]}}).encode(), url)
         elif parts.path in ("/search", "/lookup"):
@@ -193,6 +195,8 @@ class ShopTests(unittest.TestCase):
         self.assertEqual(facts["controller"], "full")
         self.assertEqual(facts["couch"], ["Shared/Split Screen", "Shared/Split Screen Co-op"])
         self.assertEqual(len(facts["screenshots"]), 2, "Only https screenshots")
+        self.assertEqual(facts["platforms"], ["Mac", "Windows", "Linux"])
+        self.assertEqual(facts["deck"], "Verified")
         self.assertFalse(missing["found"])
         with self.assertRaises(shop.ShopError):
             shop.steam_details("abc", opener=Opener(), now=1000)

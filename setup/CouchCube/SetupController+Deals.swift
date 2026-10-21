@@ -627,7 +627,7 @@ extension SetupController {
         return dealRow(artwork: dealArtwork(steamArtURL(deal.steamAppId) ?? deal.thumb), title: deal.title,
                        detail: dealBadges(badges), detailTip: tips.joined(separator: "\n"), trailing: trailing,
                        accessibility: "Open \(deal.title) at \(deal.store ?? "store"), " + spoken,
-                       actions: [shopTargetButton(key: heart.identifier!.rawValue, title: deal.title, currency: "USD"), heart]) { [weak self] in
+                       actions: [heart]) { [weak self] in
             self?.showShopGame(self?.shopDetail(deal: deal))
         }
     }

@@ -61,7 +61,7 @@ let smokeRatesJSON = """
 """
 let smokeSteamDetailsJSON = """
 {"app_id":"620","found":true,"description":"The Perpetual Testing Initiative has been expanded to allow you to design co-op puzzles.",
- "genres":["Action","Adventure"],"developers":["Valve"],"release":"18 Apr, 2011",
+ "genres":["Action","Adventure"],"platforms":["Mac","Windows","Linux"],"deck":"Verified","developers":["Valve"],"release":"18 Apr, 2011",
  "screenshots":["https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/620/ss_1.jpg",
                 "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/620/ss_2.jpg"],
  "storage_bytes":8589934592,"controller":"full","couch":["Shared/Split Screen Co-op"],"error":null}

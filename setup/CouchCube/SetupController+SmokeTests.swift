@@ -2491,11 +2491,10 @@ extension SetupController {
         let opens = views(dealsList).compactMap { $0 as? ClickableRowView }
         precondition(opens.count == 4, "Every deal row is one clickable row")
         precondition(opens.allSatisfy { $0.accessibilityRole() == .link && ($0.accessibilityLabel() ?? "").hasPrefix("Open ") })
-        precondition(views(dealsList).compactMap { $0 as? NSButton }.allSatisfy { ["wishlistHeart", "shopTarget"].contains($0.accessibilityIdentifier()) },
-                     "Deal rows have no buttons except Set Target and the wishlist heart")
-        precondition(views(dealsList).filter { $0.accessibilityIdentifier() == "shopTarget" }.count == 4
-                     && views(dealsList).filter { $0.accessibilityIdentifier() == "shopStoreTag" }.count == 4,
-                     "Every deal row has Set Target and its store under the price")
+        precondition(views(dealsList).compactMap { $0 as? NSButton }.allSatisfy { $0.accessibilityIdentifier() == "wishlistHeart" },
+                     "Deal rows have no buttons except the wishlist heart (Set Target lives on the game page)")
+        precondition(views(dealsList).filter { $0.accessibilityIdentifier() == "shopStoreTag" }.count == 4,
+                     "Every deal row has its store under the price")
         // A row opens its game page; the page's main button opens the store, and Back returns to the same list.
         var savedTabForPages = shopTab.selectedSegment
         func openThroughGamePage(_ row: ClickableRowView) {

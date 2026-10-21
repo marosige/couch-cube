@@ -3,55 +3,123 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="Turn your Apple Silicon Mac into a couch-friendly gaming console.">
+  <meta name="description" content="Couch Cube turns your Apple Silicon Mac into a game console for the couch: controllers, your games and a TV menu, set up in minutes.">
+  <meta property="og:title" content="Couch Cube — Your Mac Console">
+  <meta property="og:description" content="Turn your Mac into a game console for the couch.">
+  <meta property="og:image" content="https://couchcube.marosi.me/icon.png">
+  <link rel="icon" href="icon.png">
   <title>Couch Cube — Your Mac Console</title>
   <style>
-    :root { color-scheme: light dark; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #f5f5f7; color: #1d1d1f; }
-    * { box-sizing: border-box; }
-    body { margin: 0; min-height: 100svh; display: grid; place-items: center; padding: 40px 24px; }
-    main { width: min(100%, 560px); text-align: center; }
-    .hero { display: block; width: 150px; height: 150px; margin: 0 auto; }
-    main > p, .downloads, main > small { max-width: 560px; margin-left: auto; margin-right: auto; }
-    h1 { font-size: clamp(36px, 8vw, 52px); letter-spacing: -.04em; margin: 16px 0 8px; }
-    p { color: #62626a; line-height: 1.6; }
-    .tagline { font-size: 22px; margin: 0 0 24px; color: inherit; }
-    .downloads { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 32px 0 24px; }
-    .download { display: block; background: #fff; border-radius: 18px; padding: 24px 16px; text-decoration: none; color: inherit; border: 1px solid #dddde2; }
-    .download:hover { border-color: #007aff; }
-    .download strong { display: block; color: #0068d9; font-size: 19px; margin-bottom: 8px; }
-    .download span { display: block; font-size: 14px; line-height: 1.5; color: #62626a; }
-    a { color: #0068d9; }
-    a:focus-visible { outline: 3px solid #007aff; outline-offset: 5px; }
-    small { display: block; color: #62626a; line-height: 1.6; margin: 16px 0; }
-    #release-status { font-size: 14px; }
-    @media (prefers-color-scheme: dark) {
-      :root { background: #1c1c1e; color: #f5f5f7; }
-      p, small, .download span { color: #b0b0b8; }
-      .download { background: #29292c; border-color: #424247; }
-      a, .download strong { color: #69adff; }
+    :root {
+      color-scheme: light dark;
+      --bg: #fbfbfd; --fg: #1d1d1f; --muted: #6e6e73; --card: #ffffff; --line: #e3e3e8;
+      --accent: #0071e3; --accent-fg: #ffffff; --glow: rgba(120, 90, 255, .18);
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", sans-serif;
     }
-    @media (max-width: 420px) { .downloads { grid-template-columns: 1fr; } }
+    @media (prefers-color-scheme: dark) {
+      :root { --bg: #000000; --fg: #f5f5f7; --muted: #a1a1a6; --card: #161617; --line: #2c2c2e;
+              --accent: #2997ff; --glow: rgba(130, 100, 255, .28); }
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--bg); color: var(--fg); -webkit-font-smoothing: antialiased; }
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    a:focus-visible, .button:focus-visible { outline: 3px solid var(--accent); outline-offset: 4px; }
+
+    .hero { position: relative; overflow: hidden; text-align: center; padding: 96px 20px 72px; }
+    .hero::before { content: ""; position: absolute; inset: -40% -20% auto; height: 120%;
+      background: radial-gradient(closest-side, var(--glow), transparent); pointer-events: none; }
+    .hero > * { position: relative; }
+    .icon { width: 140px; height: 140px; filter: drop-shadow(0 18px 30px rgba(0,0,0,.25)); }
+    h1 { font-size: clamp(44px, 9vw, 80px); letter-spacing: -.045em; line-height: 1.02; margin: 20px 0 6px; }
+    .tagline { font-size: clamp(22px, 4vw, 30px); font-weight: 600; letter-spacing: -.02em; margin: 0;
+      background: linear-gradient(90deg, #7b5cff, #2997ff 60%, #30d1c3); -webkit-background-clip: text; background-clip: text; color: transparent; }
+    .lead { max-width: 560px; margin: 20px auto 0; font-size: 19px; line-height: 1.5; color: var(--muted); }
+    .actions { display: flex; flex-wrap: wrap; gap: 14px 24px; justify-content: center; align-items: center; margin-top: 36px; }
+    .button { display: inline-block; background: var(--accent); color: var(--accent-fg); font-size: 17px; font-weight: 600;
+      padding: 14px 28px; border-radius: 980px; }
+    .button:hover { text-decoration: none; filter: brightness(1.08); }
+    .meta { margin-top: 16px; font-size: 13px; color: var(--muted); }
+
+    .features { max-width: 1040px; margin: 0 auto; padding: 24px 20px 40px;
+      display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 18px; }
+    .feature { background: var(--card); border: 1px solid var(--line); border-radius: 22px; padding: 28px 24px; }
+    .feature svg { width: 34px; height: 34px; color: var(--accent); }
+    .feature h2 { font-size: 20px; letter-spacing: -.01em; margin: 16px 0 8px; }
+    .feature p { margin: 0; font-size: 15px; line-height: 1.5; color: var(--muted); }
+
+    .steps { max-width: 760px; margin: 0 auto; padding: 48px 20px; text-align: center; }
+    .steps h2 { font-size: clamp(28px, 5vw, 40px); letter-spacing: -.03em; margin: 0 0 28px; }
+    .steps ol { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 18px; counter-reset: step; }
+    .steps li { counter-increment: step; font-size: 15px; line-height: 1.5; color: var(--muted); }
+    .steps li::before { content: counter(step); display: grid; place-items: center; width: 36px; height: 36px; margin: 0 auto 10px;
+      border-radius: 50%; background: var(--card); border: 1px solid var(--line); color: var(--fg); font-weight: 700; }
+    .steps strong { display: block; color: var(--fg); }
+
+    footer { max-width: 1040px; margin: 0 auto; padding: 32px 20px 48px; border-top: 1px solid var(--line);
+      font-size: 12px; line-height: 1.6; color: var(--muted); text-align: center; }
+    footer details { margin-top: 10px; }
+    footer summary { cursor: pointer; color: var(--accent); }
+    code { font-size: 12px; background: var(--card); border: 1px solid var(--line); border-radius: 6px; padding: 2px 6px; word-break: break-all; }
   </style>
 </head>
 <body>
-  <main>
-    <img class="hero" src="icon.png" alt="Couch Cube Mac mini and TV icon" width="150" height="150" fetchpriority="high">
+  <header class="hero">
+    <img class="icon" src="icon.png" alt="Couch Cube icon" width="140" height="140" fetchpriority="high">
     <h1>Couch Cube</h1>
     <p class="tagline">Your Mac Console</p>
-    <p>Set up your Mac for gaming on the couch. Steam, retro games, controllers and game storage — in one simple app.</p>
-    <div class="downloads">
-      <a class="download" id="installer" href="https://github.com/marosige/couch-cube/releases">
-        <strong>Installer</strong><span>For this Mac.<br>Open the DMG and drag the app to Applications.</span>
-      </a>
-      <a class="download" id="ssd" href="https://github.com/marosige/couch-cube/releases">
-        <strong>SSD pack</strong><span>For an external SSD.<br>Unzip onto your SSD, open the app and finish Setup.</span>
-      </a>
+    <p class="lead">Turn your Mac into a game console for the couch. Plug in a few controllers, pick a game, play together on the TV.</p>
+    <div class="actions">
+      <a class="button" id="download" href="https://github.com/marosige/couch-cube/releases">Download for Mac</a>
+      <a id="ssd" href="https://github.com/marosige/couch-cube/releases">Running it from an SSD? Get the SSD pack ›</a>
     </div>
-    <p id="release-status" role="status">Choose a download from GitHub Releases.</p>
-    <small>Apple Silicon Mac · macOS 13 or newer · Early alpha<br>No games, BIOS or emulators included. Some Windows games need separate compatibility software.</small>
-    <small>Not notarized yet. If macOS says it could not verify the app, copy it to Applications and run once in Terminal: <code>sudo xattr -dr com.apple.quarantine /Applications/CouchCube.app</code></small>
-    <a href="https://github.com/marosige/couch-cube">View on GitHub</a>
+    <p class="meta" id="release-status" role="status">Free · Apple Silicon · macOS 13 or newer</p>
+  </header>
+
+  <main>
+    <section class="features" aria-label="Features">
+      <article class="feature">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 8h10a5 5 0 0 1 4.9 6l-.6 3a2.5 2.5 0 0 1-4.3 1.2L15 16H9l-2 2.2A2.5 2.5 0 0 1 2.7 17l-.6-3A5 5 0 0 1 7 8z"/><path d="M7 11v3M5.5 12.5h3"/><circle cx="16" cy="11.5" r=".6" fill="currentColor"/><circle cx="18" cy="13.5" r=".6" fill="currentColor"/></svg>
+        <h2>Controllers that just work</h2>
+        <p>PlayStation, Xbox, Switch and 8BitDo pads side by side. Connect, name and order players 1 to 4.</p>
+      </article>
+      <article class="feature">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="7.5" height="7.5" rx="2"/><rect x="13.5" y="3" width="7.5" height="7.5" rx="2"/><rect x="3" y="13.5" width="7.5" height="7.5" rx="2"/><rect x="13.5" y="13.5" width="7.5" height="7.5" rx="2"/></svg>
+        <h2>All your games, one place</h2>
+        <p>Steam, retro classics and Windows games through compatibility apps, each one click from Play.</p>
+      </article>
+      <article class="feature">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2.5" y="4" width="19" height="12.5" rx="2"/><path d="M8 20h8M12 16.5V20"/></svg>
+        <h2>A real TV console</h2>
+        <p>Console Mode starts Steam Big Picture or ES-DE when a controller turns on. No keyboard needed.</p>
+      </article>
+      <article class="feature">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16l-1.4 11.2A2 2 0 0 1 16.6 20H7.4a2 2 0 0 1-2-1.8L4 7z"/><path d="M9 10V6a3 3 0 0 1 6 0v4"/></svg>
+        <h2>Cube Shop</h2>
+        <p>Deals from every PC store, all-time lows, couch picks and a wishlist that tells you when to buy.</p>
+      </article>
+    </section>
+
+    <section class="steps" aria-labelledby="how">
+      <h2 id="how">Ready in minutes</h2>
+      <ol>
+        <li><strong>Install</strong>Drag Couch Cube to Applications.</li>
+        <li><strong>Set up</strong>Choose where games live: this Mac or an external SSD.</li>
+        <li><strong>Play</strong>Turn on a controller and grab the couch.</li>
+      </ol>
+    </section>
   </main>
+
+  <footer>
+    Couch Cube is in early alpha. No games, BIOS files or emulators are included; you bring your own.<br>
+    Not affiliated with Valve, Apple or any game store.
+    <details>
+      <summary>macOS says it can't verify the app?</summary>
+      Couch Cube isn't notarized yet. After copying it to Applications, run this once in Terminal:<br>
+      <code>sudo xattr -dr com.apple.quarantine /Applications/CouchCube.app</code>
+    </details>
+  </footer>
+
   <script>
     (async () => {
       const status = document.getElementById("release-status");
@@ -63,12 +131,13 @@
         if (!release) throw new Error("No download available");
         const installer = release.assets.find(asset => /^CouchCube-.*-arm64\.dmg$/.test(asset.name));
         const ssd = release.assets.find(asset => /^CouchCube-.*-arm64-SSD\.zip$/.test(asset.name));
-        document.getElementById("installer").href = installer.browser_download_url;
+        document.getElementById("download").href = installer.browser_download_url;
         if (ssd) document.getElementById("ssd").href = ssd.browser_download_url;
-        status.textContent = release.tag_name + (release.prerelease ? " · Early alpha" : "") +
-          (ssd ? "" : " · SSD pack will be available in a future release.");
+        else document.getElementById("ssd").hidden = true;
+        status.textContent = "Free · " + release.tag_name.replace(/^v/, "Version ") +
+          (release.prerelease ? " (early alpha)" : "") + " · Apple Silicon · macOS 13 or newer";
       } catch (error) {
-        status.textContent = "Couldn't check downloads. Both buttons open GitHub Releases.";
+        // The links already point at the releases page; the default line stays.
       }
     })();
   </script>

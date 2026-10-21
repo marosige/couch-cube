@@ -586,7 +586,7 @@ extension SetupController {
                                                    store: best?.offer.store,
                                                    lowest: best?.offer.storeId != nil ? insightLabel(game.insight, normal: normal) : nil)],
                            accessibility: "Open \(game.title)\(spoken)" + (compat.map { ". " + $0.tip } ?? ""),
-                           actions: [shopTargetButton(key: heart.identifier!.rawValue, title: game.title, currency: best?.offer.currency ?? "USD"), heart]) { [weak self] in
+                           actions: [heart]) { [weak self] in
             self?.showShopGame(self?.shopDetail(game: game))
         }
         view.setAccessibilityIdentifier("shopGameRow")
@@ -603,7 +603,7 @@ extension SetupController {
                            detailTip: (app.seller.map { "By \($0)\n" } ?? "") + (price.converted ? "Price: \(price.spoken)" : "Mac App Store price in \(app.currency)"),
                            trailing: [priceCluster(price: price, store: "Mac App Store")],
                            accessibility: "Open \(app.title), Mac App Store, \(price.spoken). \(compat.tip)",
-                           actions: [shopTargetButton(key: heart.identifier!.rawValue, title: app.title, currency: app.currency), heart]) { [weak self] in
+                           actions: [heart]) { [weak self] in
             self?.showShopGame(self?.shopDetail(app: app))
         }
         view.setAccessibilityIdentifier("shopAppStoreRow")
@@ -814,7 +814,7 @@ extension SetupController {
         }
     }
 
-    /// "Set Target…" on a store row: works whether or not the game is on the wishlist yet (setting one adds it).
+    /// "Set Target…" on the game page: works whether or not the game is on the wishlist yet (setting one adds it).
     func shopTargetButton(key: String, title: String, currency: String) -> NSButton {
         let button = RowControlButton(title: "", target: self, action: #selector(shopTargetClicked(_:)))
         // Not the wishlist key itself, which identifies the heart.
