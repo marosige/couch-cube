@@ -6,6 +6,15 @@ plain words, and make technical decisions (including versioning) yourself.
 Keep every reply very short: a few lines, results only, no long explanations.
 Merge your own PRs yourself once CI is green; the owner does not review them.
 
+## Working style
+
+- Large or multi-step work: first write a plan in phases (read `ROADMAP.md` first) and get approval.
+  Then do one phase at a time, one PR per phase.
+- Research and wide file searches: use Haiku subagents.
+- English text you write (code comments, commit messages, PR descriptions, `DESIGN.md`) follows
+  ASD-STE100 Simplified Technical English. Chat replies stay in Hungarian.
+- Done means: the local checks below pass and the **Checks** workflow is green on the PR.
+
 ## Layout
 
 - `setup/CouchCube/*.swift` – the app (`ConsoleSetup` binary). `SetupController.swift` holds all
