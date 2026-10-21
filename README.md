@@ -26,6 +26,16 @@ collection with **ES-DE**, and connect up to **4 controllers** in supported game
 Downloads are on the [Releases](https://github.com/marosige/couch-cube/releases) page.
 Couch Cube is in early testing (alpha): back up your data first. Some game players require newer macOS.
 
+**"Apple could not verify CouchCube.app…"** Couch Cube is not notarized by Apple yet, so macOS
+blocks the first launch. If **Open Anyway** in System Settings → Privacy & Security doesn't help,
+copy the app to Applications, then run this once in Terminal (it asks for your Mac password):
+
+```sh
+sudo xattr -dr com.apple.quarantine /Applications/CouchCube.app
+```
+
+This only removes the "downloaded from the internet" mark from Couch Cube; nothing else changes.
+
 ## What you get
 
 - **Play** — open your TV menu (Steam Big Picture or ES-DE), or start any game from one launcher:

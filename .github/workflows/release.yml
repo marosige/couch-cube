@@ -81,7 +81,9 @@ jobs:
           **Install:** open the DMG and drag CouchCube.app to Applications.
           **External SSD:** unzip the SSD pack onto your SSD, open CouchCube.app and finish Setup before adding games. The ZIP contains empty game folders, not a preconfigured library.
 
-          Ad-hoc signed, not notarized: macOS may ask for approval in System Settings → Privacy & Security.
+          Not notarized yet: if macOS says it \"could not verify CouchCube.app\", copy it to Applications and run once in Terminal:
+          \`sudo xattr -dr com.apple.quarantine /Applications/CouchCube.app\`
+
           No games, BIOS, firmware or keys are included. Steam storage and shortcuts are configured manually. Switch emulator setup is manual."
           gh release create "$TAG" --target "$GITHUB_SHA" "${flags[@]}" \
             --title "Couch Cube $VERSION" --notes "$notes" \
