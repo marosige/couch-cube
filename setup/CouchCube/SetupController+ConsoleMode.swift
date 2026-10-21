@@ -251,10 +251,6 @@ extension SetupController {
         loadPageData(1)
     }
 
-    @objc func openLockScreenSettings() {
-        if let url = URL(string: "x-apple.systempreferences:com.apple.Lock-Screen-Settings.extension") { NSWorkspace.shared.open(url) }
-    }
-
     @objc func openAppleWatchUnlockSettings() {
         if let url = URL(string: "x-apple.systempreferences:com.apple.Touch-ID-Settings.extension") { NSWorkspace.shared.open(url) }
     }
