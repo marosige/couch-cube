@@ -982,7 +982,7 @@ extension SetupController {
         updateSelectedStorageMarker()
         if report == nil {
             libraryTitle.stringValue = "Checking your library..."
-            libraryDescription.stringValue = "Reading the selected drive. No files will be changed."
+            libraryDescription.stringValue = "Checking the drive\u{2026}"
         }
         checkStorage()
     }
@@ -1019,13 +1019,13 @@ extension SetupController {
                 }
                 if report.state == "not prepared" {
                     self.libraryTitle.stringValue = "No library on this drive yet"
-                    self.libraryDescription.stringValue = "Creates folders and launcher files only. No apps are installed, no games are moved, and Steam settings are unchanged."
+                    self.libraryDescription.stringValue = "Makes the game folders. Nothing else on your Mac changes."
                     self.libraryAction.title = "Create game library..."
                 } else if report.issues.isEmpty {
                     self.libraryTitle.stringValue = "Game folders created"
                     self.libraryDescription.stringValue = report.missing.contains("steam")
-                        ? "Steam is not installed. Open App Store next. Creating folders did not install any apps."
-                        : "Steam is installed. Its storage settings are managed in Steam, not here. See Steam & controller setup on Play."
+                        ? "Ready. Next, get Steam or other game apps in App Store."
+                        : "Ready. Steam keeps its own game folders; change them in Steam."
                     self.libraryAction.title = "Update library links..."
                 } else {
                     self.libraryTitle.stringValue = "This library needs attention"
