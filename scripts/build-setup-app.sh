@@ -30,7 +30,7 @@ cp "$ROOT/assets/header.png" "$APP/Contents/Resources/HomeHeader.png"
 cp "$ROOT/assets/header-portable.png" "$APP/Contents/Resources/HomeHeaderPortable.png"
 xcrun swiftc -target arm64-apple-macos13.0 -swift-version 5 -module-cache-path "$ROOT/build/module-cache" \
   -framework AppKit -framework GameController -framework CoreBluetooth -framework IOBluetooth \
-  "$ROOT/setup/ConsoleSetup.swift" -o "$APP/Contents/MacOS/ConsoleSetup"
+  "$ROOT"/setup/CouchCube/*.swift -o "$APP/Contents/MacOS/ConsoleSetup"
 xcrun swiftc -target arm64-apple-macos13.0 -swift-version 5 -module-cache-path "$ROOT/build/module-cache" \
   -framework AppKit -framework GameController -framework IOKit \
   "$ROOT/setup/ConsoleAutoLaunch.swift" -o "$APP/Contents/MacOS/ConsoleAutoLaunch"
@@ -49,19 +49,23 @@ ditto "$ROOT/assets/tv-menus" "$APP/Contents/Resources/TVMenus"
 cp "$ROOT/README.md" "$APP/Contents/Resources/README.md"
 cp "$ROOT/setup/Install Homebrew.command" "$APP/Contents/Resources/Install Homebrew.command"
 chmod +x "$APP/Contents/Resources/Install Homebrew.command"
-/usr/bin/python3 - "$APP" <<'PY'
-import pathlib, plistlib, sys
+/usr/bin/python3 - "$APP" "$ROOT/config/release.json" <<'PY'
+import json, pathlib, plistlib, sys
 app = pathlib.Path(sys.argv[1])
+release = json.loads(pathlib.Path(sys.argv[2]).read_text())
+# CFBundleShortVersionString must be numeric, so the full SemVer (with -alpha.N) is kept in CouchCubeVersion.
+short = release["version"].split("-")[0]
 (app / "Contents/Info.plist").write_bytes(plistlib.dumps({
     "CFBundleName": "Couch Cube",
     "CFBundleDisplayName": "Couch Cube",
     "CFBundleIconFile": "Console",
     "MCCDistribution": "local",
-    "CFBundleIdentifier": "org.macgameconsole.setup",
+    "CFBundleIdentifier": release["bundle_id"],
     "CFBundleExecutable": "ConsoleSetup",
     "CFBundlePackageType": "APPL",
-    "CFBundleVersion": "3",
-    "CFBundleShortVersionString": "0.1.0",
+    "CFBundleVersion": str(release["build"]),
+    "CFBundleShortVersionString": short,
+    "CouchCubeVersion": release["version"],
     "LSArchitecturePriority": ["arm64"],
     "LSMinimumSystemVersion": "13.0",
     "NSHighResolutionCapable": True,

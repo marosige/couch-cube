@@ -145,12 +145,10 @@ class NoSecretsTests(unittest.TestCase):
     """Static scan: sign-in status code reads names only and never touches credentials or web data."""
 
     def store_accounts_swift(self):
-        source = (ROOT / "setup/ConsoleSetup.swift").read_text()
-        start = source.index("struct StoreAccountName")
-        end = source.index("struct WindowsDownloadItem")
-        ui_start = source.index("private func storeAccountsCard()")
-        ui_end = source.index("private func settingsRow(")
-        return source[start:end] + source[ui_start:ui_end]
+        models = (ROOT / "setup/CouchCube/AppModels.swift").read_text()
+        start = models.index("struct StoreAccountName")
+        end = models.index("struct WindowsDownloadItem")
+        return models[start:end] + (ROOT / "setup/CouchCube/SetupController+StoreAccounts.swift").read_text()
 
     def test_backend_reads_only_loginusers(self):
         source = (ROOT / "scripts/store_accounts.py").read_text()
@@ -165,7 +163,7 @@ class NoSecretsTests(unittest.TestCase):
         for forbidden in ["WKWebView", "WebKit", "WKWebsiteDataStore", "evaluateJavaScript", "UserDefaults",
                           "password", "token", "cookie", "HTTPCookie"]:
             self.assertNotIn(forbidden.lower(), code.lower(), forbidden)
-        self.assertNotIn("import WebKit", (ROOT / "setup/ConsoleSetup.swift").read_text())
+        self.assertNotIn("import WebKit", "\n".join(path.read_text() for path in (ROOT / "setup/CouchCube").glob("*.swift")))
 
     def test_usernames_are_not_logged(self):
         code = self.store_accounts_swift()

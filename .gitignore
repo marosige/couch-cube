@@ -5,4 +5,3 @@ build/
 __pycache__/
 *.pyc
 config/setup.json
-marosi-me-tesla/

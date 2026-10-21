@@ -3,25 +3,28 @@ from pathlib import Path
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
-SOURCE = (ROOT / "setup/ConsoleSetup.swift").read_text()
+SOURCES = {path: path.read_text() for path in sorted((ROOT / "setup/CouchCube").glob("*.swift"))}
+SOURCE = "\n".join(SOURCES.values())
 
 
 class ActivityWindowReleaseTests(unittest.TestCase):
     """Release builds open Activity only from View > Activity; everything else goes through activityNeeded()."""
 
     def test_activity_is_only_shown_by_explicit_paths(self):
-        calls = [SOURCE[:match.start()].count("\n") + 1 for match in re.finditer(r"\bshowActivity\(\)", SOURCE)]
         allowed = []
-        for line_number in calls:
-            line = SOURCE.splitlines()[line_number - 1]
-            context = "\n".join(SOURCE.splitlines()[max(0, line_number - 4):line_number])
-            if "func showActivity()" in line:
-                continue
-            if "SetupController.activityAutoOpens" in line or ".alertSecondButtonReturn" in line \
-                    or '"--smoke-activity"' in context:
-                allowed.append(line_number)
-                continue
-            self.fail(f"setup/ConsoleSetup.swift:{line_number} opens Activity automatically: {line.strip()}")
+        for path, source in SOURCES.items():
+            lines = source.splitlines()
+            for match in re.finditer(r"\bshowActivity\(\)", source):
+                line_number = source[:match.start()].count("\n") + 1
+                line = lines[line_number - 1]
+                context = "\n".join(lines[max(0, line_number - 4):line_number])
+                if "func showActivity()" in line:
+                    continue
+                if "SetupController.activityAutoOpens" in line or ".alertSecondButtonReturn" in line \
+                        or '"--smoke-activity"' in context:
+                    allowed.append(line_number)
+                    continue
+                self.fail(f"{path.relative_to(ROOT)}:{line_number} opens Activity automatically: {line.strip()}")
         self.assertEqual(len(allowed), 3)
         self.assertIn('addItem(withTitle: "Activity", action: #selector(showActivity)', SOURCE)
 

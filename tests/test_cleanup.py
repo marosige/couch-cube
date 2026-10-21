@@ -152,13 +152,50 @@ class CleanupTests(unittest.TestCase):
         self.assertTrue(root.exists())
 
     def test_login_agent_is_disabled_before_settings_removal(self):
-        config = self.home / "Library/Application Support/Mac Game Console/setup.json"
+        config = self.home / "Library/Application Support/Couch Cube/setup.json"
         self.folder(str(config.parent.relative_to(self.home)))
         with patch.object(console, "HOST_CONFIG", config), \
                 patch.object(console, "login_launcher") as login:
             plan = console.cleanup_plan()
             console.prepare_cleanup([item["id"] for item in plan["items"]], plan["token"], True)
         login.assert_called_once_with(True, enabled=False)
+
+
+class AppSupportMigrationTests(unittest.TestCase):
+    def test_legacy_settings_move_without_overwriting_new_files(self):
+        with tempfile.TemporaryDirectory() as directory:
+            legacy, current = Path(directory) / "Mac Game Console", Path(directory) / "Couch Cube"
+            legacy.mkdir()
+            current.mkdir()
+            (legacy / "setup.json").write_text("old setup")
+            (legacy / "wishlist-mirror.json").write_text("old wishlist")
+            (current / "wishlist-mirror.json").write_text("new wishlist")
+            console.migrate_app_support(legacy, current)
+            self.assertEqual((current / "setup.json").read_text(), "old setup")
+            self.assertEqual((current / "wishlist-mirror.json").read_text(), "new wishlist")
+            self.assertEqual((legacy / "wishlist-mirror.json").read_text(), "old wishlist")
+
+    def test_whole_folder_moves_and_missing_legacy_is_a_no_op(self):
+        with tempfile.TemporaryDirectory() as directory:
+            legacy, current = Path(directory) / "Mac Game Console", Path(directory) / "Couch Cube"
+            console.migrate_app_support(legacy, current)
+            self.assertFalse(current.exists())
+            legacy.mkdir()
+            (legacy / "frontend.json").write_text("{}")
+            console.migrate_app_support(legacy, current)
+            self.assertFalse(legacy.exists())
+            self.assertTrue((current / "frontend.json").is_file())
+
+    def test_symlinked_folders_are_left_alone(self):
+        with tempfile.TemporaryDirectory() as directory:
+            target = Path(directory) / "elsewhere"
+            target.mkdir()
+            (target / "setup.json").write_text("{}")
+            legacy, current = Path(directory) / "Mac Game Console", Path(directory) / "Couch Cube"
+            legacy.symlink_to(target)
+            console.migrate_app_support(legacy, current)
+            self.assertFalse(current.exists())
+            self.assertTrue((target / "setup.json").is_file())
 
 
 if __name__ == "__main__":

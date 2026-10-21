@@ -3,6 +3,8 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 bash "$ROOT/scripts/build-setup-app.sh"
 APP="$ROOT/build/CouchCube.app"
+DMG="$ROOT/build/$(/usr/bin/python3 "$ROOT/scripts/version.py" get dmg)"
+SSD_ZIP="$ROOT/build/$(/usr/bin/python3 "$ROOT/scripts/version.py" get zip)"
 WORK="$(mktemp -d "$ROOT/build/dmg-work.XXXXXX")"
 STAGE="$WORK/contents"
 MOUNT="$WORK/mount"
@@ -22,7 +24,6 @@ ditto "$APP" "$STAGE/CouchCube.app"
 ln -s /Applications "$STAGE/Applications"
 cp "$ROOT/README.md" "$STAGE/README.md"
 cp "$ROOT/build/Installer.icns" "$STAGE/.VolumeIcon.icns"
-DMG="$ROOT/build/CouchCube-0.1.0-arm64.dmg"
 hdiutil create -ov -format UDRW -volname "Couch Cube" -srcfolder "$STAGE" "$WORK/writable.dmg"
 hdiutil attach -readwrite -nobrowse -mountpoint "$MOUNT" "$WORK/writable.dmg"
 ATTACHED=1
@@ -53,5 +54,5 @@ for folder in backend.SSD_FOLDERS:
     (root / folder).mkdir(parents=True, exist_ok=True)
 (root / backend.SSD_TEMPLATE).write_text("Couch Cube SSD template v1\n")
 PY
-ditto -c -k --sequesterRsrc "$SSD_STAGE" "$ROOT/build/CouchCube-0.1.0-arm64-SSD.zip"
-echo "$ROOT/build/CouchCube-0.1.0-arm64-SSD.zip"
+ditto -c -k --sequesterRsrc "$SSD_STAGE" "$SSD_ZIP"
+echo "$SSD_ZIP"

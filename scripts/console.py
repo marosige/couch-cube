@@ -23,8 +23,13 @@ import xml.etree.ElementTree as ET
 
 PROJECT = Path(__file__).resolve().parent.parent
 BIOS_MAP = PROJECT / ("Config" if Path(__file__).parent.name == "Runtime" else "config") / "bios-map.csv"
-HOST_CONFIG = Path.home() / "Library/Application Support/Mac Game Console/setup.json"
-FRONTEND_CONFIG = Path.home() / "Library/Application Support/Mac Game Console/frontend.json"
+APP_SUPPORT = Path.home() / "Library/Application Support/Couch Cube"
+# Settings folder used before the app was renamed; migrate_app_support() moves its files over.
+LEGACY_APP_SUPPORT = Path.home() / "Library/Application Support/Mac Game Console"
+HOST_CONFIG = APP_SUPPORT / "setup.json"
+FRONTEND_CONFIG = APP_SUPPORT / "frontend.json"
+BUNDLE_ID = "me.marosi.couchcube"
+LEGACY_BUNDLE_ID = "org.macgameconsole.setup"
 SYSTEM_APPLICATIONS = Path("/Applications")
 MARKER = ".mac-game-console.json"
 FOLDER = "Couch Cube"
@@ -347,6 +352,22 @@ def erase_external(device, token, confirmation, confirm):
     # diskutil handles authorization where supported; permission failures are final.
     run(["/usr/sbin/diskutil", "eraseDisk", "APFS", "Mac Gaming", "GPT", "/dev/" + device])
     print("Erase completed.", flush=True)
+
+
+def migrate_app_support(legacy=None, current=None):
+    """Move settings from the pre-rename folder; files already in the new folder win."""
+    legacy = LEGACY_APP_SUPPORT if legacy is None else legacy
+    current = APP_SUPPORT if current is None else current
+    if legacy.is_symlink() or current.is_symlink() or not legacy.is_dir():
+        return
+    current.mkdir(parents=True, exist_ok=True)
+    for item in legacy.iterdir():
+        if not (current / item.name).exists() and not (current / item.name).is_symlink():
+            os.rename(item, current / item.name)
+    try:
+        legacy.rmdir()
+    except OSError:
+        pass  # Something could not move because the new folder already had it; keep the rest.
 
 
 def release_tools():
@@ -890,7 +911,7 @@ def app_files(name, action, root, identifier=None):
     )
     plist = plistlib.dumps({
         "CFBundleName": name, "CFBundleDisplayName": name,
-        "CFBundleIdentifier": "org.macgameconsole." + hashlib.sha256(name.encode()).hexdigest()[:16],
+        "CFBundleIdentifier": BUNDLE_ID + ".launcher." + hashlib.sha256(name.encode()).hexdigest()[:16],
         "CFBundleExecutable": "launch", "CFBundlePackageType": "APPL",
         "CFBundleVersion": "1", "LSUIElement": True,
     })
@@ -1252,7 +1273,8 @@ def cleanup_plan():
         (".config/retroarch", "RetroArch configuration"),
         ("ES-DE", "ES-DE settings and downloaded artwork"),
         (".emulationstation", "Legacy EmulationStation settings"),
-        ("Library/Application Support/Mac Game Console", "Couch Cube settings"),
+        ("Library/Application Support/Couch Cube", "Couch Cube settings"),
+        ("Library/Application Support/Mac Game Console", "Older Couch Cube settings"),
         ("Library/Logs/Couch Cube", "Couch Cube logs"),
     ]
     for relative, name in data_folders:
@@ -1262,7 +1284,8 @@ def cleanup_plan():
         for base in [SYSTEM_APPLICATIONS, home / "Applications", home / "Games"]:
             add(base / name, name + " games and addons", "Games and data")
     bundle_ids = {
-        "org.macgameconsole.setup": "Couch Cube",
+        BUNDLE_ID: "Couch Cube",
+        LEGACY_BUNDLE_ID: "Older Couch Cube",
         "com.valvesoftware.steam": "Steam",
         "org.libretro.RetroArch": "RetroArch",
         "org.dolphin-emu.dolphin": "Dolphin",
@@ -2520,6 +2543,7 @@ def main():
             command.add_argument("--app", required=True)
     args = parser.parse_args()
     try:
+        migrate_app_support()
         if args.command == "drives":
             print(json_text(drives()))
         elif args.command == "storage-status":
