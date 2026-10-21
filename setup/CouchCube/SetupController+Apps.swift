@@ -250,6 +250,23 @@ extension SetupController {
         return control
     }
 
+    /// Makes the library's Windows/Porting Kit folder, shows it in Finder and puts its path on the clipboard,
+    /// ready to paste as Porting Kit's "Applications default path". Porting Kit's own setting isn't changed for you.
+    @objc func preparePortingKitFolder() {
+        guard let drive = selected else { return }
+        runBackendInBackground(["porting-kit-folder", "--root", drive.root]) { [weak self] code, data, errors in
+            guard let self else { return }
+            guard code == 0, let reply = try? JSONSerialization.jsonObject(with: data) as? [String: String], let path = reply["path"] else {
+                self.appsStatus.stringValue = "Couldn't make the Porting Kit folder: " + backendErrorMessage(errors, fallback: "check Game library.")
+                return
+            }
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(path, forType: .string)
+            NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)])
+            self.appsStatus.stringValue = "Path copied. In Porting Kit, choose Change for \u{201C}Applications default path\u{201D} and pick this folder. New ports then appear in Play."
+        }
+    }
+
     @objc func openAppManagementSettings() {
         if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AppBundles") {
             NSWorkspace.shared.open(url)
@@ -536,6 +553,13 @@ extension SetupController {
             slot.setAccessibilityLabel(appRowStatus(app, operation: operation, unknown: false, checking: false).title + " " + app.name)
             controls.addArrangedSubview(slot)
         } else {
+            if app.id == "porting-kit" && app.installed && selected != nil {
+                // Porting Kit asks where to put its ports; this makes the library folder and copies its path.
+                let folder = button("Games Folder", #selector(preparePortingKitFolder))
+                folder.toolTip = "Create Couch Cube \u{203A} Windows \u{203A} Porting Kit, show it and copy its path for Porting Kit's Applications path"
+                folder.setAccessibilityIdentifier("portingKitFolder")
+                controls.addArrangedSubview(folder)
+            }
             if app.id == "crossover" && app.installed {
                 let open = button("Open", #selector(openCrossOver(_:)))
                 open.tag = index
