@@ -175,7 +175,11 @@ Additional rows appear only for setup problems, missing game apps or status erro
 App categories and settings retain distinct rounded native NSBox groups with
 system colors and subtle separators in both appearances.
 App Store rows show the app name, Installed/Not installed (green / gray dot; red only for a failure) and a short purpose;
-Get and Update start at once (no confirmation); only Remove asks. An installed Porting Kit row has **Games Folder**:
+Get and Update start at once (no confirmation); only Remove asks. The Windows games card has **How It Works**,
+which opens a guide page (under App Store): a one-line intro (many games have a Mac version), then CrossOver
+(easiest, paid, trial) and Porting Kit (free) as cards with numbered plain steps from getting the app to the
+game appearing in Play, buttons to their App Store rows and Porting Kit's Games Folder, and a note that not
+every game (anti-cheat) runs. An installed Porting Kit row has **Games Folder**:
 it creates `Windows/Porting Kit` in the game library, pins it to the top of Finder's sidebar (which Porting
 Kit's folder dialog shows too) and copies its path, so it's one click away when setting Porting Kit's
 "Applications default path"; the button then reads **Unpin Folder** and takes it off the sidebar again.

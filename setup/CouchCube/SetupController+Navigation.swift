@@ -116,13 +116,13 @@ extension SetupController {
         screenTitle.stringValue = index == 0 ? "Play" : index == 9 ? inspectorTitle.stringValue :
             index == 12 ? (detailDrive.map(driveTitle) ?? driveDetailCache[driveDetailID ?? ""].map { driveTitle($0.drive) } ?? "Drive") : index == 4 ? "Library storage" :
             index == 5 ? "Steam setup guide" : index == 14 ? (shopDetails[shopDetailKey ?? ""]?.title ?? "Cube Shop") :
-            index == 15 ? "Clean up gaming setup" :
+            index == 15 ? "Clean up gaming setup" : index == 16 ? "Playing Windows games" :
             sidebarPages.firstIndex(of: index).map { sidebarTitles[$0] } ?? "Couch Cube"
         storageNext.isHidden = index != 4
         storageNext.keyEquivalent = index == 4 ? "\r" : ""
         playAction.keyEquivalent = index == 0 ? "\r" : ""
         let sidebarPage = (index == 3 || index == 4) ? 6 : index == 5 ? 6 : index == 9 ? inspectorParent : index == 12 ? driveDetailParent :
-            index == 14 ? 13 : index == 15 ? 11 : index
+            index == 14 ? 13 : index == 15 ? 11 : index == 16 ? 1 : index
         if let selected = sidebarPages.firstIndex(of: sidebarPage), sidebar.selectedRow != selected {
             sidebar.selectRowIndexes(IndexSet(integer: selected), byExtendingSelection: false)
         }

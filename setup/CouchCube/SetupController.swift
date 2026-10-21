@@ -692,7 +692,7 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
             appManagementHint,
             appCategoryCard("TV menus", rows: appMenuRows),
             appCategoryCard("PC games", rows: appPCRows),
-            appCategoryCard("Windows games", rows: appWindowsRows),
+            appCategoryCard("Windows games", rows: appWindowsRows, extra: [windowsGuideButton()]),
             appCategoryCard("Retro games", rows: appRetroRows),
             helperAdvice,
             helperButton
@@ -916,6 +916,7 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
         cleanupContent.spacing = 16
         cleanupContent.setAccessibilityIdentifier("cleanupPage")
         addPage("Clean up", content: column([cleanupContent]))
+        addPage("Windows games", content: windowsGuidePage())
         navigationBar.orientation = .vertical
         navigationBar.alignment = .leading
         let sidebarScroll = NSScrollView()

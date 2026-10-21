@@ -128,7 +128,7 @@ extension SetupController {
             rows === appWindowsRows ? "Windows games" : "Retro games"
     }
 
-    func appCategoryCard(_ title: String, rows: NSStackView) -> NSBox {
+    func appCategoryCard(_ title: String, rows: NSStackView, extra: [NSView] = []) -> NSBox {
         let toggle = NSButton(image: NSImage(systemSymbolName: "chevron.down", accessibilityDescription: nil)!,
                               target: self, action: #selector(toggleAppCategory(_:)))
         toggle.isBordered = false
@@ -137,7 +137,7 @@ extension SetupController {
         toggle.identifier = NSUserInterfaceItemIdentifier(title)
         appCategoryToggles[title] = toggle
         updateAppCategoryToggle(title)
-        return card("", subtitle: nil, views: [cardHeader(title, buttons: [toggle]), rows])
+        return card("", subtitle: nil, views: [cardHeader(title, buttons: extra + [toggle]), rows])
     }
 
     func updateAppCategoryToggle(_ title: String) {

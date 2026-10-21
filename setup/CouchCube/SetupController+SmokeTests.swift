@@ -435,7 +435,7 @@ extension SetupController {
                 let stack = self.detail.subviews.compactMap { $0 as? NSStackView }.first!
                 let discoveryOK = success && !self.volumes.isEmpty && self.window.isVisible
                     && self.selected != nil
-                    && self.tabs.numberOfTabViewItems == 16 && self.logWindow == nil
+                    && self.tabs.numberOfTabViewItems == 17 && self.logWindow == nil
                 precondition(self.sidebarPages.count == self.sidebarTitles.count &&
                              self.sidebarPages.count == self.sidebarSymbols.count)
                 precondition(!self.sidebarPages.contains(3) && !self.sidebarPages.contains(4),
@@ -487,7 +487,7 @@ extension SetupController {
                         self.selectPage(page)
                         precondition(!self.navigationBar.isHidden && self.window === self.mainWindow)
                         precondition(self.sidebar.selectedRow == self.sidebarPages.firstIndex(of:
-                            (page == 2 || page == 3 || page == 4) ? 6 : page == 5 ? 6 : page == 9 ? self.inspectorParent : page == 12 ? self.driveDetailParent : page == 14 ? 13 : page == 15 ? 11 : page))
+                            (page == 2 || page == 3 || page == 4) ? 6 : page == 5 ? 6 : page == 9 ? self.inspectorParent : page == 12 ? self.driveDetailParent : page == 14 ? 13 : page == 15 ? 11 : page == 16 ? 1 : page))
                         if page == 13 { self.assertSmokeDeals() }
                         self.assertSmokePageScrolls()
                         if page == 7 {
