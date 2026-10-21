@@ -2,7 +2,7 @@
   <img src="assets/icon-512.png" width="144" alt="Couch Cube Mac mini and TV icon">
 </p>
 <h1 align="center">Couch Cube</h1>
-<p align="center"><strong>Your Mac. Your games. Your couch.</strong></p>
+<p align="center"><strong>Your Mac Console</strong></p>
 <p align="center">
   Turn your Mac into a big-screen gaming console.<br>
   Bring a controller. Invite your friends. Make room for game night.
@@ -21,7 +21,7 @@ collection with **ES-DE**, and connect up to **4 controllers** in supported game
 | On this Mac | On an external SSD |
 |---|---|
 | One Mac, one cozy gaming spot. | More room for games on smaller Macs, such as 256 GB models — or take your app and games between Macs. |
-| Open the **DMG** and drag **CouchCube.app** to Applications. | Unzip the **SSD pack** onto the SSD and configure **Settings → Game library**. Or use the installed app → **Settings → Game library → Add or prepare an SSD** to copy the app or explicitly prepare a new SSD. |
+| Open the **DMG** and drag **Couch Cube** onto **Applications**. | Unzip the **SSD pack** onto the SSD and configure **Settings → Game library**. Or use the installed app → **Settings → Game library → Add or prepare an SSD** to copy the app or explicitly prepare a new SSD. |
 
 Downloads are on the [Releases](https://github.com/marosige/couch-cube/releases) page.
 Couch Cube is in early testing (alpha): back up your data first. Some game players require newer macOS.

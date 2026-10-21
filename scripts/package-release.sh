@@ -6,31 +6,19 @@ APP="$ROOT/build/CouchCube.app"
 DMG="$ROOT/build/$(/usr/bin/python3 "$ROOT/scripts/version.py" get dmg)"
 SSD_ZIP="$ROOT/build/$(/usr/bin/python3 "$ROOT/scripts/version.py" get zip)"
 WORK="$(mktemp -d "$ROOT/build/dmg-work.XXXXXX")"
-STAGE="$WORK/contents"
-MOUNT="$WORK/mount"
-ATTACHED=0
-mkdir "$STAGE" "$MOUNT"
-cleanup() {
-  if [[ "$ATTACHED" == 1 ]]; then
-    if ! hdiutil detach "$MOUNT"; then
-      echo "Cannot detach build image at $MOUNT; temporary build files retained." >&2
-      return 1
-    fi
-  fi
-  rm -rf "$WORK"
-}
-trap cleanup EXIT
-ditto "$APP" "$STAGE/CouchCube.app"
-ln -s /Applications "$STAGE/Applications"
-cp "$ROOT/README.md" "$STAGE/README.md"
-cp "$ROOT/build/Installer.icns" "$STAGE/.VolumeIcon.icns"
-hdiutil create -ov -format UDRW -volname "Couch Cube" -srcfolder "$STAGE" "$WORK/writable.dmg"
-hdiutil attach -readwrite -nobrowse -mountpoint "$MOUNT" "$WORK/writable.dmg"
-ATTACHED=1
-xcrun SetFile -a C "$MOUNT"
-hdiutil detach "$MOUNT"
-ATTACHED=0
-hdiutil convert -ov "$WORK/writable.dmg" -format UDZO -o "$DMG"
+trap 'rm -rf "$WORK"' EXIT
+# The installer window: titled background, the app, an arrow and Applications — nothing else.
+"$ROOT/build/generate-icon" --dmg-background "$WORK/background.png" "$WORK/background@2x.png"
+tiffutil -cathidpicheck "$WORK/background.png" "$WORK/background@2x.png" -out "$WORK/background.tiff"
+# dmgbuild writes the Finder window layout directly (no Finder scripting), so it works on build machines.
+VENV="$ROOT/build/dmg-venv"
+if [[ ! -x "$VENV/bin/dmgbuild" ]]; then
+  /usr/bin/python3 -m venv "$VENV"
+  "$VENV/bin/python3" -m pip install --quiet --disable-pip-version-check "dmgbuild>=1.6,<2"
+fi
+rm -f "$DMG"
+"$VENV/bin/dmgbuild" -s "$ROOT/scripts/dmg-settings.py" -D app="$APP" -D background="$WORK/background.tiff" \
+  -D icon="$ROOT/build/Installer.icns" "Couch Cube" "$DMG"
 hdiutil verify "$DMG"
 "$ROOT/build/generate-icon" --set-file-icon "$ROOT/build/Installer.icns" "$DMG"
 (

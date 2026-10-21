@@ -21,6 +21,7 @@ jobs:
             COUCH_CUBE_SMOKE_CAPTURE="$PWD/build/screenshots" \
               build/CouchCube.app/Contents/MacOS/ConsoleSetup --smoke-test --smoke-flow --appearance "$appearance"
           done
+          build/generate-icon --dmg-background build/screenshots/page-dmg-1x.png build/screenshots/page-dmg-background.png
           ls build/screenshots | wc -l
       - uses: actions/upload-artifact@v4
         with:

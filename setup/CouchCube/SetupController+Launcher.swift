@@ -63,7 +63,7 @@ extension SetupController {
                                           path: nil, launch: { [weak self] in
                     guard let url = URL(string: "steam://rungameid/\(game.appid)") else { return }
                     if !NSWorkspace.shared.open(url) { self?.status.stringValue = "Couldn't open Steam to start \(game.name)." }
-                }))
+                }, artworkURL: artwork == nil ? steamArtURL(game.appid).flatMap { safeDealURL($0) } : nil))
             }
         }
         // Each ROM starts straight in its console's emulator (no frontend in between).

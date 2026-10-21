@@ -218,6 +218,9 @@ chosen menu's colors (Steam blue, ES-DE red, Cube TV purple when none is chosen)
 scanlines, the installed app's own icon (bundled icon as fallback) and its name ("STEAM / Big Picture",
 "ES-DE / Retro Games"). The whole tile launches the menu; the line under "Cube TV" only shows status
 while no menu is chosen. No third-party screenshots are bundled.
+The installer DMG (built with dmgbuild from `scripts/dmg-settings.py`) opens one clean window: a light
+background titled **Couch Cube** with the subtitle **Your Mac Console** (the tagline everywhere), the app
+on the left, an arrow, and Applications on the right. Nothing else is visible in it.
 The header preserves the icon's Mac mini geometry, without controller overlays.
 The portable edition adds a connected SSD on the cabinet to the left of the Mac mini.
 The Controllers tile is an interactive mini version of the Controllers page. Its

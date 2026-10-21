@@ -9,6 +9,49 @@ if CommandLine.arguments.count == 4 && CommandLine.arguments[1] == "--set-file-i
     exit(0)
 }
 
+/// The installer window's background (660 × 400 pt): title, subtitle and an arrow from the app to Applications.
+/// Icon centers sit at (180, 220) and (480, 220) from the top-left, matching scripts/dmg-settings.py.
+if CommandLine.arguments.count == 4 && CommandLine.arguments[1] == "--dmg-background" {
+    for (scale, path) in [(1, CommandLine.arguments[2]), (2, CommandLine.arguments[3])] {
+        let bitmap = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: 660 * scale, pixelsHigh: 400 * scale,
+                                      bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
+                                      colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0)!
+        bitmap.size = NSSize(width: 660, height: 400)
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: bitmap)
+        let rect = NSRect(x: 0, y: 0, width: 660, height: 400)
+        NSGradient(starting: NSColor(calibratedRed: 0.97, green: 0.97, blue: 0.99, alpha: 1),
+                   ending: NSColor(calibratedRed: 0.88, green: 0.90, blue: 0.95, alpha: 1))!.draw(in: rect, angle: -90)
+        let center = NSMutableParagraphStyle()
+        center.alignment = .center
+        NSAttributedString(string: "Couch Cube", attributes: [
+            .font: NSFont.systemFont(ofSize: 34, weight: .bold), .paragraphStyle: center,
+            .foregroundColor: NSColor(calibratedWhite: 0.12, alpha: 1)]).draw(in: NSRect(x: 0, y: 312, width: 660, height: 44))
+        NSAttributedString(string: "Your Mac Console", attributes: [
+            .font: NSFont.systemFont(ofSize: 15, weight: .medium), .paragraphStyle: center,
+            .foregroundColor: NSColor(calibratedWhite: 0.42, alpha: 1)]).draw(in: NSRect(x: 0, y: 288, width: 660, height: 22))
+        // Arrow between the icons (y = 400 - 220 from the bottom).
+        let arrow = NSBezierPath()
+        arrow.lineWidth = 5
+        arrow.lineCapStyle = .round
+        arrow.lineJoinStyle = .round
+        arrow.move(to: NSPoint(x: 268, y: 180))
+        arrow.line(to: NSPoint(x: 392, y: 180))
+        arrow.move(to: NSPoint(x: 374, y: 196))
+        arrow.line(to: NSPoint(x: 394, y: 180))
+        arrow.line(to: NSPoint(x: 374, y: 164))
+        NSColor(calibratedRed: 0.55, green: 0.59, blue: 0.68, alpha: 1).setStroke()
+        arrow.stroke()
+        NSGraphicsContext.restoreGraphicsState()
+        guard let png = bitmap.representation(using: .png, properties: [:]),
+              (try? png.write(to: URL(fileURLWithPath: path))) != nil else {
+            fputs("Cannot write the installer background.\n", stderr)
+            exit(1)
+        }
+    }
+    exit(0)
+}
+
 func color(_ hex: UInt32) -> NSColor {
     NSColor(calibratedRed: CGFloat((hex >> 16) & 255) / 255,
             green: CGFloat((hex >> 8) & 255) / 255,

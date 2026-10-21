@@ -19,7 +19,7 @@ if [[ "$(uname -s)" != Darwin ]]; then
   echo "Build requires macOS and Apple Command Line Tools (xcode-select --install)." >&2
   exit 1
 fi
-bash "$ROOT/scripts/clean-build.sh" --keep CouchCube.app --keep "CouchCube-*.dmg*" --keep "CouchCube-*.zip*"
+bash "$ROOT/scripts/clean-build.sh" --keep CouchCube.app --keep "CouchCube-*.dmg*" --keep "CouchCube-*.zip*" --keep dmg-venv
 mkdir -p "$STAGING"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources/scripts" "$APP/Contents/Resources/config" "$ROOT/build/module-cache"
 RUNTIME="$(bash "$ROOT/scripts/prepare-runtime.sh")"

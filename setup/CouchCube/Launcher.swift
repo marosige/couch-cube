@@ -35,6 +35,8 @@ struct LauncherItem {
     let wideArtwork: Bool
     let path: String?
     let launch: () -> Void
+    /// Art to fetch when nothing is cached locally (Steam's store header); the icon shows until it arrives.
+    var artworkURL: URL? = nil
 }
 
 /// Steam keeps tools and runtimes in the same manifests as games; they are not something to play.
@@ -50,7 +52,8 @@ func steamHeaderArtwork(appid: String, steamRoot: URL = FileManager.default.home
     let cache = steamRoot.appendingPathComponent("appcache/librarycache")
     let candidates = [cache.appendingPathComponent("\(appid)/header.jpg"),
                       cache.appendingPathComponent("\(appid)_header.jpg"),
-                      cache.appendingPathComponent("\(appid)/library_header.jpg")]
+                      cache.appendingPathComponent("\(appid)/library_header.jpg"),
+                      cache.appendingPathComponent("\(appid)_library_header.jpg")]
     for url in candidates where FileManager.default.fileExists(atPath: url.path) {
         if let image = NSImage(contentsOf: url) { return image }
     }
@@ -140,6 +143,17 @@ final class LauncherTile: ClickableRowView {
                 icon.widthAnchor.constraint(equalToConstant: 56),
                 icon.heightAnchor.constraint(equalToConstant: 56)
             ])
+        }
+        if let url = item.artworkURL, !(item.wideArtwork && item.artwork != nil) {
+            let remote = RemoteImageView()
+            remote.aspectFill = true
+            remote.translatesAutoresizingMaskIntoConstraints = false
+            plate.addSubview(remote)
+            NSLayoutConstraint.activate([
+                remote.leadingAnchor.constraint(equalTo: plate.leadingAnchor), remote.trailingAnchor.constraint(equalTo: plate.trailingAnchor),
+                remote.topAnchor.constraint(equalTo: plate.topAnchor), remote.bottomAnchor.constraint(equalTo: plate.bottomAnchor)
+            ])
+            remote.load(url, enabled: !ProcessInfo.processInfo.arguments.contains("--smoke-test"))
         }
         let title = NSTextField(labelWithString: item.title)
         title.font = .systemFont(ofSize: 13, weight: .medium)

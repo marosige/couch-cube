@@ -97,8 +97,11 @@ with tempfile.TemporaryDirectory(prefix="couch-cube-release-") as directory:
         app = mount / "CouchCube.app"
         assert (mount / "Applications").is_symlink()
         assert (mount / "Applications").readlink() == Path("/Applications")
-        assert not (mount / "Start Here.txt").exists()
-        assert (mount / "README.md").is_file()
+        # The installer window holds the app and Applications only, over its titled background.
+        visible = sorted(entry.name for entry in mount.iterdir() if not entry.name.startswith("."))
+        assert visible == ["Applications", "CouchCube.app"], visible
+        assert (mount / ".DS_Store").is_file(), "Installer window layout missing"
+        assert any((mount / ".background").glob("*.tiff")), "Installer background missing"
         assert (mount / ".VolumeIcon.icns").is_file()
         assert (mount / ".VolumeIcon.icns").read_bytes() == (app / "Contents/Resources/Console.icns").read_bytes()
         local_icon = (app / "Contents/Resources/Console.icns").read_bytes()
