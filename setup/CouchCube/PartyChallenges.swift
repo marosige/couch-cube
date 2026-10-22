@@ -103,7 +103,7 @@ struct PartyGame {
     var current: PartyChallenge? { started && round < queue.count ? queue[round] : nil }
     var finished: Bool { started && round >= queue.count }
     var ranking: [(name: String, points: Int)] {
-        players.map { (name: $0, points: scores[$0] ?? 0) }.sorted { $0.points != $1.points ? $0.points > $1.points : $0.name < $1.name }
+        players.map { ($0, scores[$0] ?? 0) }.sorted { $0.points != $1.points ? $0.points > $1.points : $0.name < $1.name }
     }
 
     mutating func start<G: RandomNumberGenerator>(using generator: inout G) {
