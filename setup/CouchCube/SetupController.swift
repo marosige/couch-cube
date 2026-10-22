@@ -16,9 +16,9 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
     let mainDetail = NSView()
     let sidebar = NSTableView()
     var selectingPage = false
-    let sidebarPages = [-1, 0, 8, 13, 17, -1, 6, 1, 7, 10, 11]
-    let sidebarTitles = ["Couch Cube", "Play", "Controllers", "Cube Shop", "Party Challenges", "Settings", "Game library", "App Store", "Retro consoles", "Console Mode", "App Settings"]
-    let sidebarSymbols = ["", "play.rectangle.fill", "gamecontroller.fill", "bag.fill", "figure.run", "", "books.vertical.fill", "storefront", "tv", "power", "gearshape"]
+    let sidebarPages = [-1, 0, 8, 13, -1, 6, 1, 7, 10, 11]
+    let sidebarTitles = ["Couch Cube", "Play", "Controllers", "Cube Shop", "Settings", "Game library", "App Store", "Retro consoles", "Console Mode", "App Settings"]
+    let sidebarSymbols = ["", "play.rectangle.fill", "gamecontroller.fill", "bag.fill", "", "books.vertical.fill", "storefront", "tv", "power", "gearshape"]
     let screenTitle = NSTextField(labelWithString: "Play")
     // Deals: lazy, cached, read-only views of CheapShark store deals and GamerPower giveaways.
     lazy var dealsRead: ([String], @escaping (Int32, Data, String) -> Void) -> Void = { [weak self] arguments, completed in
@@ -930,7 +930,6 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
         cleanupContent.setAccessibilityIdentifier("cleanupPage")
         addPage("Clean up", content: column([cleanupContent]))
         addPage("Windows games", content: windowsGuidePage())
-        addPage("Party Challenges", content: partyPage(), maxWidth: 820)
         navigationBar.orientation = .vertical
         navigationBar.alignment = .leading
         let sidebarScroll = NSScrollView()
@@ -1207,14 +1206,6 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
     var cleanupInProgress = false
     var cleanupReviewChoices: [NSButton] = []
     var cleanupPlan: CleanupPlan?
-    var party = PartyGame()
-    let partyContent = NSStackView()
-    let partyNameField = NSTextField()
-    let partyClock = NSTextField(labelWithString: "")
-    var partyTimer: Timer?
-    var partySecondsLeft: Int?
-    var partyLetter: Character = "A"
-    var partyHerdPicks: Set<String> = []
     var cleanupMessage: (text: String, color: NSColor)?
     let cleanupContent = NSStackView()
     let cleanupSummary = NSTextField(labelWithString: "")

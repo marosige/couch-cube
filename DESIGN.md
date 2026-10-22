@@ -20,18 +20,9 @@ view, not buttons positioned inside the content. AppKit manages their glass,
 spacing and overflow; View menu commands also support Command-[ and Command-].
 The page title is an unbordered informational toolbar item. Content uses the
 system safe area instead of a fixed-height imitation titlebar.
-The Couch Cube section groups Play (the home screen), Controllers, Cube Shop and Party Challenges.
+The Couch Cube section groups Play (the home screen), Controllers and Cube Shop.
 Settings groups Game library, App Store, Retro consoles, Console Mode and App Settings,
 in that order. Game library also contains what used to be Library storage.
-
-**Party Challenges** is a party game for the room, between video games: add 2–16 players, tick what you
-have (A4 paper, pens, cups, coins, a ball, spoons, "we're outside"), choose 5, 8 or 12 rounds and Start.
-Each round is one big card: a challenge that needs only what you ticked (indoor-only ones skip when outside),
-a countdown with Start Timer/Pause for timed ones (a sound at zero), then **Who won this round?** with one
-button per player or Nobody. **Mix in Herd Mind questions** (on by default) makes every other round a
-question ("Name a fruit."): with paper and pens everyone writes secretly; without, hands go up and everyone
-answers together on three, no changing; tick everyone with the most common answer. The end screen shows
-the winner and points with Play Again / New Game. Players, props and the Herd Mind choice are remembered.
 
 **Cube Shop** (it replaced the Deals page and always opens on Home) is a native,
 read-only Mac game store for PC games: **Home**, **Deals**, **Free Games** and **Wishlist**, plus

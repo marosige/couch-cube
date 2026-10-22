@@ -435,7 +435,7 @@ extension SetupController {
                 let stack = self.detail.subviews.compactMap { $0 as? NSStackView }.first!
                 let discoveryOK = success && !self.volumes.isEmpty && self.window.isVisible
                     && self.selected != nil
-                    && self.tabs.numberOfTabViewItems == 18 && self.logWindow == nil
+                    && self.tabs.numberOfTabViewItems == 17 && self.logWindow == nil
                 precondition(self.sidebarPages.count == self.sidebarTitles.count &&
                              self.sidebarPages.count == self.sidebarSymbols.count)
                 precondition(!self.sidebarPages.contains(3) && !self.sidebarPages.contains(4),
@@ -489,7 +489,6 @@ extension SetupController {
                         precondition(self.sidebar.selectedRow == self.sidebarPages.firstIndex(of:
                             (page == 2 || page == 3 || page == 4) ? 6 : page == 5 ? 6 : page == 9 ? self.inspectorParent : page == 12 ? self.driveDetailParent : page == 14 ? 13 : page == 15 ? 11 : page == 16 ? 1 : page))
                         if page == 13 { self.assertSmokeDeals() }
-                        if page == 17 { self.assertSmokeParty() }
                         self.assertSmokePageScrolls()
                         if page == 7 {
                             for toggle in self.systemSwitches {
@@ -1615,7 +1614,7 @@ extension SetupController {
                     controllerHeaderButtons[0].performClick(nil)
                     precondition(self.tabs.selectedTabViewItem === self.tabs.tabViewItems[8])
                     self.selectPage(0)
-                    precondition(self.sidebarPages == [-1, 0, 8, 13, 17, -1, 6, 1, 7, 10, 11] && !self.sidebarPages.contains(2))
+                    precondition(self.sidebarPages == [-1, 0, 8, 13, -1, 6, 1, 7, 10, 11] && !self.sidebarPages.contains(2))
                     precondition(self.sidebarTitles[0] == "Couch Cube" && self.sidebarTitles[1] == "Play" && self.sidebarSymbols[1] == "play.rectangle.fill")
                     precondition(self.sidebarTitles[self.sidebarPages.firstIndex(of: 1)!] == "App Store")
                     for page in [0, 8, 13, 6, 1, 7, 10, 11] {
@@ -3425,45 +3424,5 @@ extension SetupController {
         let document = scroll.documentView!
         precondition(document.bounds.height >= document.subviews.first!.fittingSize.height,
                      "Every settings page must scroll to its last control")
-    }
-
-    /// Party Challenges: only playable challenges come up, winners score, and the game ends with a ranking.
-    func assertSmokeParty() {
-        func views(_ root: NSView) -> [NSView] { [root] + root.subviews.flatMap(views) }
-        func labels(_ root: NSView) -> [String] { views(root).compactMap { ($0 as? NSTextField)?.stringValue } }
-        let saved = party
-        defer { party = saved; partyTimer?.invalidate(); partyTimer = nil; renderParty() }
-        party = PartyGame()
-        party.players = ["Anna", "Ben", "Cili"]
-        party.props = [.paper, .pens]
-        party.rounds = 5
-        party.herd = false
-        renderParty()
-        precondition(views(partyContent).compactMap { $0 as? NSButton }.first { $0.accessibilityIdentifier() == "partyStart" }?.isEnabled == true)
-        partyStart()
-        precondition(party.queue.count == 5 && party.queue.allSatisfy { $0.needs.isSubset(of: [.paper, .pens]) && !$0.needs.contains(.outside) },
-                     "Only challenges the group can play come up")
-        precondition(Set(party.queue.map(\.title)).count == party.queue.count, "No challenge repeats in one game")
-        let title = labels(partyContent).contains(party.queue[0].title)
-        precondition(title, "The round shows its challenge")
-        let pick = views(partyContent).compactMap { $0 as? NSButton }.first { $0.identifier?.rawValue == "winner:Ben" }!
-        pick.performClick(nil)
-        precondition(party.round == 1 && party.scores["Ben"] == 1)
-        partyEnd()
-        precondition(party.finished && labels(partyContent).contains("Ben wins!"), "The game ends with the winner")
-        precondition(PartyChallenges.playable(with: [.outside]).allSatisfy { !$0.indoors }, "Indoor-only challenges stay inside")
-        // Herd Mind: every other round is a question, and everyone ticked scores.
-        party.herd = true
-        party.props = []
-        partyStart()
-        precondition(party.queue.count == 5 && party.queue[1].question != nil && party.queue[0].question == nil, "Herd Mind alternates")
-        party.finishRound(winners: [])
-        renderParty()
-        precondition(labels(partyContent).contains { $0.contains("say it together on three") }, "Without paper, answers are said together")
-        for name in ["Anna", "Cili"] {
-            views(partyContent).compactMap { $0 as? NSButton }.first { $0.identifier?.rawValue == "herd:" + name }!.performClick(nil)
-        }
-        views(partyContent).compactMap { $0 as? NSButton }.first { $0.accessibilityIdentifier() == "partyHerdDone" }!.performClick(nil)
-        precondition(party.scores["Anna"] == 1 && party.scores["Cili"] == 1 && party.scores["Ben"] == 0, "Everyone with the top answer scores")
     }
 }
