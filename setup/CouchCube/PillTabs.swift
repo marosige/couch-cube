@@ -99,14 +99,14 @@ final class PillTabs: NSView {
 
     private func refresh() {
         effectiveAppearance.performAsCurrentDrawingAppearance {
-            layer?.backgroundColor = NSColor.quaternaryLabelColor.withAlphaComponent(0.6).cgColor
+            layer?.backgroundColor = NSColor.labelColor.withAlphaComponent(0.08).cgColor
             for button in buttons {
                 let chosen = button.tag == selectedSegment
                 let color: NSColor = chosen ? .white : .labelColor
                 button.attributedTitle = NSAttributedString(string: button.title, attributes: [
                     .font: NSFont.systemFont(ofSize: 14, weight: chosen ? .semibold : .medium), .foregroundColor: color])
                 button.layer?.backgroundColor = (chosen ? NSColor.controlAccentColor
-                    : button.tag == hovered ? NSColor.quaternaryLabelColor : NSColor.clear).cgColor
+                    : button.tag == hovered ? NSColor.labelColor.withAlphaComponent(0.08) : NSColor.clear).cgColor
                 button.setAccessibilityValue(chosen)
             }
         }

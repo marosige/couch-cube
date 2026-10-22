@@ -655,7 +655,7 @@ extension SetupController {
             texts.trailingAnchor.constraint(lessThanOrEqualTo: view.trailingAnchor, constant: -16),
             texts.centerYAnchor.constraint(equalTo: view.centerYAnchor)
         ])
-        view.baseColor = NSColor.quaternaryLabelColor.withAlphaComponent(0.5)
+        view.baseColor = NSColor.labelColor.withAlphaComponent(0.06)
         return view
     }
 
