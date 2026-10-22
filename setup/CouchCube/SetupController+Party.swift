@@ -71,12 +71,12 @@ extension SetupController {
         })
         grid.rowSpacing = 8
         grid.columnSpacing = 24
-        let props = card("What do you have?", subtitle: "Only challenges you can play come up.", views: [grid, herd])
 
         let herd = NSButton(checkboxWithTitle: "Mix in Herd Mind questions", target: self, action: #selector(partyHerdToggled(_:)))
         herd.state = party.herd ? .on : .off
         herd.toolTip = "Every other round everyone answers a question; the most common answer scores"
         let available = PartyChallenges.playable(with: party.props).count + (party.herd ? PartyChallenges.herdQuestions.count : 0)
+        let props = card("What do you have?", subtitle: "Only challenges you can play come up.", views: [grid, herd])
         let rounds = NSPopUpButton()
         for count in [5, 8, 12] { rounds.addItem(withTitle: "\(count) rounds"); rounds.lastItem?.tag = count }
         rounds.selectItem(withTag: party.rounds)
