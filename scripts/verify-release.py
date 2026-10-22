@@ -60,6 +60,7 @@ def verify_app(app, working_directory, distribution="local"):
     assert (resources / "scripts/rates.py").is_file()
     assert (resources / "scripts/steam_library.py").is_file()
     assert (resources / "scripts/rom_art.py").is_file()
+    assert (resources / "scripts/steamgriddb.py").is_file()
     assert os.access(resources / "scripts/askpass.sh", os.X_OK)
     assert (resources / "config/release.json").is_file()
     assert (resources / "config/bios-map.csv").is_file()

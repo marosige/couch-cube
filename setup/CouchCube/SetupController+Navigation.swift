@@ -212,6 +212,7 @@ extension SetupController {
             refreshGeneral()
             if steamReport == nil { loadSteamStatus() }
             romArtRounds = 0
+            gameArtRounds = 0
             loadLauncherLibrary()
         }
     }

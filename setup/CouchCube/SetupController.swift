@@ -201,6 +201,11 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
     static let launcherAppsKey = "launcherApps"
     var launcherLibrary: LibraryGames?
     var romArtRounds = 0
+    var gameArt: [String: [String: String]] = [:]
+    var gameArtRounds = 0
+    var gameArtLoading = false
+    let gameArtKeyField = NSSecureTextField()
+    let gameArtStatus = NSTextField(labelWithString: "")
     var romArtLoading = false
     /// Smoke screenshots show sample tiles instead of whatever the build machine has installed.
     var launcherSmokeItems: [LauncherItem]?
@@ -913,6 +918,7 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
                             color: .systemRed, trailing: button("Review...", #selector(reviewGamingCleanup)))
             ]),
             shopSettingsCard(),
+            gameArtworkCard(),
             storeAccountsCard()
         ]))
         driveDetailRows.orientation = .vertical

@@ -2284,6 +2284,21 @@ def rom_art_tools():
     return module
 
 
+def steamgriddb_tools():
+    spec = importlib.util.spec_from_file_location("console_steamgriddb", Path(__file__).with_name("steamgriddb.py"))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def game_art(storage):
+    """SteamGridDB grid, hero, logo and icon for the Play library's ROMs and game apps (needs the user's key)."""
+    library = library_games(storage)
+    games = [{"key": rom["path"], "name": rom["name"]} for rom in library["roms"]]
+    games += [{"key": app["path"], "name": app["name"]} for app in library["apps"]]
+    return steamgriddb_tools().artwork(games)
+
+
 def library_games(storage, home=None):
     """Everything playable for the Play page's game grid, read-only and fast (nothing is measured):
     ROMs of enabled consoles, native Mac games and Windows wrappers in the library, Porting Kit ports
@@ -2718,7 +2733,7 @@ def main():
                        help="Keep selection on the drive only; do not save it in this Mac's home folder.")
     setup.add_argument("--install", nargs="*", choices=list(PACKAGES), default=[])
     for action in ["env", "index", "steam", "retro", "console", "launch", "emulate", "register", "library-games",
-                   "porting-kit-folder", "rom-art"]:
+                   "porting-kit-folder", "rom-art", "game-art"]:
         command = sub.add_parser(action)
         command.add_argument("--root")
         if action == "launch":
@@ -2887,6 +2902,8 @@ def main():
                 emulate(storage, args.system, args.rom)
             elif args.command == "library-games":
                 print(json_text(library_games(storage)))
+            elif args.command == "game-art":
+                print(json_text(game_art(storage)))
             elif args.command == "rom-art":
                 print(json_text(rom_art_tools().covers(library_games(storage)["roms"])))
             elif args.command == "porting-kit-folder":

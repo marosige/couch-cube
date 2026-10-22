@@ -62,7 +62,8 @@ extension SetupController {
         return process
     }
 
-    func runBackendInBackground(_ arguments: [String], completed: @escaping (Int32, Data, String) -> Void) {
+    func runBackendInBackground(_ arguments: [String], environment extra: [String: String] = [:],
+                                completed: @escaping (Int32, Data, String) -> Void) {
         precondition(!arguments.contains("--confirm") || !ProcessInfo.processInfo.arguments.contains("--smoke-test"),
                      "Read-only smoke tests must never run mutations")
         let process = Process()
@@ -71,6 +72,7 @@ extension SetupController {
         var environment = ProcessInfo.processInfo.environment
         environment["PYTHONDONTWRITEBYTECODE"] = "1"
         environment["PATH"] = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+        environment.merge(extra) { _, new in new }
         process.environment = environment
         let output = Pipe(), errors = Pipe()
         process.standardOutput = output

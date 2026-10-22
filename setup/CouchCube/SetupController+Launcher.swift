@@ -68,17 +68,20 @@ extension SetupController {
         }
         // Each ROM starts straight in its console's emulator (no frontend in between).
         for rom in launcherLibrary?.roms ?? [] {
-            let cover = rom.cover.flatMap { NSImage(contentsOfFile: $0) }
+            // SteamGridDB's wide grid (when a key is set) fills the tile; else libretro's box cover; else the console.
+            let grid = gameArt[rom.path]?["grid"].flatMap { NSImage(contentsOfFile: $0) }
+            let cover = grid == nil ? rom.cover.flatMap { NSImage(contentsOfFile: $0) } : nil
             items.append(LauncherItem(id: "rom-" + rom.path, title: rom.name, subtitle: rom.systemName, section: .retro,
-                                      artwork: cover ?? ConsoleArtwork.image(for: rom.system), wideArtwork: false, path: rom.path,
+                                      artwork: grid ?? cover ?? ConsoleArtwork.image(for: rom.system), wideArtwork: grid != nil, path: rom.path,
                                       launch: { [weak self] in self?.launchRom(rom) }, coverArt: cover != nil))
         }
         for app in launcherLibrary?.apps ?? [] {
             let subtitle = ["native": "Mac", "windows": "Windows", "porting-kit": "Porting Kit",
                             "crossover": "CrossOver" + (app.group.map { " \u{00B7} \($0)" } ?? "")][app.kind] ?? ""
+            let grid = gameArt[app.path]?["grid"].flatMap { NSImage(contentsOfFile: $0) }
             items.append(LauncherItem(id: "app-" + app.path, title: app.name, subtitle: subtitle,
                                       section: app.kind == "native" ? .mac : .windows,
-                                      artwork: NSWorkspace.shared.icon(forFile: app.path), wideArtwork: false, path: app.path,
+                                      artwork: grid ?? NSWorkspace.shared.icon(forFile: app.path), wideArtwork: grid != nil, path: app.path,
                                       launch: { [weak self] in self?.openLauncherApp(app.path, name: app.name) }))
         }
         for path in launcherAddedPaths where FileManager.default.fileExists(atPath: path) {
@@ -100,7 +103,83 @@ extension SetupController {
             self.launcherLibrary = try? decoder.decode(LibraryGames.self, from: data)
             self.renderLauncher()
             self.loadRomArt()
+            self.loadGameArt()
         }
+    }
+
+    /// SteamGridDB art for ROMs and game apps, only with the user's own key (from the Keychain, passed to the
+    /// backend for that one run). Fetched in the background a few games at a time and cached on this Mac.
+    func loadGameArt() {
+        guard !gameArtLoading, gameArtRounds < 10, let key = SteamGridDBKey.read() else { return }
+        gameArtLoading = true
+        gameArtRounds += 1
+        runBackendInBackground(["game-art"], environment: ["COUCH_CUBE_STEAMGRIDDB_KEY": key]) { [weak self] code, data, _ in
+            guard let self else { return }
+            self.gameArtLoading = false
+            guard code == 0, let reply = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
+            let art = reply["art"] as? [String: [String: String]] ?? [:]
+            let error = reply["error"] as? String
+            self.gameArtStatus.stringValue = error ?? (art.isEmpty ? "" : "Artwork for \(art.count) game\(art.count == 1 ? "" : "s") on this Mac.")
+            self.gameArtStatus.textColor = error == nil ? .secondaryLabelColor : .systemOrange
+            if art != self.gameArt {
+                self.gameArt = art
+                self.renderLauncher()
+            }
+            if reply["more"] as? Bool == true && error == nil { self.loadGameArt() }
+        }
+    }
+
+    func gameArtworkCard() -> NSView {
+        gameArtKeyField.placeholderString = SteamGridDBKey.read() == nil ? "Paste your SteamGridDB API key" : "Key saved"
+        gameArtKeyField.target = self
+        gameArtKeyField.action = #selector(saveGameArtKey)
+        gameArtKeyField.setAccessibilityLabel("SteamGridDB API key")
+        gameArtKeyField.widthAnchor.constraint(equalToConstant: 180).isActive = true
+        gameArtStatus.font = .systemFont(ofSize: 11)
+        gameArtStatus.textColor = .secondaryLabelColor
+        gameArtStatus.lineBreakMode = .byWordWrapping
+        gameArtStatus.maximumNumberOfLines = 0
+        let get = button("Get a Free Key", #selector(openSteamGridDBKeyPage))
+        let remove = button("Remove Key", #selector(removeGameArtKey))
+        return card("Game artwork", subtitle: nil, views: [
+            settingsRow("SteamGridDB", subtitle: "Optional: banners, logos and icons for retro and Windows games. Retro covers work without it.",
+                        symbol: "photo.on.rectangle.angled", color: .systemPurple,
+                        trailing: row([gameArtKeyField, button("Save", #selector(saveGameArtKey))]),
+                        detail: row([get, remove, gameArtStatus]))
+        ])
+    }
+
+    @objc func openSteamGridDBKeyPage() {
+        if let url = URL(string: "https://www.steamgriddb.com/profile/preferences/api") { NSWorkspace.shared.open(url) }
+    }
+
+    @objc func saveGameArtKey() {
+        let key = gameArtKeyField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !key.isEmpty else { return }
+        guard key.range(of: "^[A-Za-z0-9]{16,64}$", options: .regularExpression) != nil else {
+            gameArtStatus.stringValue = "That doesn't look like a SteamGridDB API key."
+            gameArtStatus.textColor = .systemOrange
+            return
+        }
+        guard SteamGridDBKey.save(key) else {
+            gameArtStatus.stringValue = "Couldn't save the key in the Keychain."
+            gameArtStatus.textColor = .systemOrange
+            return
+        }
+        gameArtKeyField.stringValue = ""
+        gameArtKeyField.placeholderString = "Key saved"
+        gameArtStatus.stringValue = "Saved. Artwork loads when you open Play."
+        gameArtStatus.textColor = .secondaryLabelColor
+        gameArtRounds = 0
+        loadGameArt()
+    }
+
+    @objc func removeGameArtKey() {
+        SteamGridDBKey.delete()
+        gameArt = [:]
+        gameArtKeyField.placeholderString = "Paste your SteamGridDB API key"
+        gameArtStatus.stringValue = "Key removed. Saved artwork stays until macOS clears the cache."
+        renderLauncher()
     }
 
     /// Box covers for ROMs (libretro thumbnails, keyless), fetched in the background a batch at a time; the

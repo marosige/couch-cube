@@ -243,7 +243,12 @@ game's box cover from the libretro thumbnail collection (`rom-art`, keyless, `th
 only): matched by name like RetroArch (No-Intro names; a short name also tries (USA), (Europe), (World),
 (Japan)), fetched in the background 30 at a time, cached in `~/Library/Caches/Couch Cube/rom-art`, misses
 remembered for a week. The whole cover shows on a dark plate; systems without a libretro set (Wii U,
-Switch) keep the console artwork. Drive pages count games
+Switch) keep the console artwork. **App Settings › Game artwork** takes an optional SteamGridDB API key
+(the user's own free key, "Get a Free Key" opens SteamGridDB's API page): it's kept in the Keychain and
+handed to `game-art` in an environment variable for that run only. With it, ROMs and game apps get
+SteamGridDB's wide grid on their tile (before the libretro cover), plus a hero, logo and icon saved in
+`~/Library/Caches/Couch Cube/game-art` for the coming Cube TV; 10 games per run, images only from
+SteamGridDB's CDN, misses remembered for a week. Drive pages count games
 the same way, not files. Tiles fill the width in a flow grid; click, Return or
 VoiceOver opens them, and their menu offers Open, Show in Finder and, for added apps, Remove from Play. The search field filters by name.
 The Cube TV tile's artwork is drawn in code (`TVMenuArtwork.swift`) so it stays sharp at any size: the
