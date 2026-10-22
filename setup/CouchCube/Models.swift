@@ -344,6 +344,16 @@ struct ConsoleSystem: Decodable {
     var emulator_installed: Bool? = nil
 }
 
+/// `console-detail`: one console's games with their RetroArch saves and states (standalone emulators keep their own).
+struct ConsoleDetail: Decodable {
+    struct Game: Decodable { let name: String; let file: String; let path: String; let bytes: Int64?; let saves: Int; let states: Int }
+    let id: String
+    let name: String
+    let folder: String
+    let games: [Game]
+    let savesWhere: String?
+}
+
 struct BIOSStatus: Decodable {
     let state: String
     let summary: String

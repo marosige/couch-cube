@@ -1163,6 +1163,56 @@ def bios_status(storage, system):
             "files": []}
 
 
+SAVE_SUFFIXES = {".srm", ".sav", ".mcr", ".mcd", ".dsv", ".eep", ".fla", ".rtc", ".sra", ".vmu", ".bin"}
+
+
+def console_detail(storage, system):
+    """One console's overview for its Details page: its games (with size), and the RetroArch saves and save
+    states that belong to each game (matched by the game's file name, as RetroArch names them). Read-only."""
+    if system not in SYSTEMS:
+        raise SetupError("Unknown console.")
+    name, extensions, core = SYSTEMS[system]
+    folder = storage.root / "ROMs" / system
+    games = []
+    if folder.is_dir() and not folder.is_symlink():
+        try:
+            found = playable_roms(folder, extensions.split("|"))
+        except OSError:
+            found = []
+        for game, launch in found:
+            try:
+                size = launch.stat().st_size
+            except OSError:
+                size = None
+            games.append({"name": game, "file": launch.name, "path": str(launch), "bytes": size, "saves": 0, "states": 0})
+    # Saves and states: RetroArch keeps them under Saves/RetroArch (states in States/), named after the game file.
+    # Standalone emulators (Dolphin, PCSX2, RPCS3, Cemu, Ryujinx) keep their own.
+    standalone = core in STANDALONE or core == "dolphin"
+    if not standalone and games:
+        stems = {Path(game["file"]).stem.lower(): game for game in games}
+        base = storage.root / "Saves/RetroArch"
+        if base.is_dir() and not base.is_symlink():
+            try:
+                for path in base.rglob("*"):
+                    if path.is_symlink() or not path.is_file():
+                        continue
+                    lower = path.name.lower()
+                    is_state = ".state" in lower and not lower.endswith(".png")
+                    stem = lower.split(".state")[0] if is_state else Path(lower).stem
+                    game = stems.get(stem)
+                    if game is None:
+                        continue
+                    if is_state:
+                        game["states"] += 1
+                    elif path.suffix.lower() in SAVE_SUFFIXES:
+                        game["saves"] += 1
+            except OSError:
+                pass
+    return {"id": system, "name": name, "folder": str(folder), "games": games,
+            "saves_where": None if not standalone else ("Dolphin" if core == "dolphin" else PACKAGES[core].removesuffix(".app")),
+            "bios": bios_status(storage, system)}
+
+
 def systems_status(storage=None):
     enabled = selected_systems(read_json(storage.target(MARKER))) if storage else []
     installed = {}
@@ -2730,6 +2780,9 @@ def main():
     full_cleanup.add_argument("--items", nargs="+", required=True)
     full_cleanup.add_argument("--token", required=True)
     full_cleanup.add_argument("--confirm", action="store_true")
+    detail = sub.add_parser("console-detail")
+    detail.add_argument("--root", required=True)
+    detail.add_argument("--system", required=True)
     systems = sub.add_parser("systems")
     systems.add_argument("--root", required=True)
     systems.add_argument("--enabled", nargs="*", choices=list(SYSTEMS))
@@ -2878,6 +2931,8 @@ def main():
             print(json_text(cleanup_plan()))
         elif args.command == "cleanup-prepare":
             print(json_text(prepare_cleanup(args.items, args.token, args.confirm)))
+        elif args.command == "console-detail":
+            print(json_text(console_detail(configured_storage(args.root), args.system)))
         elif args.command == "systems":
             storage = configured_storage(args.root)
             if args.enabled is not None:

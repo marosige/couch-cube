@@ -16,6 +16,9 @@ class FakeStorage:
     def target(self, name):
         return self.root / name
 
+    def read_path(self, name):
+        return self.root / name
+
 
 class LibraryGamesTests(unittest.TestCase):
     """The Play page lists games only: ROMs of shown consoles, game apps and Windows shortcuts, no launchers."""
@@ -66,6 +69,20 @@ class LibraryGamesTests(unittest.TestCase):
                          "A game folder is one game (updates and DLC beside it); folders without a game are skipped")
         counts = {system["id"]: system["games"] for system in console.populated_systems(self.root)}
         self.assertEqual((counts["gc"], counts["switch"]), (1, 1), "Counts games, not files")
+
+    def test_console_detail_lists_games_with_their_saves_and_states(self):
+        (self.root / "Saves/RetroArch/States").mkdir(parents=True)
+        (self.root / "Saves/RetroArch/Super Mario World.srm").write_bytes(b"s")
+        (self.root / "Saves/RetroArch/States/Super Mario World.state").write_bytes(b"s")
+        (self.root / "Saves/RetroArch/States/Super Mario World.state1").write_bytes(b"s")
+        (self.root / "Saves/RetroArch/States/Super Mario World.state1.png").write_bytes(b"s")
+        (self.root / "BIOS/retroarch").mkdir(parents=True)
+        detail = console.console_detail(FakeStorage(self.root), "snes")
+        self.assertEqual(detail["name"], "Super Nintendo")
+        self.assertEqual([(game["name"], game["saves"], game["states"]) for game in detail["games"]], [("Super Mario World", 1, 2)])
+        self.assertIsNone(detail["saves_where"])
+        (self.root / "ROMs/gc").mkdir()
+        self.assertEqual(console.console_detail(FakeStorage(self.root), "gc")["saves_where"], "Dolphin")
 
     def test_symlinked_folders_are_not_followed(self):
         (self.home / "elsewhere/Fake.app").mkdir(parents=True)

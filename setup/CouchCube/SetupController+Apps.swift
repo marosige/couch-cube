@@ -722,30 +722,95 @@ extension SetupController {
         selectPage(inspectorParent)
     }
 
+    /// A console's Details page: an overview (console, emulator and whether it's installed, shown or hidden, games,
+    /// BIOS), then its games with their saves and states, then the BIOS files.
     @objc func showConsoleDetails(_ sender: NSButton) {
         guard consoleSystems.indices.contains(sender.tag) else { return }
         let system = consoleSystems[sender.tag]
         inspectorSystemID = system.id
         inspectorParent = 7
         inspectorTitle.stringValue = system.name
+        renderConsoleDetail(system, detail: nil)
+        selectPage(9)
+        guard let root = selected?.root, !ProcessInfo.processInfo.arguments.contains("--smoke-test") else { return }
+        runBackendInBackground(["console-detail", "--root", root, "--system", system.id]) { [weak self] code, data, _ in
+            guard let self, self.inspectorSystemID == system.id, code == 0,
+                  let detail = decodeDeals(ConsoleDetail.self, data) else { return }
+            self.renderConsoleDetail(system, detail: detail)
+        }
+    }
+
+    func renderConsoleDetail(_ system: ConsoleSystem, detail: ConsoleDetail?) {
         clearRows(inspectorRows)
-        let emulator = emulatorStatus(system)
+        func add(_ view: NSView) {
+            inspectorRows.addArrangedSubview(view)
+            view.widthAnchor.constraint(equalTo: inspectorRows.widthAnchor).isActive = true
+        }
+        func heading(_ title: String) -> NSTextField {
+            let label = text(title, size: 15)
+            label.font = .systemFont(ofSize: 15, weight: .semibold)
+            return label
+        }
+        // Overview
+        let installed = emulatorInstalled(system)
         let store = NSButton(title: "Show in App Store", target: self, action: #selector(showEmulatorInAppStore(_:)))
-        store.image = NSImage(systemSymbolName: "storefront", accessibilityDescription: nil)
-        store.imagePosition = .imageLeading
         store.bezelStyle = .rounded
         store.controlSize = .small
         store.identifier = NSUserInterfaceItemIdentifier(system.package)
-        store.toolTip = "Show \(emulatorName(system)) in App Store"
-        let emulatorRow = row([statusIndicator(emulator.title, color: emulator.color), NSView(), store])
-        emulatorRow.distribution = .fill
-        inspectorRows.addArrangedSubview(emulatorRow)
-        if let bios = system.bios, bios.state != "not-needed" {
-            let status = biosStatusView(bios, searchQuery: system.name + " BIOS")
-            inspectorRows.addArrangedSubview(status)
-            status.widthAnchor.constraint(equalTo: inspectorRows.widthAnchor).isActive = true
+        var facts: [(String, NSView)] = [
+            ("Console", text(system.name, size: 13)),
+            ("Emulator", row([statusIndicator(emulatorStatus(system).title, color: emulatorStatus(system).color),
+                              text(installed == true ? "Installed" : installed == false ? "Not installed" : "Not checked yet", size: 12, secondary: true),
+                              store])),
+            ("Shown", text(system.enabled ? "Yes, in Play and the TV menu" : "No. Turn it on in Retro consoles.", size: 13, secondary: !system.enabled)),
+            ("Games", text(detail.map { $0.games.count == 1 ? "1 game" : "\($0.games.count) games" } ?? (selected == nil ? "No game library" : "Counting\u{2026}"),
+                           size: 13))
+        ]
+        if let bios = system.bios, bios.state != "not-needed" { facts.append(("BIOS", text(bios.summary, size: 13))) }
+        let grid = NSGridView(views: facts.map { fact -> [NSView] in
+            let name = text(fact.0, size: 12, secondary: true)
+            return [name, fact.1]
+        })
+        grid.rowSpacing = 10
+        grid.columnSpacing = 16
+        grid.column(at: 0).width = 80
+        grid.setAccessibilityIdentifier("consoleOverview")
+        add(grid)
+        // Games, with saves and states
+        if let detail {
+            add(separator())
+            let open = button("Open ROM Folder", #selector(openBIOSFolder(_:)))
+            open.identifier = NSUserInterfaceItemIdentifier(detail.folder)
+            add(row([heading("Games"), NSView(), open]))
+            if detail.games.isEmpty {
+                add(text("No games yet. Put this console's games in its ROM folder.", size: 12, secondary: true))
+            }
+            for game in detail.games {
+                var parts: [String] = []
+                if let bytes = game.bytes { parts.append(ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file)) }
+                if let place = detail.savesWhere {
+                    parts.append("Saves in " + place)
+                } else {
+                    parts.append(game.saves == 0 ? "No saves" : game.saves == 1 ? "1 save" : "\(game.saves) saves")
+                    parts.append(game.states == 0 ? "No states" : game.states == 1 ? "1 state" : "\(game.states) states")
+                }
+                let name = text(game.name, size: 13)
+                name.lineBreakMode = .byTruncatingTail
+                name.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+                let info = text(parts.joined(separator: " \u{00B7} "), size: 11, secondary: true)
+                info.setContentHuggingPriority(.required, for: .horizontal)
+                let line = row([name, NSView(), info])
+                line.distribution = .fill
+                line.toolTip = game.file
+                add(line)
+            }
         }
-        selectPage(9)
+        // BIOS files
+        if let bios = system.bios, bios.state != "not-needed" {
+            add(separator())
+            add(heading("BIOS"))
+            add(biosStatusView(bios, searchQuery: system.name + " BIOS"))
+        }
     }
 
     func appStoreLink(for system: ConsoleSystem) -> NSButton {

@@ -672,3 +672,8 @@ instead. ES-DE still needs the appropriate emulators, games and any BIOS/cores.
 Decky is not included or supported
 on macOS. Windows games need compatible, individually configured wrappers,
 not macOS Proton.
+
+**Retro console details** (ⓘ on a console row): an overview — console, emulator with Installed / Not installed and
+Show in App Store, whether it's shown (in Play and the TV menu) or hidden, how many games, the BIOS summary — then
+**Games** (from `console-detail`: each game with its size and its RetroArch saves and save states, matched by the
+game's file name; standalone emulators say where they keep saves) with Open ROM Folder, then the BIOS files.
