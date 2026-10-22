@@ -802,7 +802,10 @@ extension SetupController {
 
     func lookUpPlatforms() {
         var ids = storeDeals.compactMap(\.steamAppId) + (shopHome.map { ($0.featured + $0.drops).compactMap(\.steamAppId) } ?? [])
-        ids += shopHome.map { (($0.topSellers ?? []) + ($0.trending ?? []) + ($0.couch ?? [])).compactMap(\.steamAppId) } ?? []
+        if let home = shopHome {
+            let shelves: [[ShopGame]] = [home.topSellers ?? [], home.trending ?? [], home.couch ?? []]
+            ids += shelves.joined().compactMap(\.steamAppId)
+        }
         ids += (searchReply?.games ?? []).compactMap(\.steamAppId) + (wishlist?.items ?? []).compactMap(\.steamAppId)
         var seen = Set<String>()
         let wanted = ids.filter { !platformsRequested.contains($0) && seen.insert($0).inserted }.prefix(40)
