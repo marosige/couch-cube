@@ -668,11 +668,11 @@ extension SetupController {
         let compat = compatibilityBadge(.mac)!
         badges.append(compat.badge)
         let heart = wishlistHeart(key: "app:" + app.id, title: app.title, payload: ["title": app.title, "app_store_id": app.id, "thumb": app.thumb ?? ""])
-        let view = dealRow(artwork: dealArtwork(app.thumb, fill: false), title: app.title, detail: dealBadges(badges),
-                           detailTip: (app.seller.map { "By \($0)\n" } ?? "") + (price.converted ? "Price: \(price.spoken)" : "Mac App Store price in \(app.currency)"),
-                           trailing: [priceCluster(price: price, store: "Mac App Store")],
-                           accessibility: "Open \(app.title), Mac App Store, \(price.spoken). \(compat.tip)",
-                           actions: [heart]) { [weak self] in
+        let tip = (app.seller.map { "By \($0)\n" } ?? "") + (price.converted ? "Price: \(price.spoken)" : "Mac App Store price in \(app.currency)")
+        let right = offerColumns(price: price, was: nil, savings: nil, insight: nil, normal: nil)
+        let view = shopItemRow(heart: heart, artwork: dealArtwork(app.thumb, fill: false), title: app.title, tags: shopTags(title: app.title),
+                               store: "Mac App Store", platform: dealBadges(badges), tip: tip,
+                               accessibility: "Open \(app.title), Mac App Store, \(price.spoken). \(compat.tip)", right: right) { [weak self] in
             self?.showShopGame(self?.shopDetail(app: app))
         }
         view.setAccessibilityIdentifier("shopAppStoreRow")
