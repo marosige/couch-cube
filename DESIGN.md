@@ -238,7 +238,12 @@ shortcuts in `~/Applications/CrossOver` (installers and uninstallers skipped); M
 `Native/Games`; and apps added with **+** (UserDefaults `launcherApps`). The list comes from
 `library-games`, read-only and unmeasured, and loads again once the drives are known. A game can be a
 loose file or a folder (a Switch game with its updates and DLC, a GameCube game in its own folder): a
-folder is one game named after the folder and starts its largest playable file. Drive pages count games
+folder is one game named after the folder and starts its largest playable file. ROM tiles show the
+game's box cover from the libretro thumbnail collection (`rom-art`, keyless, `thumbnails.libretro.com`
+only): matched by name like RetroArch (No-Intro names; a short name also tries (USA), (Europe), (World),
+(Japan)), fetched in the background 30 at a time, cached in `~/Library/Caches/Couch Cube/rom-art`, misses
+remembered for a week. The whole cover shows on a dark plate; systems without a libretro set (Wii U,
+Switch) keep the console artwork. Drive pages count games
 the same way, not files. Tiles fill the width in a flow grid; click, Return or
 VoiceOver opens them, and their menu offers Open, Show in Finder and, for added apps, Remove from Play. The search field filters by name.
 The Cube TV tile's artwork is drawn in code (`TVMenuArtwork.swift`) so it stays sharp at any size: the

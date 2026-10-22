@@ -68,9 +68,10 @@ extension SetupController {
         }
         // Each ROM starts straight in its console's emulator (no frontend in between).
         for rom in launcherLibrary?.roms ?? [] {
+            let cover = rom.cover.flatMap { NSImage(contentsOfFile: $0) }
             items.append(LauncherItem(id: "rom-" + rom.path, title: rom.name, subtitle: rom.systemName, section: .retro,
-                                      artwork: ConsoleArtwork.image(for: rom.system), wideArtwork: false, path: rom.path,
-                                      launch: { [weak self] in self?.launchRom(rom) }))
+                                      artwork: cover ?? ConsoleArtwork.image(for: rom.system), wideArtwork: false, path: rom.path,
+                                      launch: { [weak self] in self?.launchRom(rom) }, coverArt: cover != nil))
         }
         for app in launcherLibrary?.apps ?? [] {
             let subtitle = ["native": "Mac", "windows": "Windows", "porting-kit": "Porting Kit",
@@ -98,6 +99,25 @@ extension SetupController {
             decoder.keyDecodingStrategy = .convertFromSnakeCase
             self.launcherLibrary = try? decoder.decode(LibraryGames.self, from: data)
             self.renderLauncher()
+            self.loadRomArt()
+        }
+    }
+
+    /// Box covers for ROMs (libretro thumbnails, keyless), fetched in the background a batch at a time; the
+    /// library reloads to show them. Covers stay cached on this Mac, so this only works once per game.
+    func loadRomArt() {
+        guard !romArtLoading, romArtRounds < 10, launcherLibrary?.roms.contains(where: { $0.cover == nil }) == true else { return }
+        romArtLoading = true
+        romArtRounds += 1
+        runBackendInBackground(["rom-art"]) { [weak self] code, data, _ in
+            guard let self else { return }
+            self.romArtLoading = false
+            guard code == 0, let reply = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let covers = reply["covers"] as? [String: String] else { return }
+            let known = Set(self.launcherLibrary?.roms.compactMap(\.cover) ?? [])
+            if covers.values.contains(where: { !known.contains($0) }) || reply["more"] as? Bool == true {
+                self.loadLauncherLibrary()
+            }
         }
     }
 

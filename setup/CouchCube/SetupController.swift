@@ -200,6 +200,8 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
     let launcherSearch = NSSearchField()
     static let launcherAppsKey = "launcherApps"
     var launcherLibrary: LibraryGames?
+    var romArtRounds = 0
+    var romArtLoading = false
     /// Smoke screenshots show sample tiles instead of whatever the build machine has installed.
     var launcherSmokeItems: [LauncherItem]?
     var homeTiles: NSStackView!

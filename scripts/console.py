@@ -2277,19 +2277,29 @@ def app_bundles(folder, depth=1):
     return found
 
 
+def rom_art_tools():
+    spec = importlib.util.spec_from_file_location("console_rom_art", Path(__file__).with_name("rom_art.py"))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 def library_games(storage, home=None):
     """Everything playable for the Play page's game grid, read-only and fast (nothing is measured):
     ROMs of enabled consoles, native Mac games and Windows wrappers in the library, Porting Kit ports
     and CrossOver's program shortcuts. Steam games come from steam-status."""
     home = Path.home() if home is None else home
     enabled = set(selected_systems(read_json(storage.target(MARKER))))
+    art = rom_art_tools()
     roms = []
     for system, (system_name, extensions, _) in SYSTEMS.items():
         folder = storage.root / "ROMs" / system
         if system not in enabled or folder.is_symlink() or not folder.is_dir():
             continue
         for name, launch in playable_roms(folder, extensions.split("|")):
-            roms.append({"system": system, "system_name": system_name, "name": name, "path": str(launch)})
+            cover = art.cached(system, name)
+            roms.append({"system": system, "system_name": system_name, "name": name, "path": str(launch),
+                         "cover": str(cover) if cover else None})
     apps = []
     for kind, folder, depth in [("native", storage.root / "Native/Games", 1),
                                 ("windows", storage.root / "Windows/Wrappers", 1),
@@ -2708,7 +2718,7 @@ def main():
                        help="Keep selection on the drive only; do not save it in this Mac's home folder.")
     setup.add_argument("--install", nargs="*", choices=list(PACKAGES), default=[])
     for action in ["env", "index", "steam", "retro", "console", "launch", "emulate", "register", "library-games",
-                   "porting-kit-folder"]:
+                   "porting-kit-folder", "rom-art"]:
         command = sub.add_parser(action)
         command.add_argument("--root")
         if action == "launch":
@@ -2877,6 +2887,8 @@ def main():
                 emulate(storage, args.system, args.rom)
             elif args.command == "library-games":
                 print(json_text(library_games(storage)))
+            elif args.command == "rom-art":
+                print(json_text(rom_art_tools().covers(library_games(storage)["roms"])))
             elif args.command == "porting-kit-folder":
                 storage.mkdir("Windows/Porting Kit")
                 print(json_text({"path": str(storage.root / "Windows/Porting Kit")}))

@@ -18,7 +18,7 @@ enum LauncherSection: String, CaseIterable {
 
 /// `library-games` (scripts/console.py): ROMs of shown consoles and game apps in the library and CrossOver.
 struct LibraryGames: Decodable {
-    struct Rom: Decodable { let system: String; let systemName: String; let name: String; let path: String }
+    struct Rom: Decodable { let system: String; let systemName: String; let name: String; let path: String; var cover: String? = nil }
     struct App: Decodable { let kind: String; let name: String; let path: String; let group: String? }
     let roms: [Rom]
     let apps: [App]
@@ -37,6 +37,8 @@ struct LauncherItem {
     let launch: () -> Void
     /// Art to fetch when nothing is cached locally (Steam's store header); the icon shows until it arrives.
     var artworkURL: URL? = nil
+    /// The artwork is a game's box cover (taller than the tile): shown whole on a dark plate instead of cropped.
+    var coverArt = false
 }
 
 /// Steam keeps tools and runtimes in the same manifests as games; they are not something to play.
@@ -128,7 +130,17 @@ final class LauncherTile: ClickableRowView {
         plate.layer?.cornerRadius = 8
         plate.layer?.masksToBounds = true
         plate.layer?.backgroundColor = NSColor.quaternaryLabelColor.cgColor
-        if let artwork = item.artwork, item.wideArtwork {
+        if let artwork = item.artwork, item.coverArt {
+            plate.layer?.backgroundColor = NSColor(white: 0.12, alpha: 1).cgColor
+            let cover = NSImageView(image: artwork)
+            cover.imageScaling = .scaleProportionallyUpOrDown
+            cover.translatesAutoresizingMaskIntoConstraints = false
+            plate.addSubview(cover)
+            NSLayoutConstraint.activate([
+                cover.leadingAnchor.constraint(equalTo: plate.leadingAnchor), cover.trailingAnchor.constraint(equalTo: plate.trailingAnchor),
+                cover.topAnchor.constraint(equalTo: plate.topAnchor, constant: 6), cover.bottomAnchor.constraint(equalTo: plate.bottomAnchor, constant: -6)
+            ])
+        } else if let artwork = item.artwork, item.wideArtwork {
             plate.layer?.contentsGravity = .resizeAspectFill
             plate.layer?.contents = artwork.cgImage(forProposedRect: nil, context: nil, hints: nil)
         } else {
