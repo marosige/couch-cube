@@ -2527,21 +2527,26 @@ def login_status():
     agent = login_agent()
     reject_symlinks(agent)
     if not agent.exists():
-        return {"enabled": False, "delay": 30, "legacy": False}
+        return {"enabled": False, "delay": 30, "legacy": False, "always": False}
     with agent.open("rb") as file:
         previous = plistlib.load(file)
     if previous.get("Label") != LOGIN_LABEL:
         raise SetupError("Preserving an unrecognized existing LaunchAgent.")
     arguments = previous.get("ProgramArguments")
     if arguments == ["/usr/bin/open", "steam://open/bigpicture"]:
-        return {"enabled": True, "delay": 30, "legacy": True}
+        return {"enabled": True, "delay": 30, "legacy": True, "always": True}
+    # "--always" opens the TV menu after every login; without it only when a controller is on and no
+    # keyboard or mouse is connected.
+    always = isinstance(arguments, list) and len(arguments) == 4 and arguments[3] == "--always"
+    if always:
+        arguments = arguments[:3]
     if (not isinstance(arguments, list) or len(arguments) != 3
             or not isinstance(arguments[0], str) or not Path(arguments[0]).is_absolute()
             or Path(arguments[0]).name != "ConsoleAutoLaunch" or arguments[1] != "--delay"
             or not isinstance(arguments[2], str) or not arguments[2].isdigit()
             or not 5 <= int(arguments[2]) <= 300):
         raise SetupError("Unrecognized console auto-launch settings; preserving the existing LaunchAgent.")
-    return {"enabled": True, "delay": int(arguments[2]), "legacy": False}
+    return {"enabled": True, "delay": int(arguments[2]), "legacy": False, "always": always}
 
 
 def login_helper():
@@ -2552,7 +2557,7 @@ def login_helper():
     return helper
 
 
-def login_launcher(confirm, enabled=True, delay=30, root=None):
+def login_launcher(confirm, enabled=True, delay=30, root=None, always=False):
     if not confirm:
         raise SetupError("Login changes require --confirm. No change made.")
     if type(delay) is not int or not 5 <= delay <= 300:
@@ -2571,7 +2576,7 @@ def login_launcher(confirm, enabled=True, delay=30, root=None):
             default_frontend()
         settings = {
             "Label": LOGIN_LABEL,
-            "ProgramArguments": [str(helper), "--delay", str(delay)],
+            "ProgramArguments": [str(helper), "--delay", str(delay)] + (["--always"] if always else []),
             "RunAtLoad": True,
             "LimitLoadToSessionType": "Aqua",
             "StandardOutPath": str(log_dir / "auto-launch.log"),
@@ -2742,6 +2747,7 @@ def main():
     login.add_argument("--disable", action="store_true")
     login.add_argument("--delay", type=int, default=30)
     login.add_argument("--root")
+    login.add_argument("--always", action="store_true", help="Open the TV menu after every login, not only with a controller")
     setup = sub.add_parser("setup")
     setup.add_argument("--drive", required=True)
     setup.add_argument("--confirm", action="store_true")
@@ -2892,7 +2898,7 @@ def main():
                 app = stage_current_app(Path(directory))
                 copy_app_to_storage(choice, app)
         elif args.command == "login":
-            login_launcher(args.confirm, not args.disable, args.delay, args.root)
+            login_launcher(args.confirm, not args.disable, args.delay, args.root, args.always)
         elif args.command == "setup":
             if not args.confirm:
                 raise SetupError("No changes made. Setup requires explicit --confirm consent.")

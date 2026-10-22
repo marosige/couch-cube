@@ -3165,7 +3165,9 @@ extension SetupController {
                 let frame = row.convert(row.bounds, to: page)
                 precondition(frame.minX >= -0.5 && frame.maxX <= page.bounds.width + 0.5, "Shop rows stay inside the page on tab \(tab)")
             }
-            precondition(shopNav.convert(shopNav.bounds, to: page).maxX <= (shopScopeBar.isHidden ? dealsRefreshButton : shopScope).convert(NSPoint.zero, to: page).x + 0.5, "The Shop sections and store scope fit the narrowest window")
+            let tabs = shopNav.convert(shopNav.bounds, to: page)
+            precondition(tabs.minX >= -0.5 && tabs.maxX <= page.bounds.width + 0.5, "The Shop section tabs fit the narrowest window")
+            precondition(shopSearchField.convert(shopSearchField.bounds, to: page).maxX <= (shopScopeBar.isHidden ? dealsRefreshButton : shopScope).convert(NSPoint.zero, to: page).x + 0.5, "Search and store scope share a line")
             // Right end of each row: price over usual price, discount over store, in fixed columns that line up row to row.
             var priceX: [String: (shape: String, price: CGFloat)] = [:]
             for row in views(page).compactMap({ $0 as? ClickableRowView }) where !row.isHiddenOrHasHiddenAncestor {

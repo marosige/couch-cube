@@ -79,7 +79,7 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
     let shopTabKey = "shopTab", shopScopeKey = "shopScope", shopCurrencyKey = "shopCurrency", shopFeeKey = "shopFeePercent"
     let shopTab = NSSegmentedControl(labels: ["Home", "Deals", "Free Games", "Search", "Wishlist"], trackingMode: .selectOne, target: nil, action: nil)
     /// The visible navigation; Search isn't a tab but the results of the search field above it.
-    let shopNav = NSSegmentedControl(labels: ["Home", "Deals", "Free Games", "Wishlist"], trackingMode: .selectOne, target: nil, action: nil)
+    let shopNav = PillTabs(labels: ["Home", "Deals", "Free Games", "Wishlist"])
     static let shopNavTabs = [0, 1, 2, 4]
     var shopReturnTab = 0
     /// Cube Shop game pages, by wishlist key; Back and Forward reopen them from here.
@@ -450,6 +450,8 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
     let autoLaunchDelay = NSTextField(string: "30")
     let autoLaunchStatus = NSTextField(wrappingLabelWithString: "")
     var autoLaunchLoaded = false
+    /// Console mode opens the TV menu after every login, not only when a controller is the only input.
+    var autoLaunchAlways = false
     enum OverviewCheck: CaseIterable { case storage, menu, consoles, automatic, steam, apps }
     var overviewChecks = Set<OverviewCheck>()
     /// The guided step currently shown; it stays until its tasks are done so arriving checks never make markers jump.

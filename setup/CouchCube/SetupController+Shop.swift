@@ -41,8 +41,6 @@ extension SetupController {
         shopNav.action = #selector(shopNavChanged)
         shopNav.setAccessibilityLabel("Cube Shop section")
         shopNav.setAccessibilityIdentifier("shopNav")
-        shopNav.segmentDistribution = .fit
-        shopNav.segmentStyle = .automatic
         shopScope.target = self
         shopScope.action = #selector(shopScopeChanged)
         shopScope.controlSize = .small
@@ -72,14 +70,24 @@ extension SetupController {
         shopScopeBar.setViews([shopScope, shopMacOnlyToggle], in: .leading)
         shopStatusLabel(shopCurrencyNote)
         shopCurrencyNote.setAccessibilityIdentifier("shopCurrencyNote")
-        // Store header: one calm search field for every store on top, then the sections, with the store scope and refresh tucked at the right.
+        // Store header: the search field with the store scope and refresh beside it, then the sections as big
+        // centred tabs (← → steps through them; a controller's shoulder buttons will too).
         shopSearchField.setAccessibilityIdentifier("shopSearchField")
-        let nav = row([shopNav, NSView(), shopScopeBar, dealsProgress, dealsRefreshButton])
-        nav.alignment = .centerY
-        nav.spacing = 8
-        let header = column([shopSearchField, nav])
-        header.spacing = 12
-        for view in [shopSearchField, nav] { view.widthAnchor.constraint(equalTo: header.widthAnchor).isActive = true }
+        shopSearchField.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        let top = row([shopSearchField, shopScopeBar, dealsProgress, dealsRefreshButton])
+        top.alignment = .centerY
+        top.spacing = 8
+        let nav = NSView()
+        shopNav.translatesAutoresizingMaskIntoConstraints = false
+        nav.addSubview(shopNav)
+        NSLayoutConstraint.activate([
+            shopNav.centerXAnchor.constraint(equalTo: nav.centerXAnchor),
+            shopNav.leadingAnchor.constraint(greaterThanOrEqualTo: nav.leadingAnchor),
+            shopNav.topAnchor.constraint(equalTo: nav.topAnchor), shopNav.bottomAnchor.constraint(equalTo: nav.bottomAnchor)
+        ])
+        let header = column([top, nav])
+        header.spacing = 14
+        for view in [top, nav] { view.widthAnchor.constraint(equalTo: header.widthAnchor).isActive = true }
         shopScopeHint.isHidden = true
         shopStatusLabel(homeStatus)
         shopList(homeList, id: "shopHomeList")

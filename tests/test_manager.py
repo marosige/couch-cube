@@ -1025,7 +1025,7 @@ class AutoLaunchTests(unittest.TestCase):
         return agent
 
     def test_default_off_without_creating_files(self):
-        self.assertEqual(manager.login_status(), {"enabled": False, "delay": 30, "legacy": False})
+        self.assertEqual(manager.login_status(), {"enabled": False, "delay": 30, "legacy": False, "always": False})
         self.assertFalse(manager.login_agent().exists())
 
     def test_enable_saves_controller_helper_for_next_login_only(self):
@@ -1040,7 +1040,14 @@ class AutoLaunchTests(unittest.TestCase):
         self.assertEqual(state["ProgramArguments"], [str(helper), "--delay", "45"])
         self.assertTrue(state["RunAtLoad"])
         self.assertNotIn("KeepAlive", state)
-        self.assertEqual(manager.login_status(), {"enabled": True, "delay": 45, "legacy": False})
+        self.assertEqual(manager.login_status(), {"enabled": True, "delay": 45, "legacy": False, "always": False})
+        with patch.object(manager, "login_helper", return_value=helper), \
+                patch.object(manager, "app_binary", return_value=Path("/steam")), \
+                patch.object(manager.subprocess, "run", return_value=subprocess.CompletedProcess([], 113, stderr=b"")):
+            manager.login_launcher(True, delay=45, always=True)
+        state = plistlib.loads(manager.login_agent().read_bytes())
+        self.assertEqual(state["ProgramArguments"], [str(helper), "--delay", "45", "--always"])
+        self.assertTrue(manager.login_status()["always"], "Always mode opens the TV menu after every login")
 
     def test_disable_stops_waiting_helper_and_removes_login_entry(self):
         self.write_agent({"Label": manager.LOGIN_LABEL,

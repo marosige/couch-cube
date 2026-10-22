@@ -35,6 +35,7 @@ extension SetupController {
                 let settings = try JSONDecoder().decode(AutoLaunchSettings.self, from: data)
                 self.autoLaunchToggle.state = settings.enabled ? .on : .off
                 self.autoLaunchDelay.stringValue = String(settings.delay)
+                self.autoLaunchAlways = settings.always ?? false
                 self.autoLaunchLoaded = true
                 self.autoLaunchStatus.stringValue = settings.legacy
                     ? "An older Steam-only launcher is set up. Choose an option below to replace it." : ""
@@ -69,6 +70,7 @@ extension SetupController {
         }
         var arguments = ["login", "--confirm", "--delay", String(delay)]
         if enabled, let drive = selected { arguments += ["--root", drive.root] }
+        if enabled && autoLaunchAlways { arguments.append("--always") }
         if !enabled { arguments.append("--disable") }
         execute(arguments) { code, _ in
             if code == 0 { self.loadAutoLaunch(); if enabled { self.setLoginItem(false) } }
@@ -137,7 +139,7 @@ extension SetupController {
     }
 
     var consoleAfterLogin: String {
-        autoLaunchToggle.state == .on ? "tv" : loginItemEnabled ? "window" : "none"
+        autoLaunchToggle.state == .on ? (autoLaunchAlways ? "tv-always" : "tv") : loginItemEnabled ? "window" : "none"
     }
 
     func addChoice(_ row: NSView, to list: NSStackView) {
@@ -186,14 +188,15 @@ extension SetupController {
         for (id, title, subtitle, symbol, color) in [
             ("none", "Nothing", "Open Couch Cube yourself when you want to play.", "moon.fill", NSColor.systemGray),
             ("window", "Open Couch Cube", "In its window, like any app.", "macwindow", .systemBlue),
-            ("tv", "Open the TV menu", "The true console experience: when a controller is on and no keyboard or mouse is connected.", "tv.fill", .systemGreen)
+            ("tv", "Open the TV menu with a controller", "The true console experience: when a controller is on and no keyboard or mouse is connected.", "tv.fill", .systemGreen),
+            ("tv-always", "Always open the TV menu", "After every sign-in, whatever is connected.", "tv.badge.wifi", .systemTeal)
         ] {
             addChoice(choiceRow(title, subtitle: subtitle, symbol: symbol, color: color, selected: after == id,
                                                            enabled: autoLaunchLoaded, id: "after-" + id) { [weak self] in
                 self?.chooseAfterLogin(id)
             }, to: afterLoginChoices)
         }
-        consoleDelayRow.isHidden = after != "tv"
+        consoleDelayRow.isHidden = !after.hasPrefix("tv")
         autoLaunchStatus.isHidden = autoLaunchStatus.stringValue.isEmpty
 
         clearRows(tvMenuChoices)
@@ -223,13 +226,14 @@ extension SetupController {
     func chooseAfterLogin(_ mode: String) {
         guard autoLaunchLoaded else { return }
         switch mode {
-        case "tv":
+        case "tv", "tv-always":
             guard selected != nil, report?.state == "valid layout", report?.issues.isEmpty == true else {
                 autoLaunchStatus.stringValue = "Set up your game library first (Settings \u{203A} Game library)."
                 autoLaunchStatus.isHidden = false
                 return
             }
             autoLaunchToggle.state = .on
+            autoLaunchAlways = mode == "tv-always"
             saveAutoLaunch()
         case "window":
             setLoginItem(true)

@@ -7,8 +7,9 @@ enum ConsoleDecision {
 }
 
 func decision(elapsed: TimeInterval, delay: TimeInterval, hasDesktopInput: Bool,
-              hasController: Bool) -> ConsoleDecision {
+              hasController: Bool, always: Bool = false) -> ConsoleDecision {
     if elapsed < delay { return .wait }
+    if always { return .launch }
     if hasDesktopInput { return .stop }
     return hasController ? .launch : .wait
 }
@@ -51,14 +52,19 @@ final class ConsoleAutoLaunch: NSObject, NSApplicationDelegate {
     private var timer: Timer?
     private let started = ProcessInfo.processInfo.systemUptime
     private let delay: TimeInterval
+    private let always: Bool
     private var opening = false
     private var launcher: Process?
 
-    init(delay: TimeInterval) { self.delay = delay }
+    init(delay: TimeInterval, always: Bool) {
+        self.delay = delay
+        self.always = always
+    }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         GCController.shouldMonitorBackgroundEvents = true
-        log("Waiting \(Int(delay)) seconds after login, then checking desktop input and controllers.")
+        log(always ? "Waiting \(Int(delay)) seconds after login, then opening the TV menu."
+            : "Waiting \(Int(delay)) seconds after login, then checking desktop input and controllers.")
         timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in self?.check() }
         check()
     }
@@ -69,7 +75,7 @@ final class ConsoleAutoLaunch: NSObject, NSApplicationDelegate {
             let action = decision(elapsed: ProcessInfo.processInfo.systemUptime - started, delay: delay,
                                   hasDesktopInput: try desktopInputConnected()
                                     || GCKeyboard.coalesced != nil || GCMouse.current != nil,
-                                  hasController: !GCController.controllers().isEmpty)
+                                  hasController: !GCController.controllers().isEmpty, always: always)
             switch action {
             case .wait: return
             case .stop:
@@ -147,6 +153,8 @@ if arguments.contains("--self-test") {
     precondition(decision(elapsed: 301, delay: 30, hasDesktopInput: true, hasController: false) == .stop)
     precondition(decision(elapsed: 4, delay: 5, hasDesktopInput: false, hasController: true) == .wait)
     precondition(decision(elapsed: 5, delay: 5, hasDesktopInput: false, hasController: true) == .launch)
+    precondition(decision(elapsed: 30, delay: 30, hasDesktopInput: true, hasController: false, always: true) == .launch)
+    precondition(decision(elapsed: 29, delay: 30, hasDesktopInput: true, hasController: false, always: true) == .wait)
     print("Console auto-launch policy passed; no login settings changed or apps launched.")
     exit(0)
 }
@@ -155,13 +163,13 @@ if arguments.contains("--probe") {
     catch { log(error.localizedDescription); exit(1) }
     exit(0)
 }
-guard arguments.count == 3, arguments[1] == "--delay", let seconds = Int(arguments[2]),
-      (5...300).contains(seconds) else {
-    log("Expected --delay <5-300 seconds>.")
+guard arguments.count == 3 || (arguments.count == 4 && arguments[3] == "--always"),
+      arguments[1] == "--delay", let seconds = Int(arguments[2]), (5...300).contains(seconds) else {
+    log("Expected --delay <5-300 seconds> [--always].")
     exit(1)
 }
 let application = NSApplication.shared
 application.setActivationPolicy(.accessory)
-let controller = ConsoleAutoLaunch(delay: TimeInterval(seconds))
+let controller = ConsoleAutoLaunch(delay: TimeInterval(seconds), always: arguments.count == 4)
 application.delegate = controller
 application.run()

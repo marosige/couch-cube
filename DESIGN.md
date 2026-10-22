@@ -344,7 +344,8 @@ the Mac wakes from sleep) — type your password, password once then Apple Watch
 Password), or start without signing in (automatic login is read from macOS; the System Settings steps,
 including Lock Screen's password-after-sleep, show only for this choice). **2 Open at Login** —
 nothing, open Couch Cube in its window (a macOS Login Item via SMAppService), or open the TV menu (the
-true console experience) when a controller is on and no keyboard or mouse is connected (the LaunchAgent, with its wait in seconds).
+true console experience) when a controller is on and no keyboard or mouse is connected, or **Always open the TV menu** after every
+sign-in (the LaunchAgent, with its wait in seconds; `login --always`).
 **3 On the TV** — Steam Big Picture, ES-DE (a missing one leads to App Store) or Cube TV Home
 (Couch Cube's own, shown as coming soon). The Play tile is titled **Cube TV**, with the chosen menu beneath. Game library also sets up and switches the drive; App Settings groups app updates,
 app location, uninstall and gaming cleanup. **Clean up gaming setup** opens its own page (not a

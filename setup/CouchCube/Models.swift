@@ -318,6 +318,7 @@ struct AutoLaunchSettings: Decodable {
     let enabled: Bool
     let delay: Int
     let legacy: Bool
+    var always: Bool? = nil
 }
 
 struct ManagedApp: Decodable {
