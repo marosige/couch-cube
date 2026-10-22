@@ -244,8 +244,9 @@ only): matched by name like RetroArch (No-Intro names; a short name also tries (
 (Japan)), fetched in the background 30 at a time, cached in `~/Library/Caches/Couch Cube/rom-art`, misses
 remembered for a week. The whole cover shows on a dark plate; systems without a libretro set (Wii U,
 Switch) keep the console artwork. **App Settings › Game artwork** takes an optional SteamGridDB API key
-(the user's own free key, "Get a Free Key" opens SteamGridDB's API page): it's kept in the Keychain and
-handed to `game-art` in an environment variable for that run only. With it, ROMs and game apps get
+(the user's own free key, "Get a Free Key" opens SteamGridDB's API page). It only fetches public artwork,
+so it's saved in the game library (`Config/steamgriddb.json`, `game-art-key --set/--clear`) and a portable
+drive brings it to every Mac. With it, ROMs and game apps get
 SteamGridDB's wide grid on their tile (before the libretro cover), plus a hero, logo and icon saved in
 `~/Library/Caches/Couch Cube/game-art` for the coming Cube TV; 10 games per run, images only from
 SteamGridDB's CDN, misses remembered for a week. Drive pages count games

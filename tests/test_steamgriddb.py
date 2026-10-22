@@ -1,10 +1,8 @@
 import importlib.util
 import json
-import os
 from pathlib import Path
 import tempfile
 import unittest
-from unittest import mock
 import urllib.error
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -56,26 +54,30 @@ class SteamGridDBTests(unittest.TestCase):
         self.folder = Path(self.temp.name)
 
     def test_no_key_means_no_requests(self):
-        with mock.patch.dict(os.environ, {}, clear=True):
-            report = grid.artwork([{"key": "/r/a", "name": "Mario Party"}], opener=Opener(), folder=self.folder)
-        self.assertEqual((report["enabled"], report["art"]), (False, {}))
+        opener = Opener()
+        report = grid.artwork([{"key": "/r/a", "name": "Mario Party"}], None, opener=opener, folder=self.folder)
+        self.assertEqual((report["enabled"], report["art"], opener.requests), (False, {}, []))
 
-    def test_key_from_the_app_is_validated(self):
-        with mock.patch.dict(os.environ, {grid.KEY_VARIABLE: KEY}):
-            self.assertEqual(grid.api_key(), KEY)
-        with mock.patch.dict(os.environ, {grid.KEY_VARIABLE: "not a key; rm -rf"}):
-            self.assertIsNone(grid.api_key())
+    def test_key_file_in_the_library_is_validated(self):
+        path = self.folder / "steamgriddb.json"
+        path.write_text(grid.key_file_content(KEY))
+        self.assertEqual(grid.api_key(path), KEY)
+        path.write_text('{"api_key": "not a key; rm -rf"}')
+        self.assertIsNone(grid.api_key(path))
+        self.assertIsNone(grid.api_key(self.folder / "missing.json"))
+        with self.assertRaises(grid.GridError):
+            grid.key_file_content("bad key")
 
     def test_saves_cdn_images_only_and_sends_key_to_the_api_only(self):
         opener = Opener()
-        report = grid.artwork([{"key": "/r/a", "name": "Mario Party"}], opener=opener, folder=self.folder, key=KEY, now=1000)
+        report = grid.artwork([{"key": "/r/a", "name": "Mario Party"}], KEY, opener=opener, folder=self.folder, now=1000)
         art = report["art"]["/r/a"]
         self.assertEqual(set(art), {"grid"}, "The hero on a foreign host is skipped")
         self.assertEqual(Path(art["grid"]).read_bytes(), b"\x89PNGgrid")
         for url, authorization in opener.requests:
             self.assertEqual(authorization is not None, url.startswith(grid.API), url)
         again = Opener()
-        self.assertEqual(grid.artwork([{"key": "/r/a", "name": "Mario Party"}], opener=again, folder=self.folder, key=KEY)["art"]["/r/a"], art)
+        self.assertEqual(grid.artwork([{"key": "/r/a", "name": "Mario Party"}], KEY, opener=again, folder=self.folder)["art"]["/r/a"], art)
         self.assertEqual(again.requests, [], "Saved art is reused")
 
 

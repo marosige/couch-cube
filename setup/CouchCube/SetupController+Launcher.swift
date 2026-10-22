@@ -107,17 +107,19 @@ extension SetupController {
         }
     }
 
-    /// SteamGridDB art for ROMs and game apps, only with the user's own key (from the Keychain, passed to the
-    /// backend for that one run). Fetched in the background a few games at a time and cached on this Mac.
+    /// SteamGridDB art for ROMs and game apps, only with the user's own key (saved in the library, so a portable
+    /// drive brings it along). Fetched in the background a few games at a time and cached on this Mac.
     func loadGameArt() {
-        guard !gameArtLoading, gameArtRounds < 10, let key = SteamGridDBKey.read() else { return }
+        guard !gameArtLoading, gameArtRounds < 10, selected != nil,
+              !ProcessInfo.processInfo.arguments.contains("--smoke-test") else { return }
         gameArtLoading = true
         gameArtRounds += 1
-        runBackendInBackground(["game-art"], environment: ["COUCH_CUBE_STEAMGRIDDB_KEY": key]) { [weak self] code, data, _ in
+        runBackendInBackground(["game-art"]) { [weak self] code, data, _ in
             guard let self else { return }
             self.gameArtLoading = false
             guard code == 0, let reply = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
             let art = reply["art"] as? [String: [String: String]] ?? [:]
+            self.gameArtKeyField.placeholderString = reply["enabled"] as? Bool == true ? "Key saved" : "Paste your SteamGridDB API key"
             let error = reply["error"] as? String
             self.gameArtStatus.stringValue = error ?? (art.isEmpty ? "" : "Artwork for \(art.count) game\(art.count == 1 ? "" : "s") on this Mac.")
             self.gameArtStatus.textColor = error == nil ? .secondaryLabelColor : .systemOrange
@@ -130,7 +132,7 @@ extension SetupController {
     }
 
     func gameArtworkCard() -> NSView {
-        gameArtKeyField.placeholderString = SteamGridDBKey.read() == nil ? "Paste your SteamGridDB API key" : "Key saved"
+        gameArtKeyField.placeholderString = "Paste your SteamGridDB API key"
         gameArtKeyField.target = self
         gameArtKeyField.action = #selector(saveGameArtKey)
         gameArtKeyField.setAccessibilityLabel("SteamGridDB API key")
@@ -142,7 +144,7 @@ extension SetupController {
         let get = button("Get a Free Key", #selector(openSteamGridDBKeyPage))
         let remove = button("Remove Key", #selector(removeGameArtKey))
         return card("Game artwork", subtitle: nil, views: [
-            settingsRow("SteamGridDB", subtitle: "Optional: banners, logos and icons for retro and Windows games. Retro covers work without it.",
+            settingsRow("SteamGridDB", subtitle: "Optional: banners, logos and icons for retro and Windows games. Saved with your game library.",
                         symbol: "photo.on.rectangle.angled", color: .systemPurple,
                         trailing: row([gameArtKeyField, button("Save", #selector(saveGameArtKey))]),
                         detail: row([get, remove, gameArtStatus]))
@@ -161,25 +163,37 @@ extension SetupController {
             gameArtStatus.textColor = .systemOrange
             return
         }
-        guard SteamGridDBKey.save(key) else {
-            gameArtStatus.stringValue = "Couldn't save the key in the Keychain."
+        guard selected != nil else {
+            gameArtStatus.stringValue = "Set up your game library first; the key is saved there."
             gameArtStatus.textColor = .systemOrange
             return
         }
-        gameArtKeyField.stringValue = ""
-        gameArtKeyField.placeholderString = "Key saved"
-        gameArtStatus.stringValue = "Saved. Artwork loads when you open Play."
-        gameArtStatus.textColor = .secondaryLabelColor
-        gameArtRounds = 0
-        loadGameArt()
+        runBackendInBackground(["game-art-key", "--set", key]) { [weak self] code, _, errors in
+            guard let self else { return }
+            guard code == 0 else {
+                self.gameArtStatus.stringValue = "Couldn't save the key: " + backendErrorMessage(errors, fallback: "check Game library.")
+                self.gameArtStatus.textColor = .systemOrange
+                return
+            }
+            self.gameArtKeyField.stringValue = ""
+            self.gameArtKeyField.placeholderString = "Key saved"
+            self.gameArtStatus.stringValue = "Saved in your game library. Artwork loads in the background."
+            self.gameArtStatus.textColor = .secondaryLabelColor
+            self.gameArtRounds = 0
+            self.loadGameArt()
+        }
     }
 
     @objc func removeGameArtKey() {
-        SteamGridDBKey.delete()
-        gameArt = [:]
-        gameArtKeyField.placeholderString = "Paste your SteamGridDB API key"
-        gameArtStatus.stringValue = "Key removed. Saved artwork stays until macOS clears the cache."
-        renderLauncher()
+        guard selected != nil else { return }
+        runBackendInBackground(["game-art-key", "--clear"]) { [weak self] code, _, _ in
+            guard let self, code == 0 else { return }
+            self.gameArt = [:]
+            self.gameArtKeyField.placeholderString = "Paste your SteamGridDB API key"
+            self.gameArtStatus.stringValue = "Key removed."
+            self.gameArtStatus.textColor = .secondaryLabelColor
+            self.renderLauncher()
+        }
     }
 
     /// Box covers for ROMs (libretro thumbnails, keyless), fetched in the background a batch at a time; the

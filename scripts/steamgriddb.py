@@ -1,14 +1,14 @@
 """Game artwork from SteamGridDB, only when the user has added their own free API key.
 
-The key is the user's (from steamgriddb.com › Preferences › API) and is kept in the macOS Keychain by the
-app, which hands it to this process in the COUCH_CUBE_STEAMGRIDDB_KEY environment variable for one run. It
-is sent only to SteamGridDB's API host as a Bearer token and never written to disk or printed. Per game it saves four images to ~/Library/Caches/Couch Cube/game-art:
+The key is the user's (from steamgriddb.com › Preferences › API). It isn't a secret worth guarding (it
+only fetches public artwork), so it lives in the game library at Config/steamgriddb.json and travels with
+a portable SSD to every Mac. It is sent only to SteamGridDB's API host as a Bearer token and never printed.
+Per game it saves four images to ~/Library/Caches/Couch Cube/game-art:
 a wide grid (the Play tile), a hero (a big banner), a logo and an icon. Images come only from SteamGridDB's
 CDN hosts, over HTTPS, with a size limit. Misses are remembered for a week.
 """
 import hashlib
 import json
-import os
 from pathlib import Path
 import re
 import time
@@ -19,7 +19,8 @@ import urllib.request
 API = "https://www.steamgriddb.com/api/v2/"
 API_HOST = "www.steamgriddb.com"
 CDN_HOSTS = {"cdn2.steamgriddb.com", "cdn.steamgriddb.com"}
-KEY_VARIABLE = "COUCH_CUBE_STEAMGRIDDB_KEY"
+KEY_FILE = "Config/steamgriddb.json"
+KEY_PATTERN = re.compile(r"[A-Za-z0-9]{16,64}")
 USER_AGENT = "CouchCube/0.3 (+https://github.com/marosige/couch-cube)"
 JSON_LIMIT = 1024 ** 2
 IMAGE_LIMIT = 6 * 1024 ** 2
@@ -38,10 +39,24 @@ def cache_dir():
     return Path.home() / "Library/Caches/Couch Cube/game-art"
 
 
-def api_key():
-    """The user's key as handed over by the app, or None when none was added."""
-    key = os.environ.get(KEY_VARIABLE, "").strip()
-    return key if re.fullmatch(r"[A-Za-z0-9]{16,64}", key) else None
+def valid_key(value):
+    return isinstance(value, str) and KEY_PATTERN.fullmatch(value.strip()) is not None
+
+
+def api_key(path):
+    """The key saved in the library (path to Config/steamgriddb.json), or None when none was added."""
+    try:
+        data = json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, ValueError, TypeError):
+        return None
+    key = data.get("api_key") if isinstance(data, dict) else None
+    return key.strip() if valid_key(key) else None
+
+
+def key_file_content(key):
+    if not valid_key(key):
+        raise GridError("That doesn't look like a SteamGridDB API key.")
+    return json.dumps({"api_key": key.strip()}, indent=2) + "\n"
 
 
 def _read(url, hosts, limit, headers, opener):
@@ -141,9 +156,8 @@ def fetch(name, key, steam_app_id=None, now=None, opener=None, folder=None):
     return found
 
 
-def artwork(games, limit=10, now=None, opener=None, folder=None, key=None):
+def artwork(games, key, limit=10, now=None, opener=None, folder=None):
     """{game key: {kind: file}} for library games ({key, name, steam_app_id?}); at most `limit` new lookups."""
-    key = key if key is not None else api_key()
     result, looked, error = {}, 0, None
     for game in games:
         name, steam = game.get("name"), game.get("steam_app_id")

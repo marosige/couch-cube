@@ -2296,7 +2296,23 @@ def game_art(storage):
     library = library_games(storage)
     games = [{"key": rom["path"], "name": rom["name"]} for rom in library["roms"]]
     games += [{"key": app["path"], "name": app["name"]} for app in library["apps"]]
-    return steamgriddb_tools().artwork(games)
+    tools = steamgriddb_tools()
+    return tools.artwork(games, tools.api_key(storage.read_path(tools.KEY_FILE)))
+
+
+def game_art_key(storage, key=None, clear=False):
+    """Saves or removes the SteamGridDB key in the library, so it goes with the drive to other Macs."""
+    tools = steamgriddb_tools()
+    if clear:
+        path = storage.target(tools.KEY_FILE)
+        if path.exists():
+            path.unlink()
+    elif key is not None:
+        try:
+            storage.write(tools.KEY_FILE, tools.key_file_content(key))
+        except tools.GridError as exc:
+            raise SetupError(str(exc)) from None
+    return {"saved": tools.api_key(storage.read_path(tools.KEY_FILE)) is not None}
 
 
 def library_games(storage, home=None):
@@ -2733,11 +2749,14 @@ def main():
                        help="Keep selection on the drive only; do not save it in this Mac's home folder.")
     setup.add_argument("--install", nargs="*", choices=list(PACKAGES), default=[])
     for action in ["env", "index", "steam", "retro", "console", "launch", "emulate", "register", "library-games",
-                   "porting-kit-folder", "rom-art", "game-art"]:
+                   "porting-kit-folder", "rom-art", "game-art", "game-art-key"]:
         command = sub.add_parser(action)
         command.add_argument("--root")
         if action == "launch":
             command.add_argument("--id", required=True)
+        if action == "game-art-key":
+            command.add_argument("--set", metavar="KEY")
+            command.add_argument("--clear", action="store_true")
         if action == "emulate":
             command.add_argument("--system", required=True)
             command.add_argument("--rom", required=True)
@@ -2904,6 +2923,8 @@ def main():
                 print(json_text(library_games(storage)))
             elif args.command == "game-art":
                 print(json_text(game_art(storage)))
+            elif args.command == "game-art-key":
+                print(json_text(game_art_key(storage, args.set, args.clear)))
             elif args.command == "rom-art":
                 print(json_text(rom_art_tools().covers(library_games(storage)["roms"])))
             elif args.command == "porting-kit-folder":
