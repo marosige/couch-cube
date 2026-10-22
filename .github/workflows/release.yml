@@ -38,9 +38,10 @@ jobs:
   dmg:
     needs: plan
     if: github.event_name == 'workflow_dispatch' || needs.plan.outputs.publish == 'true'
-    runs-on: macos-14
+    runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
+      - run: bash scripts/select-xcode.sh
       - run: /usr/bin/python3 -B -m unittest discover -s tests -q
       - run: bash scripts/package-release.sh
       - run: /usr/bin/python3 -B scripts/verify-release.py "build/${{ needs.plan.outputs.dmg }}"

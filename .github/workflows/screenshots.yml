@@ -11,9 +11,10 @@ permissions:
   contents: write
 jobs:
   capture:
-    runs-on: macos-14
+    runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
+      - run: bash scripts/select-xcode.sh
       - run: bash scripts/build-setup-app.sh
       - run: |
           mkdir -p build/screenshots

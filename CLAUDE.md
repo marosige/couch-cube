@@ -32,7 +32,7 @@ for s in scripts/*.sh; do bash -n "$s"; done
 ```
 
 Swift only builds on macOS (`bash scripts/build-setup-app.sh`). No local compiler in cloud sessions:
-push and watch the **Checks** workflow (`native-app` job on macos-14). The full DMG smoke test runs in
+push and watch the **Checks** workflow (`native-app` job on macos-15 with Xcode 26, see `scripts/select-xcode.sh`; an older SDK loses the Liquid Glass look). The full DMG smoke test runs in
 the **Release** workflow; start it by hand (workflow_dispatch) to verify without publishing.
 
 ## Versions and releases (Claude manages these)

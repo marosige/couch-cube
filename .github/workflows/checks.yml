@@ -16,7 +16,8 @@ jobs:
       - run: python3 -m unittest discover -s tests -v
       - run: for script in scripts/*.sh; do bash -n "$script"; done
   native-app:
-    runs-on: macos-14
+    runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
+      - run: bash scripts/select-xcode.sh
       - run: bash scripts/build-setup-app.sh
