@@ -96,7 +96,7 @@ extension SetupController {
     /// Games in the Couch Cube library (ROMs, Mac games, Windows wrappers, Porting Kit) and CrossOver shortcuts.
     func loadLauncherLibrary() {
         guard !ProcessInfo.processInfo.arguments.contains("--smoke-test"), selected != nil else { return }
-        runBackendInBackground(["library-games"]) { [weak self] code, data, _ in
+        runBackendInBackground(libraryCommand(["library-games"])) { [weak self] code, data, _ in
             guard let self, code == 0 else { return }
             let decoder = JSONDecoder()
             decoder.keyDecodingStrategy = .convertFromSnakeCase
@@ -114,7 +114,7 @@ extension SetupController {
               !ProcessInfo.processInfo.arguments.contains("--smoke-test") else { return }
         gameArtLoading = true
         gameArtRounds += 1
-        runBackendInBackground(["game-art"]) { [weak self] code, data, _ in
+        runBackendInBackground(libraryCommand(["game-art"])) { [weak self] code, data, _ in
             guard let self else { return }
             self.gameArtLoading = false
             guard code == 0, let reply = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
@@ -168,7 +168,7 @@ extension SetupController {
             gameArtStatus.textColor = .systemOrange
             return
         }
-        runBackendInBackground(["game-art-key", "--set", key]) { [weak self] code, _, errors in
+        runBackendInBackground(libraryCommand(["game-art-key", "--set", key])) { [weak self] code, _, errors in
             guard let self else { return }
             guard code == 0 else {
                 self.gameArtStatus.stringValue = "Couldn't save the key: " + backendErrorMessage(errors, fallback: "check Game library.")
@@ -186,7 +186,7 @@ extension SetupController {
 
     @objc func removeGameArtKey() {
         guard selected != nil else { return }
-        runBackendInBackground(["game-art-key", "--clear"]) { [weak self] code, _, _ in
+        runBackendInBackground(libraryCommand(["game-art-key", "--clear"])) { [weak self] code, _, _ in
             guard let self, code == 0 else { return }
             self.gameArt = [:]
             self.gameArtKeyField.placeholderString = "Paste your SteamGridDB API key"
@@ -202,7 +202,7 @@ extension SetupController {
         guard !romArtLoading, romArtRounds < 10, launcherLibrary?.roms.contains(where: { $0.cover == nil }) == true else { return }
         romArtLoading = true
         romArtRounds += 1
-        runBackendInBackground(["rom-art"]) { [weak self] code, data, _ in
+        runBackendInBackground(libraryCommand(["rom-art"])) { [weak self] code, data, _ in
             guard let self else { return }
             self.romArtLoading = false
             guard code == 0, let reply = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
@@ -214,9 +214,16 @@ extension SetupController {
         }
     }
 
+    /// Library commands name the active library explicitly (`--root`); without it the backend falls back to a
+    /// host setup file that a library used only on this Mac never writes.
+    func libraryCommand(_ arguments: [String]) -> [String] {
+        guard let root = selected?.root else { return arguments }
+        return arguments + ["--root", root]
+    }
+
     func launchRom(_ rom: LibraryGames.Rom) {
         status.stringValue = "Starting \(rom.name)\u{2026}"
-        runBackendInBackground(["emulate", "--system", rom.system, "--rom", rom.path]) { [weak self] code, _, errors in
+        runBackendInBackground(libraryCommand(["emulate", "--system", rom.system, "--rom", rom.path])) { [weak self] code, _, errors in
             guard let self else { return }
             self.status.stringValue = code == 0 ? "" : "Couldn't start \(rom.name): " +
                 self.backendErrorMessageText(errors)
