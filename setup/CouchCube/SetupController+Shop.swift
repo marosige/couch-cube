@@ -445,7 +445,13 @@ extension SetupController {
         schedulePlatformLookup()
         homeList.arrangedSubviews.forEach { $0.removeFromSuperview() }
         guard let home = shopHome else {
-            homeStatus.stringValue = homeError ?? (homeLoadingKey == nil ? "" : "Loading\u{2026}")
+            homeStatus.stringValue = homeError ?? ""
+            if homeError == nil && homeLoadingKey != nil {
+                for view in shopHomeSkeleton() {
+                    homeList.addArrangedSubview(view)
+                    view.widthAnchor.constraint(equalTo: homeList.widthAnchor).isActive = true
+                }
+            }
             return
         }
         func add(_ view: NSView) {
@@ -461,9 +467,11 @@ extension SetupController {
         let featured = shown.dropFirst(hero == nil ? 0 : 1)
         let drops = home.drops.filter { shopShows(steamAppId: $0.steamAppId) }
         let topSellers = (home.topSellers ?? []).filter { shopShows(steamAppId: $0.steamAppId) }
+        let trending = (home.trending ?? []).filter { shopShows(steamAppId: $0.steamAppId) }
         let couch = (home.couch ?? []).filter { shopShows(steamAppId: $0.steamAppId) }
         for (index, view) in [shopShelf("On Your Wishlist", cards: hits.prefix(4).map { shopCard(wishlist: $0) }, more: 4),
                               shopShelf("Top Deals", cards: featured.prefix(8).map { shopCard(deal: $0) }, more: 1),
+                              shopShelf("New & Trending", cards: trending.prefix(8).map { shopCard(game: $0) }, more: nil),
                               shopShelf("Top Sellers", cards: topSellers.prefix(8).map { shopCard(game: $0) }, more: nil),
                               shopShelf("Couch Games", cards: couch.prefix(8).map { shopCard(game: $0) }, more: nil),
                               shopShelf("Price Drops", cards: drops.prefix(4).map { shopCard(deal: $0) }, more: 1),
@@ -721,6 +729,9 @@ extension SetupController {
         guard let reply = searchReply else {
             searchStatus.stringValue = searchError ?? (searchLoadingQuery != nil ? searchStatus.stringValue :
                 "Search every PC store and the Mac App Store at once.")
+            if searchError == nil && searchLoadingQuery != nil {
+                for (index, view) in shopSkeletonRows(6).enumerated() { addShopRow(view, to: searchList, separated: index > 0) }
+            }
             return
         }
         let sort = selectedSort(searchSortPopup)
@@ -791,7 +802,7 @@ extension SetupController {
 
     func lookUpPlatforms() {
         var ids = storeDeals.compactMap(\.steamAppId) + (shopHome.map { ($0.featured + $0.drops).compactMap(\.steamAppId) } ?? [])
-        ids += shopHome.map { (($0.topSellers ?? []) + ($0.couch ?? [])).compactMap(\.steamAppId) } ?? []
+        ids += shopHome.map { (($0.topSellers ?? []) + ($0.trending ?? []) + ($0.couch ?? [])).compactMap(\.steamAppId) } ?? []
         ids += (searchReply?.games ?? []).compactMap(\.steamAppId) + (wishlist?.items ?? []).compactMap(\.steamAppId)
         var seen = Set<String>()
         let wanted = ids.filter { !platformsRequested.contains($0) && seen.insert($0).inserted }.prefix(40)
@@ -1239,5 +1250,48 @@ extension SetupController {
     func ownedBadge(_ steamAppId: String?, installed: Bool = false) -> (symbol: String?, text: String, color: NSColor)? {
         guard !installed, let id = steamAppId, steamLink?.owned.contains(id) == true else { return nil }
         return ("bag.fill", "Owned", .systemBlue)
+    }
+}
+
+extension SetupController {
+    /// Home while it loads: the shapes of the featured banner and two shelves, shimmering.
+    func shopHomeSkeleton() -> [NSView] {
+        let hero = ShimmerView(cornerRadius: 14)
+        hero.heightAnchor.constraint(equalToConstant: 300).isActive = true
+        hero.setAccessibilityIdentifier("shopSkeleton")
+        var views: [NSView] = [hero]
+        for _ in 0..<2 {
+            let heading = ShimmerView(cornerRadius: 6)
+            heading.widthAnchor.constraint(equalToConstant: 180).isActive = true
+            heading.heightAnchor.constraint(equalToConstant: 22).isActive = true
+            let headingRow = row([heading, NSView()])
+            let grid = TileFlowView()
+            grid.minimumTileWidth = 190
+            grid.spacing = 18
+            grid.textHeight = 52
+            grid.setTiles((0..<4).map { _ in ShimmerView(cornerRadius: 10) })
+            views += [headingRow, grid]
+        }
+        return views
+    }
+
+    /// List rows while a list loads: art, two lines of text and a price, shimmering.
+    func shopSkeletonRows(_ count: Int) -> [NSView] {
+        (0..<count).map { index in
+            func block(_ width: CGFloat?, _ height: CGFloat, radius: CGFloat = 5) -> ShimmerView {
+                let view = ShimmerView(cornerRadius: radius)
+                if let width { view.widthAnchor.constraint(equalToConstant: width).isActive = true }
+                view.heightAnchor.constraint(equalToConstant: height).isActive = true
+                return view
+            }
+            let art = block(Self.shopArtworkSize.width, Self.shopArtworkSize.height, radius: 4)
+            let lines = column([block(CGFloat(220 - index % 3 * 40), 13), block(110, 10)])
+            lines.spacing = 8
+            let line = row([art, lines, NSView(), block(64, 22, radius: 11)])
+            line.alignment = .centerY
+            line.edgeInsets = NSEdgeInsets(top: 8, left: 0, bottom: 8, right: 0)
+            line.setAccessibilityIdentifier("shopSkeleton")
+            return line
+        }
     }
 }

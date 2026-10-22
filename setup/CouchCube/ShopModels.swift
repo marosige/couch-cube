@@ -298,6 +298,7 @@ struct ShopHomeReply: Decodable {
     let free: [Giveaway]
     /// Steam's top sellers and Couch Cube's couch picks, on sale or not (older backends send neither).
     var topSellers: [ShopGame]? = nil
+    var trending: [ShopGame]? = nil
     var couch: [ShopGame]? = nil
     let errors: [String]
     let wishlist: WishlistReply?

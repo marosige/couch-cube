@@ -237,6 +237,9 @@ extension SetupController {
         } else {
             for giveaway in sortedGiveaways() { addDealRow(giveawayRow(giveaway)) }
         }
+        if count == 0 && dealsLoadingKey != nil && warning == nil {
+            for view in shopSkeletonRows(6) { addDealRow(view) }
+        }
         dealsMore.isHidden = !store || !storeDealsHasMore || storeDeals.isEmpty
         if let warning {
             dealsStatus.stringValue = "\(warning) Showing saved deals."

@@ -166,20 +166,42 @@ final class RemoteImageView: NSImageView {
         image.draw(in: NSRect(x: (bounds.width - size.width) / 2, y: (bounds.height - size.height) / 2, width: size.width, height: size.height))
     }
 
+    private var placeholder: ShimmerView?
+
+    /// Shimmers where the picture will be until it arrives (or the download gives up).
+    private func showPlaceholder(_ on: Bool) {
+        if on, placeholder == nil {
+            let shimmer = ShimmerView(cornerRadius: layer?.cornerRadius ?? 4)
+            shimmer.frame = bounds
+            shimmer.autoresizingMask = [.width, .height]
+            addSubview(shimmer)
+            placeholder = shimmer
+        } else if !on {
+            placeholder?.removeFromSuperview()
+            placeholder = nil
+        }
+    }
+
     func load(_ url: URL?, enabled: Bool = true) {
         task?.cancel()
         source = url
+        showPlaceholder(false)
         guard let url, enabled else { return }
         if let cached = dealImageCache.object(forKey: url as NSURL) { image = cached; return }
+        showPlaceholder(true)
         task = dealImageSession.dataTask(with: url) { [weak self] data, response, _ in
-            guard let data, data.count <= 2 << 20, (response as? HTTPURLResponse)?.statusCode == 200,
-                  response?.url.flatMap({ safeDealURL($0.absoluteString) }) != nil,
-                  let picture = NSImage(data: data), picture.isValid else { return }
-            dealImageCache.setObject(picture, forKey: url as NSURL)
+            let picture = data.flatMap { data -> NSImage? in
+                guard data.count <= 2 << 20, (response as? HTTPURLResponse)?.statusCode == 200,
+                      response?.url.flatMap({ safeDealURL($0.absoluteString) }) != nil,
+                      let picture = NSImage(data: data), picture.isValid else { return nil }
+                return picture
+            }
+            if let picture { dealImageCache.setObject(picture, forKey: url as NSURL) }
             DispatchQueue.main.async {
                 // A reused or re-rendered row may now show a different deal.
                 guard let self, self.source == url else { return }
-                self.image = picture
+                self.showPlaceholder(false)
+                if let picture { self.image = picture }
             }
         }
         task?.resume()

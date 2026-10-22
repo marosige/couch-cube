@@ -56,7 +56,8 @@ class Opener:
         elif parts.path == "/saleaction/ajaxgetdeckappcompatibilityreport":
             return Response(json.dumps({"success": 1, "results": {"resolved_category": 3}}).encode(), url)
         elif parts.path == "/api/featuredcategories":
-            return Response(json.dumps({"top_sellers": {"items": [{"id": 1675200}, {"id": 367520}, {"id": 367520}]}}).encode(), url)
+            return Response(json.dumps({"top_sellers": {"items": [{"id": 1675200}, {"id": 367520}, {"id": 367520}, {"id": 367520, "type": 1}]},
+                                        "new_releases": {"items": [{"id": 367520}]}}).encode(), url)
         elif parts.path in ("/search", "/lookup"):
             name = FIX / "itunes-search.json"
         else:
@@ -117,6 +118,7 @@ class ShopTests(unittest.TestCase):
         self.assertEqual([game["title"] for game in report["top_sellers"]], ["Hollow Knight"],
                          "Steam's top sellers that CheapShark lists, once each, on sale or not")
         self.assertTrue(report["top_sellers"][0]["offers"])
+        self.assertEqual([game["title"] for game in report["trending"]], ["Hollow Knight"], "New & Trending from the same feed")
         self.assertEqual(report["couch"], [], "Couch picks CheapShark doesn't list are left out")
         with patch.object(shop, "COUCH_GAMES", ["367520"]):
             couch = shop.home([], "all", opener=Opener(), now=1000)["couch"]

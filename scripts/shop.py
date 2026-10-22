@@ -340,15 +340,20 @@ def steam_library_tools():
     return module
 
 
-def steam_top_sellers(refresh=False, now=None, opener=None):
-    """Steam's current top sellers (app IDs), on sale or not, from its keyless featured-categories feed."""
+def steam_featured(section, refresh=False, now=None, opener=None):
+    """App IDs from one list of Steam's keyless featured-categories feed ("top_sellers", "new_releases"),
+    on sale or not. The feed is fetched once and cached for both lists."""
     reply = deals.cached_fetch("steamfeatured", "steam", STEAM_FEATURED, STEAM_HOSTS, refresh, now, opener)
     data = reply.get("data") if isinstance(reply.get("data"), dict) else {}
-    section = data.get("top_sellers") if isinstance(data.get("top_sellers"), dict) else {}
+    part = data.get(section) if isinstance(data.get(section), dict) else {}
     # Type 0 is a game; packages and bundles have IDs from another range that could match an unrelated app.
-    ids = [str(item.get("id")) for item in section.get("items") or []
+    ids = [str(item.get("id")) for item in part.get("items") or []
            if isinstance(item, dict) and str(item.get("id", "")).isdigit() and item.get("type", 0) == 0]
     return list(dict.fromkeys(ids)), reply.get("error")
+
+
+def steam_top_sellers(refresh=False, now=None, opener=None):
+    return steam_featured("top_sellers", refresh, now, opener)
 
 
 def games_for_apps(app_ids, limit, refresh=False, now=None, opener=None):
@@ -412,6 +417,13 @@ def home(mine, scope="mine", refresh=False, installed=frozenset(), now=None, ope
         errors.append(str(exc))
         top = []
     try:
+        fresh, error = steam_featured("new_releases", refresh, now, opener)
+        trending, games_error = games_for_apps(fresh, TOP_SELLERS, refresh, now, opener)
+        errors += [message for message in (error, games_error) if message]
+    except deals.DealsError as exc:
+        errors.append(str(exc))
+        trending = []
+    try:
         couch, error = games_for_apps(COUCH_GAMES, len(COUCH_GAMES), refresh, now, opener)
         if error:
             errors.append(error)
@@ -419,7 +431,7 @@ def home(mine, scope="mine", refresh=False, installed=frozenset(), now=None, ope
         errors.append(str(exc))
         couch = []
     return {"scope": "mine" if use_mine else "all", "my_stores": mine, "featured": featured, "drops": drops,
-            "free": free, "top_sellers": top, "couch": couch, "errors": list(dict.fromkeys(errors))}
+            "free": free, "top_sellers": top, "trending": trending, "couch": couch, "errors": list(dict.fromkeys(errors))}
 
 
 def platform_status(platforms):

@@ -30,8 +30,8 @@ search results and a **game page** per game. It never buys anything, signs in an
 that a game runs on a Mac. The page is wider than the settings pages (up to 960 pt).
 
 - **Home** is a storefront: one featured banner (big Steam art, discount pill, price), then shelves
-  of cards: On Your Wishlist (wishlist games on sale or at your target), Top Deals, **Top Sellers**
-  (Steam's keyless `featuredcategories` top sellers, on sale or not), **Couch Games** (Couch Cube's own
+  of cards: On Your Wishlist (wishlist games on sale or at your target), Top Deals, **New & Trending** and **Top Sellers**
+  (Steam's keyless `featuredcategories` new releases and top sellers, games only, on sale or not), **Couch Games** (Couch Cube's own
   pick of local multiplayer games, `COUCH_GAMES` in shop.py, on sale or not), Price Drops and
   Free to Keep; the deal shelves have **See All** to the full list. Full-price shelves are matched to
   CheapShark by Steam app ID (cached a week) so every card has every store's price. Cards show art, title, Mac/Windows badge,
@@ -79,6 +79,8 @@ clearing the field goes back. Rate source, attribution and store-filter details 
 - **My Stores / All Stores.** Home, Deals and Free Games share one saved toggle. My Stores keeps
   the stores whose Mac app or Windows launcher is installed (detected like App Store does). With
   none installed, All Stores is used and a hint explains why.
+- **Loading** shows shimmering placeholders shaped like the content (banner and shelves on Home, rows in
+  Deals and Search, each picture until it arrives), so the page doesn't jump when it lands.
 - **Picks** on Home are made locally from discount, ratings, recency and your wishlist. Nothing about
   you is sent anywhere.
 - **Deals rows** show an Installed badge when a deal's Steam app ID matches a game installed in
