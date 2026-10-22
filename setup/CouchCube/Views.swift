@@ -35,6 +35,8 @@ final class ScopePopUp: NSPopUpButton {
 
 class ClickableRowView: NSView {
     var onActivate: (() -> Void)?
+    /// The resting background (e.g. a tinted banner); hover and press tint over it, then return to it.
+    var baseColor: NSColor = .clear { didSet { updateLook() } }
     private(set) var hovering = false
     private(set) var pressed = false
     private var downPoint: NSPoint?
@@ -131,7 +133,7 @@ class ClickableRowView: NSView {
     private func updateLook() {
         effectiveAppearance.performAsCurrentDrawingAppearance {
             let color: NSColor = pressed ? NSColor.labelColor.withAlphaComponent(0.12)
-                : hovering ? NSColor.labelColor.withAlphaComponent(0.06) : .clear
+                : hovering ? NSColor.labelColor.withAlphaComponent(0.06) : baseColor
             layer?.backgroundColor = color.cgColor
         }
     }

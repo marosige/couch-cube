@@ -29,7 +29,8 @@ extension SetupController {
             list.spacing = 10
             return list
         }
-        func option(_ title: String, _ tagline: String, symbol: String, color: NSColor, lines: [String], buttons: [NSView]) -> NSView {
+        func option(_ title: String, _ tagline: String, symbol: String, color: NSColor, lines: [String], buttons: [NSView],
+                    footer: NSView? = nil) -> NSView {
             let icon = NSImageView(image: NSImage(systemSymbolName: symbol, accessibilityDescription: nil)!)
             icon.symbolConfiguration = .init(pointSize: 22, weight: .semibold)
             icon.contentTintColor = color
@@ -38,7 +39,7 @@ extension SetupController {
             let header = row([icon, column([heading, text(tagline, size: 12, secondary: true)])])
             header.spacing = 12
             (header.arrangedSubviews[1] as? NSStackView)?.spacing = 2
-            return card("", subtitle: nil, views: [header, steps(lines), row(buttons + [NSView()])])
+            return card("", subtitle: nil, views: [header, steps(lines), row(buttons + [NSView()])] + (footer.map { [$0] } ?? []))
         }
         func appButton(_ title: String, _ id: String) -> NSButton {
             let control = button(title, #selector(windowsGuideShowApp(_:)))
@@ -47,8 +48,14 @@ extension SetupController {
         }
         let intro = text("Windows games need a helper app that translates them for the Mac. Check first: many games have a Mac version, shown with a Mac badge in Cube Shop.",
                          size: 13, secondary: true)
-        let portingFolder = button("Games Folder", #selector(preparePortingKitFolder))
+        let portingFolder = windowsGuideFolderButton
+        portingFolder.title = pinnedPortingKitFolder != nil ? "Unpin Folder" : "Games Folder"
+        portingFolder.bezelStyle = .rounded
+        portingFolder.target = self
+        portingFolder.action = #selector(preparePortingKitFolder)
         portingFolder.setAccessibilityIdentifier("windowsGuidePortingFolder")
+        windowsGuideStatus.font = .systemFont(ofSize: 12)
+        windowsGuideStatus.textColor = .secondaryLabelColor
         return column([
             intro,
             option("CrossOver", "Easiest. Paid, with a free 14-day trial.", symbol: "star.fill", color: .systemOrange, lines: [
@@ -62,7 +69,7 @@ extension SetupController {
                 "Click Games Folder below. In Porting Kit open Settings, choose Change next to \u{201C}Applications default path\u{201D} and pick \u{201C}Porting Kit\u{201D} at the top of the sidebar.",
                 "Search for your game in Porting Kit, click Install and follow its steps.",
                 "The game shows up in Play under Windows games. Back here, click Unpin Folder."
-            ], buttons: [appButton("Get Porting Kit", "porting-kit"), portingFolder]),
+            ], buttons: [appButton("Get Porting Kit", "porting-kit"), portingFolder], footer: windowsGuideStatus),
             text("Not every Windows game runs on a Mac, and online games with anti-cheat usually don't.", size: 11, secondary: true)
         ])
     }

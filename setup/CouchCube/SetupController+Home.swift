@@ -45,7 +45,7 @@ extension SetupController {
         if report == nil && !overviewCheckFailures.isEmpty { homeMenuLabel.stringValue = "Couldn't check your console." }
         playAction.isEnabled = task == nil && ready && frontend != nil
         renderHomeControllers()
-        renderLauncher()
+        renderLauncherIfChanged()
         // The artwork names the menu; the small line under "Cube TV" only speaks up while nothing is chosen.
         if homeArtworkMenu != frontend || homePlayBackground.layer?.contents == nil {
             homeArtworkMenu = frontend

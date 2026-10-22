@@ -452,7 +452,9 @@ extension SetupController {
             homeList.addArrangedSubview(view)
             view.widthAnchor.constraint(equalTo: homeList.widthAnchor).isActive = true
         }
-        let hits = (wishlist?.items ?? []).filter { $0.onSale || targetReached($0) == true }
+        let hits = (wishlist?.items ?? []).filter {
+            ($0.onSale || targetReached($0) == true) && shopShows(steamAppId: $0.steamAppId, appStore: $0.appStoreId != nil)
+        }
         let shown = home.featured.filter { shopShows(steamAppId: $0.steamAppId) }
         let hero = shown.first
         if let hero { add(shopHero(deal: hero)) }
@@ -722,7 +724,7 @@ extension SetupController {
             return
         }
         let sort = selectedSort(searchSortPopup)
-        let games = shopSorted(reply.games.filter { shopShows(steamAppId: $0.steamAppId) }, by: sort, convert: sortConvert, fields: searchSortFields)
+        let games = shopSorted(reply.games.filter { shopShows(steamAppId: $0.steamAppId, appStore: $0.appStoreOffer != nil) }, by: sort, convert: sortConvert, fields: searchSortFields)
         for (index, game) in games.enumerated() { addShopRow(searchGameRow(game), to: searchList, separated: index > 0) }
         if !reply.appStore.apps.isEmpty {
             let currency = reply.appStore.currency ?? reply.appStore.apps[0].currency

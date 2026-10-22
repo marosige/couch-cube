@@ -406,23 +406,23 @@ def open_store_client(client_id):
     subprocess.run(command, check=False, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
-def windows_downloads_status():
+def windows_downloads_status(root=None):
     """Read-only: which official Windows launcher installers are already in the library's Downloads folder."""
     tools = windows_tools()
     try:
-        storage = configured_storage()
+        storage = configured_storage(root)
     except (SetupError, OSError, KeyError, ValueError):
         return {"library": None, "folder": None, "items": tools.status(None)}
     folder = storage.read_path(tools.FOLDER)
     return {"library": str(storage.root), "folder": str(folder), "items": tools.status(folder)}
 
 
-def windows_download(package, confirm=False):
+def windows_download(package, confirm=False, root=None):
     """Downloads one installer into <library>/Downloads. It is never opened or run."""
     if not confirm:
         raise SetupError("Downloading an installer requires --confirm.")
     tools = windows_tools()
-    storage = configured_storage()
+    storage = configured_storage(root)
     folder = storage.target(tools.FOLDER)
     try:
         return tools.download(package, folder, progress=lambda line: print(line, flush=True), check=storage.check)
@@ -2701,13 +2701,14 @@ def main():
     wish.add_argument("--currency", default="USD", help="currency of --price (ISO 4217 code)")
     wish.add_argument("--country", default="US")
     wish.add_argument("--refresh", action="store_true")
-    sub.add_parser("windows-downloads")
+    sub.add_parser("windows-downloads").add_argument("--root")
     sub.add_parser("store-accounts")
     store_open = sub.add_parser("store-account-open")
     store_open.add_argument("--id", required=True)
     windows = sub.add_parser("windows-download")
     windows.add_argument("--package", required=True)
     windows.add_argument("--confirm", action="store_true")
+    windows.add_argument("--root")
     frontend = sub.add_parser("frontend")
     frontend.add_argument("--default", choices=["steam", "es-de"])
     frontend.add_argument("--confirm", action="store_true")
@@ -2816,9 +2817,9 @@ def main():
         elif args.command == "store-account-open":
             open_store_client(args.id)
         elif args.command == "windows-downloads":
-            print(json_text(windows_downloads_status()))
+            print(json_text(windows_downloads_status(args.root)))
         elif args.command == "windows-download":
-            print("RESULT " + json.dumps(windows_download(args.package, args.confirm)), flush=True)
+            print("RESULT " + json.dumps(windows_download(args.package, args.confirm, args.root)), flush=True)
         elif args.command == "deals":
             print(json_text(deals_report(args.source, args.page, args.sort, args.store, args.search,
                                          args.platform, args.kind, args.refresh, args.mine)))

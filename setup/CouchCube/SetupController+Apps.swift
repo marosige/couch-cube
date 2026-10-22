@@ -266,28 +266,35 @@ extension SetupController {
         if let pinned = pinnedPortingKitFolder {
             FinderSidebar.unpin(pinned)
             UserDefaults.standard.removeObject(forKey: "portingKitPinnedFolder")
-            appsStatus.stringValue = "Removed the Porting Kit folder from Finder's sidebar."
+            portingKitSay("Removed the Porting Kit folder from Finder's sidebar.")
             renderApps()
             return
         }
-        guard let drive = selected else { return }
+        guard let drive = selected else { portingKitSay("Set up your game library first (Game library)."); return }
         runBackendInBackground(["porting-kit-folder", "--root", drive.root]) { [weak self] code, data, errors in
             guard let self else { return }
             guard code == 0, let reply = try? JSONSerialization.jsonObject(with: data) as? [String: String], let path = reply["path"] else {
-                self.appsStatus.stringValue = "Couldn't make the Porting Kit folder: " + backendErrorMessage(errors, fallback: "check Game library.")
+                self.portingKitSay("Couldn't make the Porting Kit folder: " + backendErrorMessage(errors, fallback: "check Game library."))
                 return
             }
             NSPasteboard.general.clearContents()
             NSPasteboard.general.setString(path, forType: .string)
             if FinderSidebar.pin(URL(fileURLWithPath: path)) {
                 UserDefaults.standard.set(path, forKey: "portingKitPinnedFolder")
-                self.appsStatus.stringValue = "\u{201C}Porting Kit\u{201D} is now at the top of the sidebar in Finder and in Porting Kit's folder dialog. In Porting Kit, choose Change for \u{201C}Applications default path\u{201D} and pick it, then choose Unpin Folder here."
+                self.portingKitSay("\u{201C}Porting Kit\u{201D} is now at the top of the sidebar in Finder and in Porting Kit's folder dialog. In Porting Kit, choose Change for \u{201C}Applications default path\u{201D} and pick it, then choose Unpin Folder here.")
             } else {
                 NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)])
-                self.appsStatus.stringValue = "Path copied. In Porting Kit, choose Change for \u{201C}Applications default path\u{201D}, press \u{2318}\u{21E7}G, paste and press Return. New ports then appear in Play."
+                self.portingKitSay("Path copied. In Porting Kit, choose Change for \u{201C}Applications default path\u{201D}, press \u{2318}\u{21E7}G, paste and press Return. New ports then appear in Play.")
             }
             self.renderApps()
         }
+    }
+
+    /// Porting Kit folder messages show on the App Store page and in the Windows games guide, wherever it was clicked.
+    func portingKitSay(_ message: String) {
+        appsStatus.stringValue = message
+        windowsGuideStatus.stringValue = message
+        windowsGuideFolderButton.title = pinnedPortingKitFolder != nil ? "Unpin Folder" : "Games Folder"
     }
 
     @objc func openAppManagementSettings() {

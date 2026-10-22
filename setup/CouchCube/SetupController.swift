@@ -201,6 +201,9 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
     static let launcherAppsKey = "launcherApps"
     var launcherLibrary: LibraryGames?
     var romArtRounds = 0
+    var launcherSignature = 0
+    let windowsGuideFolderButton = NSButton(title: "Games Folder", target: nil, action: nil)
+    let windowsGuideStatus = NSTextField(wrappingLabelWithString: "")
     var gameArt: [String: [String: String]] = [:]
     var gameArtRounds = 0
     var gameArtLoading = false
@@ -318,12 +321,13 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
     var windowsLibrary: String?
     var windowsDownloadsGeneration = 0
     lazy var windowsDownloadsRead: (@escaping (Int32, Data) -> Void) -> Void = { [weak self] done in
-        self?.runBackendInBackground(["windows-downloads"]) { code, data, _ in done(code, data) }
+        guard let self else { return }
+        self.runBackendInBackground(self.libraryCommand(["windows-downloads"])) { code, data, _ in done(code, data) }
     }
     /// Starts one download and returns its cancel action. Lines arrive in order on the main thread.
     lazy var windowsDownloadRun: (String, @escaping (String) -> Void, @escaping (Int32, String) -> Void) -> (() -> Void) = { [weak self] id, line, done in
         guard let self else { return {} }
-        let process = self.runBackendStreaming(["windows-download", "--package", id, "--confirm"], line: line, completed: done)
+        let process = self.runBackendStreaming(self.libraryCommand(["windows-download", "--package", id, "--confirm"]), line: line, completed: done)
         return { if process.isRunning { process.terminate() } }
     }
     var appOperations: [String: AppOperation] = [:]

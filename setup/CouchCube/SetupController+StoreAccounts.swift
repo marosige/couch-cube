@@ -97,7 +97,7 @@ extension SetupController {
         } else {
             storeAccountsChecked.stringValue = storeAccounts.phase == .checking ? "Reading local client files\u{2026}" : ""
         }
-        storeAccountsRows.arrangedSubviews.forEach { $0.removeFromSuperview() }
+        clearRows(storeAccountsRows)
         for (index, client) in (storeAccounts.report?.clients ?? []).enumerated() {
             if index > 0 { storeAccountsRows.addArrangedSubview(separator()) }
             let view = storeAccountRow(client)
@@ -108,7 +108,7 @@ extension SetupController {
     }
 
     func renderStoreWalkthrough() {
-        storeWalkthroughPanel.arrangedSubviews.forEach { $0.removeFromSuperview() }
+        clearRows(storeWalkthroughPanel)
         guard let walkthrough = storeWalkthrough, let report = storeAccounts.report else {
             storeWalkthroughPanel.isHidden = true
             return

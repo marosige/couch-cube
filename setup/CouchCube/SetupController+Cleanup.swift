@@ -200,9 +200,10 @@ extension SetupController {
                 self.cleanupInProgress = false
                 self.appsHaveResults = false
                 self.consolesLoaded = false
-                self.refresh()
+                // Scan again first (the page then shows what's left), and let the drive refresh follow it.
                 self.reviewGamingCleanup()
                 self.cleanupMessage = ("Removed. The Trash wasn't emptied.", .systemGreen)
+                self.refresh()
             }
             if urls.isEmpty { finished(); return }
             self.busy(true)

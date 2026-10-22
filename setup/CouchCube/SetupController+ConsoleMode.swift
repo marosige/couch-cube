@@ -61,11 +61,13 @@ extension SetupController {
         guard !enabled || (selected != nil && report?.state == "valid layout" && report?.issues.isEmpty == true) else {
             autoLaunchStatus.stringValue = "Choose Settings → Game library before enabling automatic console mode."
             autoLaunchStatus.isHidden = false
+            loadAutoLaunch()
             return
         }
         guard let delay = Int(autoLaunchDelay.stringValue), (5...300).contains(delay) else {
             autoLaunchStatus.stringValue = "Enter a whole number between 5 and 300 seconds."
             autoLaunchStatus.isHidden = false
+            loadAutoLaunch()  // Show what is really set, not the unsaved choice.
             return
         }
         var arguments = ["login", "--confirm", "--delay", String(delay)]
@@ -78,6 +80,7 @@ extension SetupController {
                 self.autoLaunchStatus.stringValue = "Couldn't save console mode. Open Details for the error."
                 self.autoLaunchStatus.isHidden = false
                 self.activityNeeded()
+                self.loadAutoLaunch()
             }
         }
     }
@@ -225,6 +228,11 @@ extension SetupController {
 
     func chooseAfterLogin(_ mode: String) {
         guard autoLaunchLoaded else { return }
+        guard task == nil else {
+            autoLaunchStatus.stringValue = "Wait for the current operation to finish."
+            autoLaunchStatus.isHidden = false
+            return
+        }
         switch mode {
         case "tv", "tv-always":
             guard selected != nil, report?.state == "valid layout", report?.issues.isEmpty == true else {

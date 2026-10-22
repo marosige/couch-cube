@@ -46,7 +46,7 @@ extension SetupController {
     func openLauncherApp(_ path: String, name: String) {
         NSWorkspace.shared.openApplication(at: URL(fileURLWithPath: path), configuration: NSWorkspace.OpenConfiguration()) { _, error in
             guard let error else { return }
-            DispatchQueue.main.async { self.status.stringValue = "Couldn't open \(name): \(error.localizedDescription)" }
+            DispatchQueue.main.async { self.activityNeeded("Couldn't open \(name): \(error.localizedDescription)") }
         }
     }
 
@@ -62,7 +62,7 @@ extension SetupController {
                                           artwork: artwork ?? launcherIcon(path: nil, bundledID: "steam"), wideArtwork: artwork != nil,
                                           path: nil, launch: { [weak self] in
                     guard let url = URL(string: "steam://rungameid/\(game.appid)") else { return }
-                    if !NSWorkspace.shared.open(url) { self?.status.stringValue = "Couldn't open Steam to start \(game.name)." }
+                    if !NSWorkspace.shared.open(url) { self?.activityNeeded("Couldn't open Steam to start \(game.name).") }
                 }, artworkURL: artwork == nil ? steamArtURL(game.appid).flatMap { safeDealURL($0) } : nil))
             }
         }
@@ -95,7 +95,16 @@ extension SetupController {
 
     /// Games in the Couch Cube library (ROMs, Mac games, Windows wrappers, Porting Kit) and CrossOver shortcuts.
     func loadLauncherLibrary() {
-        guard !ProcessInfo.processInfo.arguments.contains("--smoke-test"), selected != nil else { return }
+        guard !ProcessInfo.processInfo.arguments.contains("--smoke-test") else { return }
+        guard selected != nil else {
+            // The library's drive is gone: its games can't start, so they leave Play too.
+            if launcherLibrary != nil || !gameArt.isEmpty {
+                launcherLibrary = nil
+                gameArt = [:]
+                renderLauncher()
+            }
+            return
+        }
         runBackendInBackground(libraryCommand(["library-games"])) { [weak self] code, data, _ in
             guard let self, code == 0 else { return }
             let decoder = JSONDecoder()
@@ -227,8 +236,8 @@ extension SetupController {
         status.stringValue = "Starting \(rom.name)\u{2026}"
         runBackendInBackground(libraryCommand(["emulate", "--system", rom.system, "--rom", rom.path])) { [weak self] code, _, errors in
             guard let self else { return }
-            self.status.stringValue = code == 0 ? "" : "Couldn't start \(rom.name): " +
-                self.backendErrorMessageText(errors)
+            self.status.stringValue = ""
+            if code != 0 { self.activityNeeded("Couldn't start \(rom.name): " + self.backendErrorMessageText(errors)) }
         }
     }
 
@@ -236,11 +245,33 @@ extension SetupController {
         backendErrorMessage(errors, fallback: "the emulator didn't open. Check it in App Store.")
     }
 
+    /// renderGeneral runs after most backend replies; the game grid is rebuilt only when what it shows changed,
+    /// so tiles aren't reloaded from disk (or swapped out mid-click) for unrelated updates.
+    func renderLauncherIfChanged() {
+        guard launcherSignatureNow() != launcherSignature || launcherSections.arrangedSubviews.isEmpty else { return }
+        renderLauncher()
+    }
+
+    func launcherSignatureNow() -> Int {
+        var hasher = Hasher()
+        for library in steamReport?.libraries ?? [] where library.available {
+            for game in library.games where game.installed { hasher.combine(game.appid) }
+        }
+        for rom in launcherLibrary?.roms ?? [] { hasher.combine(rom.path); hasher.combine(rom.cover) }
+        for app in launcherLibrary?.apps ?? [] { hasher.combine(app.path) }
+        hasher.combine(gameArt.count)
+        hasher.combine(launcherAddedPaths)
+        hasher.combine(launcherSearch.stringValue)
+        hasher.combine(launcherSmokeItems?.map(\.id))
+        return hasher.finalize()
+    }
+
     func renderLauncher() {
         let query = launcherSearch.stringValue.trimmingCharacters(in: .whitespaces)
         let items = launcherItems().filter {
             query.isEmpty || $0.title.localizedCaseInsensitiveContains(query) || $0.subtitle.localizedCaseInsensitiveContains(query)
         }
+        launcherSignature = launcherSignatureNow()
         clearRows(launcherSections)
         guard !items.isEmpty else {
             launcherSections.addArrangedSubview(text(query.isEmpty
