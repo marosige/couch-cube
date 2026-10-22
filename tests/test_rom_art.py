@@ -68,6 +68,10 @@ class RomArtTests(unittest.TestCase):
         report = art.covers(roms, limit=2, now=1000, opener=Opener(set()), folder=self.folder)
         self.assertEqual(report["covers"], {})
         self.assertTrue(report["more"])
+        later = art.covers(roms, limit=2, now=1000, opener=Opener(set()), folder=self.folder)
+        self.assertTrue(later["more"], "Remembered misses don't use the budget, so the next games get their turn")
+        self.assertFalse(art.covers([{"system": "switch", "name": "X", "path": "/s"}] * 5, limit=1, now=1000,
+                                    opener=Opener(set()), folder=self.folder)["more"], "No libretro set: nothing to fetch")
 
 
 def urllib_unquote(value):

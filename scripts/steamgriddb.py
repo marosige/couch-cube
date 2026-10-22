@@ -119,20 +119,26 @@ def cached(name, steam_app_id=None, folder=None):
     return found
 
 
+def settled(name, steam_app_id, now, folder):
+    """True when this game needs no lookup: all four images saved, a finished pass, or a recent miss."""
+    base = (folder or cache_dir()) / item_key(name, steam_app_id)
+    if len(cached(name, steam_app_id, folder)) == len(KINDS) or (base / "done.json").is_file():
+        return True
+    try:
+        return now - json.loads((base / "miss.json").read_text()).get("checked", 0) < MISS_SECONDS
+    except (OSError, ValueError, AttributeError):
+        return False
+
+
 def fetch(name, key, steam_app_id=None, now=None, opener=None, folder=None):
     """Downloads grid, hero, logo and icon for one game (whatever SteamGridDB has); {kind: file}."""
     folder = folder or cache_dir()
     now = time.time() if now is None else now
     base = folder / item_key(name, steam_app_id)
     found = cached(name, steam_app_id, folder)
-    if found:
+    if settled(name, steam_app_id, now, folder):
         return found
     miss = base / "miss.json"
-    try:
-        if now - json.loads(miss.read_text()).get("checked", 0) < MISS_SECONDS:
-            return {}
-    except (OSError, ValueError, AttributeError):
-        pass
     identifier = game_id(name, key, steam_app_id, opener)
     if identifier:
         for kind, path in KINDS.items():
@@ -150,26 +156,31 @@ def fetch(name, key, steam_app_id=None, now=None, opener=None, folder=None):
                 temporary.write_bytes(body)
                 temporary.replace(target)
                 found[kind] = str(target)
-    if not found:
-        base.mkdir(parents=True, exist_ok=True)
-        miss.write_text(json.dumps({"checked": now}))
+    base.mkdir(parents=True, exist_ok=True)
+    # A full pass is remembered (done.json, or miss.json when nothing exists), so a pass cut short by an error
+    # is finished on the next run instead of stopping at the grid.
+    (miss if not found else base / "done.json").write_text(json.dumps({"checked": now}))
     return found
 
 
 def artwork(games, key, limit=10, now=None, opener=None, folder=None):
     """{game key: {kind: file}} for library games ({key, name, steam_app_id?}); at most `limit` new lookups."""
-    result, looked, error = {}, 0, None
+    now = time.time() if now is None else now
+    result, looked, error, more = {}, 0, None, False
     for game in games:
         name, steam = game.get("name"), game.get("steam_app_id")
         if not name:
             continue
         found = cached(name, steam, folder)
-        if not found and key and looked < limit and error is None:
-            looked += 1
-            try:
-                found = fetch(name, key, steam, now, opener, folder)
-            except GridError as exc:
-                error = str(exc)
+        if key and error is None and not settled(name, steam, now, folder):
+            if looked >= limit:
+                more = True
+            else:
+                looked += 1
+                try:
+                    found = fetch(name, key, steam, now, opener, folder)
+                except GridError as exc:
+                    error = str(exc)
         if found:
             result[game["key"]] = found
-    return {"enabled": bool(key), "art": result, "error": error, "more": bool(key) and looked >= limit}
+    return {"enabled": bool(key), "art": result, "error": error, "more": more and error is None}

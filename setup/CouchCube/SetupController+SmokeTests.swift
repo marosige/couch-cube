@@ -1671,7 +1671,7 @@ extension SetupController {
                     }
                     precondition(self.tvMenuChoices.isDescendant(of: self.tabs.tabViewItems[10].view!) &&
                                  self.tvMenuChoices.arrangedSubviews.count == 3 && self.signInChoices.arrangedSubviews.count == 3 &&
-                                 self.afterLoginChoices.arrangedSubviews.count == 3, "Console Mode asks three questions with three answers each")
+                                 self.afterLoginChoices.arrangedSubviews.count == 4, "Console Mode asks three questions (four answers after signing in)")
                     let menuRows = self.tvMenuChoices.arrangedSubviews
                     precondition(menuRows.last?.accessibilityIdentifier() == "choice-menu-couchcube" &&
                                  (menuRows.last as? ClickableRowView)?.onActivate == nil, "Couch Cube TV is shown but not selectable yet")

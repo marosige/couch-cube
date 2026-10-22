@@ -95,7 +95,7 @@ class SteamLibraryTests(unittest.TestCase):
     def test_link_file_round_trip(self):
         path = Path(self.temp.name) / "link.json"
         sl.write_link(path, {"steam_id": "76561198000000002", "seen": ["1", "x"], "synced": 5})
-        self.assertEqual(sl.read_link(path), {"steam_id": "76561198000000002", "seen": ["1"], "synced": 5})
+        self.assertEqual(sl.read_link(path), {"steam_id": "76561198000000002", "seen": ["1"], "enabled": True, "synced": 5})
         path.write_text('{"steam_id": "nope"}')
         self.assertEqual(sl.read_link(path), {})
 

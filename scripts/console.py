@@ -636,14 +636,13 @@ def steam_link_status(change=None):
             raise SetupError("Sign in to Steam on this Mac first, then try again.")
         if link.get("steam_id") != account["steam_id"]:
             link = {"steam_id": account["steam_id"], "seen": [], "synced": None}
+        link["enabled"] = True
         tools.write_link(STEAM_LINK, link)
-    elif change == "off":
-        try:
-            STEAM_LINK.unlink()
-        except FileNotFoundError:
-            pass
-        link = {}
-    linked = bool(account and link.get("steam_id") == account["steam_id"])
+    elif change == "off" and link:
+        # Turning it off keeps what was already imported, so games removed here never come back.
+        link["enabled"] = False
+        tools.write_link(STEAM_LINK, link)
+    linked = bool(account and link.get("steam_id") == account["steam_id"] and link.get("enabled", True))
     owned = sorted(set(tools.owned_app_ids(Path.home() / "Library/Application Support/Steam", account["steam_id"]))
                    | installed_steam_app_ids()) if account else sorted(installed_steam_app_ids())
     return {"account": account and {"persona": account["persona"], "account": account["account"]},
@@ -685,7 +684,8 @@ def steam_wishlist_sync(refresh=False):
             wish.mirror(library, wish.update(path, change))
         except wish.WishlistError as exc:
             return {**status, "imported": 0, "error": str(exc)}
-    tools.write_link(STEAM_LINK, {"steam_id": link["steam_id"], "seen": link["seen"] + seen, "synced": time.time()})
+    tools.write_link(STEAM_LINK, {"steam_id": link["steam_id"], "seen": link["seen"] + seen, "synced": time.time(),
+                                  "enabled": True})
     if not app_ids and not error:
         error = "No games found on your Steam wishlist. If it isn't empty, set Game details to Public in Steam's privacy settings."
     return {**steam_link_status(), "imported": added, "error": error or lookup_error}
@@ -1712,7 +1712,10 @@ def populated_systems(root):
         if folder.is_symlink() or not folder.is_dir():
             continue
         # Games, not files: a game folder with its updates, DLC or extra discs counts once.
-        count = len(playable_roms(folder, extensions.split("|")))
+        try:
+            count = len(playable_roms(folder, extensions.split("|")))
+        except OSError:
+            continue
         if count:
             systems.append({"id": system, "name": name, "games": count, "path": str(folder)})
     return systems
@@ -1859,7 +1862,8 @@ def rom_games(folder, allowed):
         (folders if entry.is_dir() else files if entry.is_file() else []).append(entry)
     claimed = {}
     for file in files:
-        if file.suffix.lower() in {".m3u", ".cue", ".gdi"}:
+        # A descriptor only groups files when the system plays it; otherwise its files stay games of their own.
+        if file.suffix.lower() in {".m3u", ".cue", ".gdi"} and file.suffix.lower().lstrip(".") in allowed:
             claimed[file] = rom_references(file, folder)
     referenced = {target.resolve() for targets in claimed.values() for target in targets}
     groups = {}
@@ -2327,7 +2331,11 @@ def library_games(storage, home=None):
         folder = storage.root / "ROMs" / system
         if system not in enabled or folder.is_symlink() or not folder.is_dir():
             continue
-        for name, launch in playable_roms(folder, extensions.split("|")):
+        try:
+            found = playable_roms(folder, extensions.split("|"))
+        except OSError:
+            continue  # An unreadable folder hides only its own games.
+        for name, launch in found:
             cover = art.cached(system, name)
             roms.append({"system": system, "system_name": system_name, "name": name, "path": str(launch),
                          "cover": str(cover) if cover else None})

@@ -31,6 +31,7 @@ LOOKUP_BATCH = 50
 SEARCH_GAMES = 12
 STEAM_FEATURED = "https://store.steampowered.com/api/featuredcategories?cc=us&l=english"
 TOP_SELLERS = 10
+APP_LOOKUPS = 6
 # Couch Cube's own pick of local multiplayer games (Steam app IDs), shown on Home whether or not they're on sale.
 COUCH_GAMES = ["728880", "880940", "1426210", "477160", "285900", "386940", "1243830", "268910", "204360",
                "996770", "1016920", "674940", "437920", "905340", "312530", "251470", "1260320", "252110"]
@@ -344,7 +345,9 @@ def steam_top_sellers(refresh=False, now=None, opener=None):
     reply = deals.cached_fetch("steamfeatured", "steam", STEAM_FEATURED, STEAM_HOSTS, refresh, now, opener)
     data = reply.get("data") if isinstance(reply.get("data"), dict) else {}
     section = data.get("top_sellers") if isinstance(data.get("top_sellers"), dict) else {}
-    ids = [str(item.get("id")) for item in section.get("items") or [] if isinstance(item, dict) and str(item.get("id", "")).isdigit()]
+    # Type 0 is a game; packages and bundles have IDs from another range that could match an unrelated app.
+    ids = [str(item.get("id")) for item in section.get("items") or []
+           if isinstance(item, dict) and str(item.get("id", "")).isdigit() and item.get("type", 0) == 0]
     return list(dict.fromkeys(ids)), reply.get("error")
 
 
@@ -352,10 +355,15 @@ def games_for_apps(app_ids, limit, refresh=False, now=None, opener=None):
     """Shop games (every store offer, all-time low) for Steam app IDs, in the given order; games CheapShark
     doesn't list are left out. App-ID lookups are cached for a week, prices for minutes."""
     tools = steam_library_tools()
-    found, error = [], None
+    found, error, lookups = [], None, 0
     for app_id in app_ids:
         if len(found) >= limit:
             break
+        # New app IDs are looked up a few per visit (CheapShark answers one per request); the rest fill in later.
+        if not deals.cache_path("steamapp", tools.app_url(app_id)).exists():
+            if lookups >= APP_LOOKUPS:
+                continue
+            lookups += 1
         try:
             game = tools.game_for_app(app_id, refresh, now, opener)
         except deals.DealsError as exc:
@@ -403,9 +411,13 @@ def home(mine, scope="mine", refresh=False, installed=frozenset(), now=None, ope
     except deals.DealsError as exc:
         errors.append(str(exc))
         top = []
-    couch, error = games_for_apps(COUCH_GAMES, len(COUCH_GAMES), refresh, now, opener)
-    if error:
-        errors.append(error)
+    try:
+        couch, error = games_for_apps(COUCH_GAMES, len(COUCH_GAMES), refresh, now, opener)
+        if error:
+            errors.append(error)
+    except deals.DealsError as exc:
+        errors.append(str(exc))
+        couch = []
     return {"scope": "mine" if use_mine else "all", "my_stores": mine, "featured": featured, "drops": drops,
             "free": free, "top_sellers": top, "couch": couch, "errors": list(dict.fromkeys(errors))}
 
@@ -445,7 +457,13 @@ def storage_bytes(requirements):
         text = block.get("minimum") if isinstance(block, dict) else None
         match = STORAGE.search(text) if isinstance(text, str) else None
         if match:
-            amount = float(match.group(1).replace(",", "."))
+            number = match.group(1)
+            # "1,500 MB" uses a thousands separator; "2,5 GB" a decimal comma.
+            number = re.sub(r",(?=\d{3}(?!\d))", "", number).replace(",", ".")
+            try:
+                amount = float(number)
+            except ValueError:
+                return None
             return int(amount * {"MB": 1024 ** 2, "GB": 1024 ** 3, "TB": 1024 ** 4}[match.group(2).upper()])
     return None
 

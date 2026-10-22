@@ -91,9 +91,13 @@ def wishlist_app_ids(steam_id, refresh=False, now=None, opener=None):
     return [str(item["appid"]) for item in items], reply.get("error")
 
 
+def app_url(app_id):
+    return deals.CHEAPSHARK + "games?" + urllib.parse.urlencode({"steamAppID": app_id})
+
+
 def game_for_app(app_id, refresh=False, now=None, opener=None):
     """CheapShark's game for one Steam app ID: {title, game_id, thumb}, or None when CheapShark doesn't list it."""
-    url = deals.CHEAPSHARK + "games?" + urllib.parse.urlencode({"steamAppID": app_id})
+    url = app_url(app_id)
     reply = deals.cached_fetch("steamapp", "cheapshark", url, deals.CHEAPSHARK_HOSTS, refresh, now, opener)
     for item in reply.get("data") or []:
         if not isinstance(item, dict) or str(item.get("steamAppID", "")) != app_id:
@@ -114,7 +118,8 @@ def read_link(path):
     if not isinstance(data, dict) or not valid_steam_id(data.get("steam_id")):
         return {}
     seen = [value for value in data.get("seen") or [] if isinstance(value, str) and value.isdigit()]
-    return {"steam_id": data["steam_id"], "seen": seen[:5000], "synced": data.get("synced") if isinstance(data.get("synced"), (int, float)) else None}
+    return {"steam_id": data["steam_id"], "seen": seen[:5000], "enabled": data.get("enabled") is not False,
+            "synced": data.get("synced") if isinstance(data.get("synced"), (int, float)) else None}
 
 
 def write_link(path, data):

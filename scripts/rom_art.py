@@ -100,6 +100,14 @@ def cached(system, name, folder=None):
     return path if path.is_file() else None
 
 
+def recent_miss(system, name, now, folder):
+    miss = folder / system / (cache_key(system, name) + ".miss")
+    try:
+        return now - json.loads(miss.read_text()).get("checked", 0) < MISS_SECONDS
+    except (OSError, ValueError, AttributeError):
+        return False
+
+
 def find(system, name, now=None, opener=None, folder=None):
     """The cover for one game: from the cache, else downloaded once. None when libretro has none."""
     folder = folder or cache_dir()
@@ -109,11 +117,8 @@ def find(system, name, now=None, opener=None, folder=None):
         return found
     target = folder / system / (cache_key(system, name) + ".png")
     miss = target.with_suffix(".miss")
-    try:
-        if now - json.loads(miss.read_text()).get("checked", 0) < MISS_SECONDS:
-            return None
-    except (OSError, ValueError, AttributeError):
-        pass
+    if recent_miss(system, name, now, folder):
+        return None
     for url in candidates(system, name):
         body = fetch_image(url, opener)
         if body:
@@ -129,19 +134,25 @@ def find(system, name, now=None, opener=None, folder=None):
 
 
 def covers(roms, limit=30, now=None, opener=None, folder=None):
-    """{rom path: cover file} for the given library-games ROMs; at most `limit` new downloads per call."""
-    result, fetched, error = {}, 0, None
+    """{rom path: cover file} for the given library-games ROMs; at most `limit` real lookups per call
+    (cached covers, remembered misses and systems without a libretro set don't use the budget)."""
+    folder = folder or cache_dir()
+    now = time.time() if now is None else now
+    result, fetched, error, more = {}, 0, None, False
     for rom in roms:
         system, name, path = rom.get("system"), rom.get("name"), rom.get("path")
         if not system or not name or not path:
             continue
-        found = cached(system, name, folder or cache_dir())
-        if found is None and fetched < limit and error is None:
-            fetched += 1
-            try:
-                found = find(system, name, now, opener, folder)
-            except ArtError as exc:
-                error = str(exc)
+        found = cached(system, name, folder)
+        if found is None and candidates(system, name) and not recent_miss(system, name, now, folder) and error is None:
+            if fetched >= limit:
+                more = True
+            else:
+                fetched += 1
+                try:
+                    found = find(system, name, now, opener, folder)
+                except ArtError as exc:
+                    error = str(exc)
         if found:
             result[path] = str(found)
-    return {"covers": result, "error": error, "more": fetched >= limit}
+    return {"covers": result, "error": error, "more": more and error is None}
