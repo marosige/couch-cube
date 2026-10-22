@@ -286,7 +286,27 @@ extension SetupController {
             }
             accessibility += ", " + badge.groups.map { "\($0.count) \(sidebarSeverityName($0.color))" }.joined(separator: ", ")
         }
+        // Cube Shop: a green dot counts wishlist games at or under their target price.
+        if sidebarPages[row] == 13 {
+            let hits = (wishlist?.items ?? []).filter { targetReached($0) == true }
+            if !hits.isEmpty {
+                let dot = SidebarCountDot(count: hits.count, color: .systemGreen)
+                dot.toolTip = "Target price reached:\n" + hits.map { "\u{2022} " + $0.title }.joined(separator: "\n")
+                dot.setAccessibilityElement(true)
+                dot.setAccessibilityRole(.staticText)
+                dot.setAccessibilityLabel("\(hits.count) at target price")
+                markers.addArrangedSubview(dot)
+                accessibility += ", \(hits.count) at target price"
+            }
+        }
         cell.setAccessibilityLabel(accessibility)
+    }
+
+    /// Redraws the Cube Shop sidebar row's dots (wishlist targets change outside the general task check).
+    func refreshShopSidebarDot() {
+        guard let row = sidebarPages.firstIndex(of: 13), sidebar.numberOfRows == sidebarPages.count,
+              let cell = sidebar.view(atColumn: 0, row: row, makeIfNecessary: false) as? NSTableCellView else { return }
+        applySidebarMarkers(to: cell, row: row)
     }
 
     func tableView(_ tableView: NSTableView, shouldSelectRow row: Int) -> Bool { sidebarPages[row] >= 0 }

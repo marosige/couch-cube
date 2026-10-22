@@ -112,6 +112,8 @@ extension SetupController {
                                         key: wishlistSortKey, label: "Sort wishlist")
         wishlistSortPopup.item(at: 0)?.title = "On Sale First"
         configureShopPane(wishlistPane, [wishlistHeader, wishlistList], full: [wishlistHeader, wishlistList])
+        shopList(trendingList, id: "trendingList")
+        configureShopPane(trendingPane, [trendingList], full: [trendingList])
         let attribution = NSTextField(labelWithAttributedString: dealsAttribution())
         attribution.isSelectable = true
         attribution.allowsEditingTextAttributes = true
@@ -119,10 +121,10 @@ extension SetupController {
         attribution.maximumNumberOfLines = 0
         attribution.setAccessibilityIdentifier("dealsAttribution")
         // Store-style page: one header row, the content, and the small print (scope, rates, sources) at the bottom.
-        let page = column([header, dealsReminderBar, homePane, deals, searchPane, wishlistPane, shopScopeHint, shopCurrencyNote, attribution])
+        let page = column([header, dealsReminderBar, homePane, trendingPane, deals, searchPane, wishlistPane, shopScopeHint, shopCurrencyNote, attribution])
         page.spacing = 12
         page.setCustomSpacing(20, after: header)
-        for view in [header, shopScopeHint, shopCurrencyNote, homePane, deals, searchPane, wishlistPane, attribution] {
+        for view in [header, shopScopeHint, shopCurrencyNote, homePane, trendingPane, deals, searchPane, wishlistPane, attribution] {
             view.widthAnchor.constraint(equalTo: page.widthAnchor).isActive = true
         }
         shopPageView = page
@@ -138,7 +140,8 @@ extension SetupController {
         dealsPane.isHidden = tab != 1 && tab != 2
         searchPane.isHidden = tab != 3
         wishlistPane.isHidden = tab != 4
-        shopScopeBar.isHidden = tab > 2
+        trendingPane.isHidden = tab != 5
+        shopScopeBar.isHidden = tab > 2 && tab != 5
         shopNav.selectedSegment = Self.shopNavTabs.firstIndex(of: tab) ?? -1
         // The field shows a query only while its results are on screen.
         if tab != 3 { shopSearchField.stringValue = "" }
@@ -187,6 +190,9 @@ extension SetupController {
             dealsMode.selectedSegment = tab - 1
             dealsModeChanged()
         case 3: renderSearch()
+        case 5:
+            renderTrending()
+            loadHome(refresh: false)
         default: renderWishlist()
         }
     }
@@ -197,6 +203,7 @@ extension SetupController {
         case 0: loadHome(refresh: true)
         case 1, 2: loadDeals(page: 0, refresh: true)
         case 3: runSearch(refresh: true)
+        case 5: loadHome(refresh: true)
         default: checkWishlist(refresh: true)
         }
     }
@@ -211,9 +218,28 @@ extension SetupController {
         guard dealsOpened else { return }
         renderDeals()
         renderHome()
+        renderTrending()
         renderSearch()
         renderWishlist()
         if shopDetailKey != nil { renderShopGame() }
+    }
+
+    /// Trending: Steam's new & trending games and top sellers as list rows, on sale or not (prices from every store).
+    func renderTrending() {
+        trendingList.arrangedSubviews.forEach { $0.removeFromSuperview() }
+        guard let home = shopHome else {
+            if homeLoadingKey != nil { shopSkeletonRows(6).forEach { addShopRow($0, to: trendingList) } }
+            return
+        }
+        var seen = Set<String>()
+        for (title, games) in [("New & Trending", home.trending ?? []), ("Top Sellers", home.topSellers ?? [])] {
+            let shown = games.filter { shopShows(steamAppId: $0.steamAppId) && seen.insert($0.id).inserted }
+            guard !shown.isEmpty else { continue }
+            let heading = sectionHeader(title, size: Self.shopHeadingSize)
+            heading.setAccessibilityIdentifier("shopSection")
+            addShopRow(heading, to: trendingList, separated: false)
+            for (index, game) in shown.enumerated() { addShopRow(searchGameRow(game), to: trendingList, separated: index > 0) }
+        }
     }
 
     // MARK: My Stores / All Stores
@@ -412,6 +438,7 @@ extension SetupController {
             guard code == 0, let reply = decodeDeals(ShopHomeReply.self, data) else {
                 self.homeError = self.dealsErrorText(String(decoding: data, as: UTF8.self) + errors)
                 self.renderHome()
+                self.renderTrending()
                 return
             }
             self.shopHome = reply
@@ -421,6 +448,7 @@ extension SetupController {
             self.updateScopeHint()
             if self.wishlist == nil, let wishlist = reply.wishlist { self.wishlist = wishlist }
             self.renderHome()
+            self.renderTrending()
         }
     }
 
@@ -622,13 +650,12 @@ extension SetupController {
         let was = best.flatMap { item in item.offer.normalPrice.flatMap { $0 > item.offer.price ? shopPrice($0, item.offer.currency).text : nil } }
         let normal = game.offers.compactMap(\.normalPrice).max()
         let spoken = best.map { ", lowest price \($0.price.spoken) at \($0.offer.store)" + (($0.offer.savings ?? 0) > 0 ? ", \($0.offer.savings!)% off" : "") } ?? ""
-        let view = dealRow(artwork: dealArtwork(steamArtURL(game.steamAppId) ?? game.thumb), title: game.title, detail: dealBadges(badges),
-                           detailTip: ([best.map { "Lowest price: \($0.price.spoken) at \($0.offer.store)" }, compat?.tip].compactMap { $0 }).joined(separator: "\n"),
-                           trailing: [priceCluster(price: best?.price, was: was, savings: best?.offer.savings, highlight: best != nil,
-                                                   store: best?.offer.store,
-                                                   lowest: best?.offer.storeId != nil ? insightLabel(game.insight, normal: normal) : nil)],
-                           accessibility: "Open \(game.title)\(spoken)" + (compat.map { ". " + $0.tip } ?? ""),
-                           actions: [heart]) { [weak self] in
+        let right = offerColumns(price: best?.price, was: was, savings: best?.offer.savings,
+                                 insight: best?.offer.storeId != nil ? game.insight : nil, normal: normal)
+        let view = shopItemRow(heart: heart, artwork: dealArtwork(steamArtURL(game.steamAppId) ?? game.thumb), title: game.title,
+                               tags: shopTags(title: game.title), store: best?.offer.store, platform: dealBadges(badges),
+                               tip: ([best.map { "Lowest price: \($0.price.spoken) at \($0.offer.store)" }, compat?.tip].compactMap { $0 }).joined(separator: "\n"),
+                               accessibility: "Open \(game.title)\(spoken)" + (compat.map { ". " + $0.tip } ?? ""), right: right) { [weak self] in
             self?.showShopGame(self?.shopDetail(game: game))
         }
         view.setAccessibilityIdentifier("shopGameRow")
@@ -961,6 +988,7 @@ extension SetupController {
     func applyWishlist(_ reply: WishlistReply) {
         wishlist = reply
         refreshHearts()
+        refreshShopSidebarDot()
         switch shopTab.selectedSegment {
         case 0: renderHome()
         case 4: renderWishlist()
@@ -971,9 +999,7 @@ extension SetupController {
     func wishlistRow(_ item: WishlistItem, targetButton: Bool = true) -> NSView {
         var badges: [(symbol: String?, text: String, color: NSColor)] = []
         var tips: [String] = []
-        // The sale (green tag, store, discount) shows under the price like every other row; the sentence stays in the tooltip.
         if let sale = item.saleText { tips.append(sale) }
-        var trailing: [NSView] = []
         var bestPrice: ShopPrice?
         if let best = item.best {
             let price = shopPrice(best.price, best.currency)
@@ -985,61 +1011,48 @@ extension SetupController {
                 tips.append("Checked " + formatter.localizedString(for: Date(timeIntervalSince1970: checked), relativeTo: Date()))
             }
         }
+        let reached = targetReached(item)
         if let target = item.targetPrice {
             // The target stays in the currency it was entered in; the best price is converted to it for the comparison.
-            let code = item.targetCurrency ?? "USD"
-            let amount = ShopMoney.format(ShopMoney.decimal(target), code)
-            switch targetReached(item) {
-            case true?:
-                badges.append(("target", "Target reached: " + amount, .systemOrange))
-                tips.append("Target price \(amount) reached")
-            case false?:
-                badges.append((nil, "Target " + amount, .secondaryLabelColor))
-                tips.append("Target price: \(amount)")
+            let amount = ShopMoney.format(ShopMoney.decimal(target), item.targetCurrency ?? "USD")
+            switch reached {
+            case true?: tips.append("Target price \(amount) reached")
+            case false?: tips.append("Target price: \(amount)")
             case nil:
-                badges.append((nil, "Target " + amount, .secondaryLabelColor))
                 tips.append(item.best == nil ? "Target price: \(amount). No current price yet."
                             : "Target price: \(amount). Can't compare with \(item.best!.currency) prices until exchange rates load.")
             }
         }
-        if let owned = ownedBadge(item.steamAppId) { badges.append(owned) }
-        if badges.isEmpty { badges.append((nil, item.best == nil ? "No price checked yet" : "Not on sale", .secondaryLabelColor)) }
         if let compat = compatibilityBadge(compatibility(steamAppId: item.steamAppId, appStore: item.appStoreId != nil)) {
             badges.append(compat.badge)
             tips.append(compat.tip)
         }
-        let targetCode = targetCurrency(for: item)
-        let target = RowControlButton(title: item.targetPrice == nil ? "Set Target\u{2026}" : "Target\u{2026}", target: self, action: #selector(wishlistTargetClicked(_:)))
-        target.toolTip = "Set a target price in \(targetCode)"
-        target.identifier = NSUserInterfaceItemIdentifier(item.key)
-        target.controlSize = .small
-        target.bezelStyle = .inline
-        target.isEnabled = wishlistEditable
-        target.setAccessibilityIdentifier("wishlistTarget")
-        target.setAccessibilityLabel("Set a target price in \(targetCode) for \(item.title)")
-        let remove = RowControlButton(title: "", target: self, action: #selector(wishlistRemoveClicked(_:)))
-        remove.identifier = NSUserInterfaceItemIdentifier(item.key)
-        remove.image = NSImage(systemSymbolName: "heart.fill", accessibilityDescription: nil)
-        remove.contentTintColor = .systemPink
-        remove.bezelStyle = .inline
-        remove.isBordered = false
-        remove.isEnabled = wishlistEditable
-        remove.toolTip = "Remove from wishlist"
-        remove.setAccessibilityIdentifier("wishlistRemove")
-        remove.setAccessibilityLabel("Remove \(item.title) from wishlist")
-        remove.widthAnchor.constraint(equalToConstant: Self.shopHeartWidth).isActive = true
+        if let owned = ownedBadge(item.steamAppId) { badges.append(owned) }
+        if item.best == nil { badges.append((nil, "No price checked yet", .secondaryLabelColor)) }
+        let heart = RowControlButton(title: "", target: self, action: #selector(wishlistRemoveClicked(_:)))
+        heart.identifier = NSUserInterfaceItemIdentifier(item.key)
+        heart.image = NSImage(systemSymbolName: "heart.fill", accessibilityDescription: nil)
+        heart.contentTintColor = .systemPink
+        heart.bezelStyle = .inline
+        heart.isBordered = false
+        heart.isEnabled = wishlistEditable
+        heart.toolTip = "Remove from wishlist"
+        heart.setAccessibilityIdentifier("wishlistRemove")
+        heart.setAccessibilityLabel("Remove \(item.title) from wishlist")
+        heart.widthAnchor.constraint(equalToConstant: Self.shopHeartWidth).isActive = true
         let was = item.best.flatMap { best in best.normalPrice.flatMap { $0 > best.price ? shopPrice($0, best.currency).text : nil } }
-        trailing += [priceCluster(price: bestPrice, priceText: bestPrice == nil ? "\u{2014}" : nil, was: was,
-                                  savings: item.onSale ? item.best?.savings : nil, highlight: item.onSale,
-                                  store: item.best?.store, lowest: insightLabel(item.insight, normal: item.best?.normalPrice))]
+        let right = offerColumns(price: bestPrice, priceText: bestPrice == nil ? "\u{2014}" : nil, was: was,
+                                 savings: item.onSale ? item.best?.savings : nil, insight: item.insight, normal: item.best?.normalPrice,
+                                 target: targetButton ? targetPill(for: item, reached: reached) : nil)
         let artURL = steamArtURL(item.steamAppId) ?? item.thumb
         let art: NSView = safeDealURL(artURL ?? "") == nil
             ? symbolArtwork(item.appStoreId != nil ? "apple.logo" : "gamecontroller", size: Self.shopArtworkSize.height, width: Self.shopArtworkSize.width)
             : dealArtwork(artURL, fill: item.appStoreId == nil)
-        let view = dealRow(artwork: art, title: item.title,
-                           detail: dealBadges(badges), detailTip: tips.joined(separator: "\n"), trailing: trailing,
-                           accessibility: "Open \(item.title). " + tips.joined(separator: ". "),
-                           actions: (targetButton ? [target] : []) + [remove]) { [weak self] in
+        // A reached target lifts the whole row in a soft green.
+        let view = shopItemRow(heart: heart, artwork: art, title: item.title, tags: shopTags(title: item.title), store: item.best?.store,
+                               platform: dealBadges(badges), tip: tips.joined(separator: "\n"),
+                               accessibility: "Open \(item.title). " + tips.joined(separator: ". "), right: right,
+                               background: reached == true ? NSColor.systemGreen.withAlphaComponent(0.12) : nil) { [weak self] in
             self?.showShopGame(self?.shopDetail(wishlist: item))
         }
         view.setAccessibilityIdentifier("wishlistRow")

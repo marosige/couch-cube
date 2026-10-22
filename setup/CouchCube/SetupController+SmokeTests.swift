@@ -2455,7 +2455,7 @@ extension SetupController {
         precondition(shopTab.selectedSegment == 0 && !homePane.isHidden && wishlistPane.isHidden && shopNav.selectedSegment == 0,
                      "Reopening Cube Shop starts on Home again")
         selectShopTab(4)
-        precondition(!wishlistPane.isHidden && shopNav.selectedSegment == 3)
+        precondition(!wishlistPane.isHidden && shopNav.selectedSegment == 4)
         selectShopTab(0)
         defaults.set("original", forKey: shopCurrencyKey)
         defaults.removeObject(forKey: shopFeeKey)
@@ -2669,7 +2669,8 @@ extension SetupController {
         spin()
         // Wishlist rows: target price and removal go through the backend file.
         let rows = views(wishlistList).filter { $0.accessibilityIdentifier() == "wishlistRow" }
-        precondition(rows.count == 1 && labels(wishlistList).contains { $0.replacingOccurrences(of: "\u{00A0}", with: " ").contains("Target reached") })
+        precondition(rows.count == 1 && (rows[0].toolTip ?? "").replacingOccurrences(of: "\u{00A0}", with: " ").contains("reached"),
+                     "A reached target is called out on its row")
         // Each item shows its art (a cached link), its current best price and a target editor, even at the minimum width.
         window.contentView!.layoutSubtreeIfNeeded()
         let wishArt = views(rows[0]).compactMap { $0 as? RemoteImageView }
@@ -2700,12 +2701,15 @@ extension SetupController {
         precondition(saved.targetPrice == 4000 && saved.targetCurrency == "HUF" && targetReached(saved) == true,
                      "1.99 USD is about 642 HUF, under a 4000 HUF target")
         func plain(_ text: String) -> String { text.replacingOccurrences(of: "\u{00A0}", with: " ").replacingOccurrences(of: "\u{202F}", with: " ") }
-        precondition(labels(wishlistList).contains { plain($0).contains("Target reached: " + plain(ShopMoney.format(4000, "HUF"))) })
+        precondition(plain(targetButton().attributedTitle.string) == "Target " + plain(ShopMoney.format(4000, "HUF")))
+        precondition((views(wishlistList).first { $0.accessibilityIdentifier() == "wishlistRow" } as? ClickableRowView)?.baseColor != .clear,
+                     "A reached target tints its row green")
         askTargetPrice = { _, current, _ in askedCurrent = current; return .some(500) }
         targetButton().performClick(nil)
         spin()
         precondition(askedCurrent! == 4000 && targetReached(wishlist!.items[0]) == false, "642 HUF is above a 500 HUF target")
-        precondition(!labels(wishlistList).contains { $0.contains("Target reached") } && labels(wishlistList).contains { plain($0).contains("Target " + plain(ShopMoney.format(500, "HUF"))) })
+        precondition(plain(targetButton().attributedTitle.string) == "Target " + plain(ShopMoney.format(500, "HUF"))
+                     && (views(wishlistList).first { $0.accessibilityIdentifier() == "wishlistRow" } as? ClickableRowView)?.baseColor == .clear)
         let loadedRates = exchangeRates
         exchangeRates = nil
         renderWishlist()
@@ -2858,6 +2862,9 @@ extension SetupController {
         precondition(shopTab.selectedSegment == 0 && !homePane.isHidden && shopNav.selectedSegment == 0, "Clearing the search goes back to Home")
         shopNav.selectedSegment = 1
         shopNavChanged()
+        precondition(shopTab.selectedSegment == 5 && !trendingPane.isHidden && homePane.isHidden, "Trending is the second section")
+        shopNav.selectedSegment = 2
+        shopNavChanged()
         precondition(shopTab.selectedSegment == 1 && !dealsPane.isHidden, "The section control switches sections")
         shopSearchField.stringValue = "hollow knight"
         shopSearchSubmitted()
@@ -2913,15 +2920,17 @@ extension SetupController {
         navigateHistory(-1)
         // The all-time low: only CheapShark's record minimum, as a small line under the price, with the record in the tooltip.
         let insights = views(searchList).filter { $0.accessibilityIdentifier() == "shopPriceInsight" }.compactMap { $0 as? NSTextField }
-        precondition(insights.map(\.stringValue).sorted() == ["All-time low", "Lowest $7.99 (\u{2212}47%)"]
+        precondition(insights.map(\.stringValue).sorted() == ["All-time low", "Lowest $7.99"]
                      && insights.allSatisfy { ($0.toolTip ?? "").contains("7.99 USD") || ($0.toolTip ?? "").contains("19.99 USD") }
                      && insights.allSatisfy { !($0.toolTip ?? "").lowercased().contains("average") && ($0.toolTip ?? "").contains("2025") }
                      && !views(searchList).filter { $0.accessibilityIdentifier() == "shopOffer" }.contains { views($0).contains { $0.accessibilityIdentifier() == "shopPriceInsight" } },
                      "All-time lows with their price and discount, on the game rows: \(insights.map(\.stringValue))")
         for insight in insights {
-            precondition(insight.superview?.accessibilityIdentifier() == "shopPercentColumn",
-                         "The all-time low sits under the discount pill")
+            precondition(insight.superview?.superview?.accessibilityIdentifier() == "shopPriceColumn",
+                         "The all-time low is the price column's bottom line")
         }
+        precondition(views(searchList).compactMap { $0 as? NSTextField }.contains { $0.accessibilityIdentifier() == "shopInsightPercent" && $0.stringValue == "\u{2212}47%" },
+                     "The low's discount sits beside it, under the discount pill")
         precondition(PriceInsight(kind: "above", percent: nil, low: 0, currency: "USD", date: nil).text == "Was free before"
                      && PriceInsight(kind: "above", percent: nil, low: 0, currency: "USD", date: nil).detail.contains("free"))
         precondition(Self.storeIconID("Steam") == "steam" && Self.storeIconID("GOG") == "gog-galaxy" && Self.storeIconID("Epic Games Store") == "epic-games" &&
@@ -3035,7 +3044,7 @@ extension SetupController {
         }
         for size in [window.contentMinSize, NSSize(width: 1240, height: 860)] {
             window.setContentSize(size)
-            for tab in 0..<5 {
+            for tab in 0..<6 {
                 selectShopTab(tab)
                 spin()
                 window.contentView!.layoutSubtreeIfNeeded()
@@ -3156,7 +3165,7 @@ extension SetupController {
         // Every tab fits the narrowest window.
         let savedFrame = window.frame
         window.setContentSize(window.contentMinSize)
-        for tab in 0..<5 {
+        for tab in 0..<6 {
             selectShopTab(tab)
             spin()
             window.contentView!.layoutSubtreeIfNeeded()
@@ -3193,7 +3202,7 @@ extension SetupController {
                                  "Columns line up on tab \(tab): \(other) vs \((shape, x)) \(row.accessibilityLabel() ?? "")")
                 } else { priceX[list] = (shape, x) }
                 // Fixed widths: a long converted price or a 100% discount never widens its column.
-                precondition(abs(priceFrame.width - Self.shopOfferWidth) < 0.5)
+                precondition(abs(priceFrame.width - Self.shopOfferWidth) < 0.5 || abs(priceFrame.width - Self.shopPriceColumnWidth) < 0.5)
                 // A deal's usual price sits beside the sale price on the same line, struck through.
                 if let was = views(cluster).first(where: { $0.accessibilityIdentifier() == "shopWasPrice" }) as? NSTextField,
                    let now = was.superview?.subviews.compactMap({ $0 as? NSTextField }).first(where: { $0 !== was }) {
@@ -3220,7 +3229,7 @@ extension SetupController {
             rerenderShop()
             for (sizeName, size) in [("min", window.contentMinSize), ("wide", NSSize(width: 1240, height: 860))] {
                 window.setContentSize(size)
-                for (tab, name) in ["home", "deals", "free", "search", "wishlist"].enumerated() {
+                for (tab, name) in ["home", "deals", "free", "search", "wishlist", "trending"].enumerated() {
                     selectShopTab(tab)
                     RunLoop.current.run(until: Date().addingTimeInterval(0.05))
                     let view = window.contentView!

@@ -36,12 +36,16 @@ that a game runs on a Mac. The page is wider than the settings pages (up to 960 
   Free to Keep; the deal shelves have **See All** to the full list. Full-price shelves are matched to
   CheapShark by Steam app ID (cached a week) so every card has every store's price. Cards show art, title, Mac/Windows badge,
   the discount pill and the price, with the wishlist heart on the art.
-- **One row style** everywhere else: art (Steam's own header art when the game is on Steam), the
-  title with its Mac/Windows badge and the heart (Set Target is on the game page and the wishlist); on the right a green discount pill,
-  then a fixed-width price block: usual price struck through and the price; the store (logo and
-  name) under it; and when known, under the discount pill, the all-time low: "Lowest $7.99 (−47%)" in your
-  Shop currency and the discount it was, or a green "All-time low" when today's price is the record.
-  Search lists one row per game (best price and how many stores); ratings live on the game page.
+- **One row style** for wishlist, deals, search and Trending rows: the heart first (filled pink on the wishlist,
+  gray outline otherwise), the art, then title, a tag line (DLC, Early Access, when the title says so), the store
+  with its logo and Mac/Windows. On the right, two fixed columns of three lines so prices line up row to row:
+  price column — usual price small and struck through, the price large (green on sale, black otherwise), the
+  lowest price ever; discount column — a gap, the −40% pill level with the price, the low's discount (small
+  gray) beside it. When today's sale is the record, the bottom line is a green "All-time low"; a full price at
+  its low shows nothing there. Wishlist rows add a faint "Target price" pill left of the columns (click to
+  enter one); a set target shows stronger, and a reached one turns the row soft green and puts a green dot
+  with the count on Cube Shop in the sidebar.
+- **Trending** (second tab): Steam's New & Trending and Top Sellers as rows, on sale or not.
 - **Game page** (opened by any row or card; Back/Forward and ⌘[ ⌘] return to the same list): a
   gallery (the cover, then Steam's screenshots, with ‹ › arrows dimmed at either end and "2 / 8"), title, badges (Mac/Windows, Installed, Owned, Steam rating, Metacritic), genre tags (Action,
   RPG… from Steam), every platform (Mac, Windows, Linux, Steam Deck Verified/Playable from Steam's keyless

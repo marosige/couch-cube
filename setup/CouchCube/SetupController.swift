@@ -77,10 +77,10 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
     var dealsFetched: [Int: Double] = [:]
     // Cube Shop: Home, Deals, Free Games, Search and the drive-saved Wishlist, with optional display-currency conversion.
     let shopTabKey = "shopTab", shopScopeKey = "shopScope", shopCurrencyKey = "shopCurrency", shopFeeKey = "shopFeePercent"
-    let shopTab = NSSegmentedControl(labels: ["Home", "Deals", "Free Games", "Search", "Wishlist"], trackingMode: .selectOne, target: nil, action: nil)
+    let shopTab = NSSegmentedControl(labels: ["Home", "Deals", "Free Games", "Search", "Wishlist", "Trending"], trackingMode: .selectOne, target: nil, action: nil)
     /// The visible navigation; Search isn't a tab but the results of the search field above it.
-    let shopNav = PillTabs(labels: ["Home", "Deals", "Free Games", "Wishlist"])
-    static let shopNavTabs = [0, 1, 2, 4]
+    let shopNav = PillTabs(labels: ["Home", "Trending", "Deals", "Free Games", "Wishlist"])
+    static let shopNavTabs = [0, 5, 1, 2, 4]
     var shopReturnTab = 0
     /// Cube Shop game pages, by wishlist key; Back and Forward reopen them from here.
     var shopDetails: [String: ShopDetail] = [:]
@@ -100,6 +100,7 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
     let shopScopeBar = NSStackView()
     let shopCurrencyNote = NSTextField(wrappingLabelWithString: "")
     let dealsPane = NSStackView(), homePane = NSStackView(), searchPane = NSStackView(), wishlistPane = NSStackView()
+    let trendingPane = NSStackView(), trendingList = NSStackView()
     let homeStatus = NSTextField(wrappingLabelWithString: ""), homeList = NSStackView()
     let shopSearchField = NSSearchField()
     var shopScrollOffsets: [Int: CGFloat] = [:], shopShownTab: Int?

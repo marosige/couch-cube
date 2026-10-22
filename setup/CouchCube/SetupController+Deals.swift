@@ -620,18 +620,16 @@ extension SetupController {
         let salePrice = shopPrice(deal.salePrice, "USD")
         let heart = wishlistHeart(key: deal.gameId.map { "cs:" + $0 } ?? "title:" + deal.title.lowercased(), title: deal.title,
                                   payload: ["title": deal.title, "game_id": deal.gameId ?? "", "steam_app_id": deal.steamAppId ?? "", "thumb": deal.thumb ?? ""])
-        let trailing = [priceCluster(price: salePrice,
-                                     was: deal.normalPrice.flatMap { $0 > deal.salePrice ? shopPrice($0, "USD").text : nil },
-                                     savings: deal.savings, store: deal.store,
-                                     lowest: insightLabel(deal.insight, normal: deal.normalPrice))]
+        let right = offerColumns(price: salePrice, was: deal.normalPrice.flatMap { $0 > deal.salePrice ? shopPrice($0, "USD").text : nil },
+                                 savings: deal.savings, insight: deal.insight, normal: deal.normalPrice)
         if salePrice.converted { tips.append("Price: \(salePrice.spoken)") }
         var spoken = "\(deal.title), \(salePrice.spoken)"
         if let normal = deal.normalPrice, normal > deal.salePrice { spoken += ", was \(shopPrice(normal, "USD").spoken), \(deal.savings)% off" }
         spoken += (deal.installed ? ", installed" : "") + ". " + tips.dropFirst().joined(separator: ". ")
-        return dealRow(artwork: dealArtwork(steamArtURL(deal.steamAppId) ?? deal.thumb), title: deal.title,
-                       detail: dealBadges(badges), detailTip: tips.joined(separator: "\n"), trailing: trailing,
-                       accessibility: "Open \(deal.title) at \(deal.store ?? "store"), " + spoken,
-                       actions: [heart]) { [weak self] in
+        return shopItemRow(heart: heart, artwork: dealArtwork(steamArtURL(deal.steamAppId) ?? deal.thumb), title: deal.title,
+                           tags: shopTags(title: deal.title), store: deal.store, platform: dealBadges(badges),
+                           tip: tips.joined(separator: "\n"), accessibility: "Open \(deal.title) at \(deal.store ?? "store"), " + spoken,
+                           right: right) { [weak self] in
             self?.showShopGame(self?.shopDetail(deal: deal))
         }
     }
