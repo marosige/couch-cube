@@ -687,7 +687,7 @@ extension SetupController {
             ". Homebrew will update only these managed apps. Self-updating and manually installed apps use their own updaters."
         alert.addButton(withTitle: "Update all")
         alert.addButton(withTitle: "Cancel")
-        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        guard alert.runModal() == .alertFirstButtonReturn, explainAppManagementOnce() else { return }
         updateNextApp(updates)
     }
 
@@ -837,6 +837,7 @@ extension SetupController {
             alert.addButton(withTitle: "Cancel")
             guard alert.runModal() == .alertFirstButtonReturn else { return }
         }
+        guard explainAppManagementOnce() else { return }
         if app.installed && !app.managed {
             NSWorkspace.shared.recycle([URL(fileURLWithPath: app.path)]) { _, error in
                 DispatchQueue.main.async {
@@ -856,7 +857,27 @@ extension SetupController {
             appsStatus.stringValue = "Quit \(app.name) before updating."
             return
         }
+        guard explainAppManagementOnce() else { return }
         manage(app, action: "update")
+    }
+
+    /// macOS asks once before another app may change apps in Applications ("Couch Cube was prevented from
+    /// modifying apps"). Say so before the first update or removal, with a way straight to the setting.
+    /// Returns false when the user went to System Settings instead of continuing.
+    func explainAppManagementOnce() -> Bool {
+        let key = "appManagementExplained"
+        guard !UserDefaults.standard.bool(forKey: key), !ProcessInfo.processInfo.arguments.contains("--smoke-test") else { return true }
+        UserDefaults.standard.set(true, forKey: key)
+        let alert = NSAlert()
+        alert.messageText = "Allow Couch Cube to manage apps"
+        alert.informativeText = "To update or remove apps, macOS needs your OK once. Turn on Couch Cube in System Settings \u{203A} Privacy & Security \u{203A} App Management.\n\nIf macOS says \u{201C}Couch Cube was prevented from modifying apps\u{201D}, this is the setting."
+        alert.addButton(withTitle: "Open App Management")
+        alert.addButton(withTitle: "Continue")
+        if alert.runModal() == .alertFirstButtonReturn {
+            openAppManagementSettings()
+            return false
+        }
+        return true
     }
 
     func manage(_ app: ManagedApp, action: String) {

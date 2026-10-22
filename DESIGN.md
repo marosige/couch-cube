@@ -175,7 +175,9 @@ Additional rows appear only for setup problems, missing game apps or status erro
 App categories and settings retain distinct rounded native NSBox groups with
 system colors and subtle separators in both appearances.
 App Store rows show the app name, Installed/Not installed (green / gray dot; red only for a failure) and a short purpose;
-Get and Update start at once (no confirmation); only Remove asks. The Windows games card has **How It Works**,
+Get and Update start at once (no confirmation); only Remove asks. Before the first update or removal Couch Cube says once that macOS
+needs App Management permission (Privacy & Security › App Management), with **Open App Management** or
+**Continue**, so macOS's "Couch Cube was prevented from modifying apps" is never a surprise. The Windows games card has **How It Works**,
 which opens a guide page (under App Store): a one-line intro (many games have a Mac version), then CrossOver
 (easiest, paid, trial) and Porting Kit (free) as cards with numbered plain steps from getting the app to the
 game appearing in Play, buttons to their App Store rows and Porting Kit's Games Folder, and a note that not
