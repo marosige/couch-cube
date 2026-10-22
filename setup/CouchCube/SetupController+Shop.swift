@@ -1161,6 +1161,9 @@ extension SetupController {
         case "shop-home":
             var home = try! JSONSerialization.jsonObject(with: Data(smokeShopHomeJSON.utf8)) as! [String: Any]
             home["wishlist"] = report()
+            // Trending reuses the search fixture's games (one on sale, one at a full price elsewhere).
+            let search = try! JSONSerialization.jsonObject(with: Data(smokeShopSearchJSON.utf8)) as! [String: Any]
+            home["trending"] = search["games"]
             if value("--scope") == "all" { home["scope"] = "all" }
             return (0, json(home))
         case "wishlist":
