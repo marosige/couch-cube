@@ -126,7 +126,8 @@
       try {
         const response = await fetch("https://api.github.com/repos/marosige/couch-cube/releases?per_page=20");
         if (!response.ok) throw new Error("Release lookup failed");
-        const releases = await response.json();
+        // GitHub orders releases by tag text (alpha.9 before alpha.11), so newest-first by publish date.
+        const releases = (await response.json()).sort((a, b) => Date.parse(b.published_at || b.created_at) - Date.parse(a.published_at || a.created_at));
         const release = releases.find(item => !item.draft && item.assets.some(asset => /^CouchCube-.*-arm64\.dmg$/.test(asset.name)));
         if (!release) throw new Error("No download available");
         const installer = release.assets.find(asset => /^CouchCube-.*-arm64\.dmg$/.test(asset.name));
