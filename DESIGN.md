@@ -238,7 +238,8 @@ order: installed Steam games (header art read from Steam's local `appcache/libra
 downloaded; Steam tools and runtimes hidden) via `steam://rungameid/<id>`; retro games — every ROM of a
 shown console in the library, started straight in its emulator with `emulate`; Windows games —
 Porting Kit ports in `Windows/Porting Kit`, wrappers in `Windows/Wrappers` and CrossOver's program
-shortcuts in `~/Applications/CrossOver` (installers and uninstallers skipped); Mac games in
+shortcuts in `~/Applications/CrossOver` (installers, uninstallers and store launchers such as Steam,
+Battle.net, EA app, Epic or GOG Galaxy skipped: Play lists games only); Mac games in
 `Native/Games`; and apps added with **+** (UserDefaults `launcherApps`). The list comes from
 `library-games`, read-only and unmeasured, and loads again once the drives are known. A game can be a
 loose file or a folder (a Switch game with its updates and DLC, a GameCube game in its own folder): a

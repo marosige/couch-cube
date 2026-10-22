@@ -2263,6 +2263,10 @@ def launch(storage, action, identifier=None):
 
 
 LAUNCHER_SKIP = re.compile(r"^(uninstall|install|setup|readme|update)\b", re.I)
+# Store apps and launchers are tools, not games: Play lists only what they install (they stay in App Store).
+STORE_LAUNCHERS = re.compile(r"^(steam|battle\.?net( launcher)?|blizzard battle\.net|ea( app| desktop)?|origin|"
+                             r"epic games( launcher)?|gog galaxy|galaxy|ubisoft connect|uplay|rockstar games launcher|"
+                             r"amazon games|itch|curseforge|xbox|ea app)$", re.I)
 
 
 def app_bundles(folder, depth=1):
@@ -2274,7 +2278,7 @@ def app_bundles(folder, depth=1):
         if entry.name.startswith(".") or entry.is_symlink():
             continue
         if entry.suffix == ".app" and entry.is_dir():
-            if not LAUNCHER_SKIP.match(entry.stem):
+            if not LAUNCHER_SKIP.match(entry.stem) and not STORE_LAUNCHERS.match(entry.stem.strip()):
                 found.append(entry)
         elif entry.is_dir() and depth > 0:
             found += app_bundles(entry, depth - 1)
