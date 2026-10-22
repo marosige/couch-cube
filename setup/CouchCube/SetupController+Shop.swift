@@ -316,7 +316,7 @@ extension SetupController {
         let caveat = "Revolut/bank rates may differ slightly."
         guard let target = shopCurrency else {
             shopCurrencyNote.isHidden = true
-            shopRatesNote.stringValue = "Prices are shown in the currency each store uses."
+            shopRatesNote.stringValue = ""
             return
         }
         shopCurrencyNote.isHidden = false
@@ -369,7 +369,7 @@ extension SetupController {
             settingsRow("Shop currency", subtitle: "Prices in your currency, or each store's own.", symbol: "dollarsign.circle",
                         color: .systemGreen, trailing: shopCurrencyPopup, detail: nil),
             separator(),
-            settingsRow("Add card/FX fee", subtitle: "Your card's fee, added to converted prices.", symbol: "percent",
+            settingsRow("Card fee", subtitle: "Added to converted prices.", symbol: "percent",
                         color: .systemOrange, trailing: row([shopFeeField, text("%", size: 12)]), detail: nil),
             separator(),
             steamLinkRow(),

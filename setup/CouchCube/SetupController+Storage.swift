@@ -121,7 +121,7 @@ extension SetupController {
             if currentPage == 12 && detailDrive != nil { loadDriveDetail() }
         }
         guard let storage = storageStatus else {
-            setupFolderStatus.stringValue = "Reading available storage..."
+            setupFolderStatus.stringValue = "Reading available storage\u{2026}"
             transferLibraryButton.isEnabled = false
             return
         }
@@ -187,7 +187,7 @@ extension SetupController {
         case "invalid": return ("Needs attention", "exclamationmark.triangle.fill", .systemOrange)
         case "disconnected": return ("Disconnected · Reconnect its drive", "bolt.horizontal.circle.fill", .systemGray)
         case "connect": return ("Connect one", nil, .systemGray)
-        default: return ("Checking...", nil, .systemGray)
+        default: return ("Checking\u{2026}", nil, .systemGray)
         }
     }
 
@@ -433,7 +433,7 @@ extension SetupController {
         rescan.isEnabled = driveGamesScanning != id
         let scanning = driveGamesScanning == id
         guard let games = driveGamesCache[id]?.games else {
-            let message = driveGamesErrors[id].map { $0 + " Nothing was changed." } ?? "Measuring games on this drive..."
+            let message = driveGamesErrors[id].map { $0 + " Nothing was changed." } ?? "Measuring games on this drive\u{2026}"
             let status: NSView = driveGamesErrors[id] == nil
                 ? statusIndicator(message, color: .systemBlue, pulsing: true) : text(message, size: 12, secondary: true)
             return detailSection("Game storage", trailing: [rescan], views: [status])
@@ -505,7 +505,7 @@ extension SetupController {
             }
         }
         var status: [String] = []
-        if scanning { status.append("Rescanning...") }
+        if scanning { status.append("Rescanning\u{2026}") }
         if !scanning, driveGamesErrors[id] != nil { status.append("The last rescan failed; showing earlier results.") }
         if games.unknown > 0 { status.append("\(games.unknown) with unknown size, left out of the bar.") }
         if games.partial > 0 { status.append("\(games.partial) only partly readable, so they may be larger.") }
@@ -549,7 +549,7 @@ extension SetupController {
         guard let entry = storageOverviewEntries().first(where: { $0.id == id }) ?? drive.map({
             StorageOverviewEntry(id: $0.id, mode: $0.mode, title: driveTitle($0), state: "checking", active: false, path: $0.root)
         }) else {
-            add(detailSection("Drive", subtitle: "Checking connected drives...", views: []))
+            add(detailSection("Drive", subtitle: "Checking connected drives\u{2026}", views: []))
             return
         }
         var library: [NSView] = [storageOverviewRow(entry, navigable: false)]
@@ -557,16 +557,16 @@ extension SetupController {
         switch entry.state {
         case "ready":
             if !entry.active {
-                actions.append(button("Use this library...", #selector(activateDetailDrive)))
+                actions.append(button("Use this library\u{2026}", #selector(activateDetailDrive)))
             } else {
-                actions.append(button("Move library...", #selector(moveLibrary)))
+                actions.append(button("Move library\u{2026}", #selector(moveLibrary)))
             }
-            let remove = button("Remove...", #selector(removeDetailLibrary))
+            let remove = button("Remove\u{2026}", #selector(removeDetailLibrary))
             remove.identifier = NSUserInterfaceItemIdentifier("drive-remove")
             actions.append(remove)
         case "absent":
             library.append(text("No Couch Cube library here yet. Initialize adds a Couch Cube folder with empty game, BIOS and save folders. Nothing existing is changed and your active library stays the same.", size: 12, secondary: true))
-            let initialize = button("Initialize...", #selector(initializeDetailDrive))
+            let initialize = button("Initialize\u{2026}", #selector(initializeDetailDrive))
             initialize.identifier = NSUserInterfaceItemIdentifier("drive-initialize")
             initialize.isEnabled = drive.map { ["apfs", "hfs"].contains($0.filesystem) } ?? false
             if !initialize.isEnabled { initialize.toolTip = "This drive must use APFS or Mac OS Extended. Couch Cube never formats it here." }
@@ -619,7 +619,7 @@ extension SetupController {
                 amount("Free space", capacity.free, "drive-free")
             ]))
         } else if loadingDetail {
-            add(detailSection("Storage", views: [statusIndicator("Reading this drive...", color: .systemBlue, pulsing: true)]))
+            add(detailSection("Storage", views: [statusIndicator("Reading this drive\u{2026}", color: .systemBlue, pulsing: true)]))
         }
         if let detail = detail, !detail.steam.isEmpty {
             var views: [NSView] = []
@@ -700,10 +700,10 @@ extension SetupController {
             review.alertStyle = .warning
             review.messageText = "Remove the Couch Cube library on \(self.driveTitle(drive))?"
             review.informativeText = "\(plan.path)\n\(size) · \(plan.files) files\n\nEverything in this folder is removed: ROMs, BIOS files, saves, launchers and settings stored there. The rest of the drive is not erased or formatted, and Steam games are not touched.\n\nBack up first: copy the library to another drive, or open it in Finder and copy what you want to keep."
-            review.addButton(withTitle: "Continue...")
+            review.addButton(withTitle: "Continue\u{2026}")
             review.addButton(withTitle: "Cancel")
             review.addButton(withTitle: "Show in Finder")
-            review.addButton(withTitle: "Copy to another drive...")
+            review.addButton(withTitle: "Copy to another drive\u{2026}")
             switch review.runModal() {
             case .alertFirstButtonReturn: break
             case .alertThirdButtonReturn:
@@ -797,7 +797,7 @@ extension SetupController {
                 let plan = try JSONDecoder().decode(LibraryTransferPlan.self, from: data)
                 let confirm = NSAlert()
                 confirm.messageText = "Copy, verify and activate this library?"
-                confirm.informativeText = "From: \(plan.source.root)\nTo: \(plan.destination.root)\nSize: \(ByteCountFormatter.string(fromByteCount: plan.bytes, countStyle: .file))\n\nCopies Couch Cube content except SteamLibrary, checks file contents, and activates the new location. The old library stays untouched until you separately move it to Trash. App installations and emulator data outside this folder are not moved. Keep both drives connected. Save automatic console mode again after moving."
+                confirm.informativeText = "From: \(plan.source.root)\nTo: \(plan.destination.root)\nSize: \(ByteCountFormatter.string(fromByteCount: plan.bytes, countStyle: .file))\n\nCopies Couch Cube content except SteamLibrary, checks file contents, and activates the new location. The old library stays untouched until you separately move it to Trash. App installations and emulator data outside this folder are not moved. Keep both drives connected. Check Console Mode again after moving."
                 confirm.addButton(withTitle: "Copy and activate")
                 confirm.addButton(withTitle: "Cancel")
                 guard confirm.runModal() == .alertFirstButtonReturn else { return }
@@ -990,7 +990,7 @@ extension SetupController {
         selectedStorage.stringValue = drive.mode == "local" ? drive.root : "\(drive.name)\n\(drive.root)"
         updateSelectedStorageMarker()
         if report == nil {
-            libraryTitle.stringValue = "Checking your library..."
+            libraryTitle.stringValue = "Checking your library\u{2026}"
             libraryDescription.stringValue = "Checking the drive\u{2026}"
         }
         checkStorage()
@@ -1019,7 +1019,7 @@ extension SetupController {
                 let report = try JSONDecoder().decode(Assessment.self, from: data)
                 self.report = report
                 self.storageNext.isEnabled = report.issues.isEmpty
-                self.storageNext.title = report.state == "not prepared" ? "Create and activate library..." : "Use this library"
+                self.storageNext.title = report.state == "not prepared" ? "Create and activate library\u{2026}" : "Use this library"
                 if !report.issues.isEmpty {
                     self.summary.stringValue = "This storage needs attention before we can continue. Activity has the details."
                     if drive.mode == "portable" {
@@ -1028,18 +1028,18 @@ extension SetupController {
                 }
                 if report.state == "not prepared" {
                     self.libraryTitle.stringValue = "No library on this drive yet"
-                    self.libraryDescription.stringValue = "Makes the game folders. Nothing else on your Mac changes."
-                    self.libraryAction.title = "Create game library..."
+                    self.libraryDescription.stringValue = "Creates empty game folders. Nothing else changes."
+                    self.libraryAction.title = "Create game library\u{2026}"
                 } else if report.issues.isEmpty {
                     self.libraryTitle.stringValue = "Game folders created"
                     self.libraryDescription.stringValue = report.missing.contains("steam")
                         ? "Ready. Next, get Steam or other game apps in App Store."
                         : "Ready. Steam keeps its own game folders; change them in Steam."
-                    self.libraryAction.title = "Update library links..."
+                    self.libraryAction.title = "Update library links\u{2026}"
                 } else {
                     self.libraryTitle.stringValue = "This library needs attention"
                     self.libraryDescription.stringValue = report.issues.prefix(2).joined(separator: "\n")
-                    self.libraryAction.title = "Update library links..."
+                    self.libraryAction.title = "Update library links\u{2026}"
                 }
                 self.helperButton.isHidden = !report.notes.contains { $0.hasPrefix("Homebrew missing") }
                 self.helperAdvice.isHidden = self.helperButton.isHidden
@@ -1202,7 +1202,7 @@ extension SetupController {
         guard let drive = selected else { return }
         let alert = NSAlert()
         alert.messageText = report?.state == "not prepared" ? "Create and activate your library?" : "Use this library?"
-        alert.informativeText = "\(drive.root)\n\nSets this as the active library on this Mac. Creates game folders and launcher files only, or updates this app's existing files. Your games and saves are kept; other libraries stay untouched.\n\nDoes not install Steam or emulators, change Steam's storage, add shortcuts to Steam or move existing games. Save automatic console mode again if it points to another library."
+        alert.informativeText = "\(drive.root)\n\nSets this as the active library on this Mac. Creates game folders and launcher files only, or updates this app's existing files. Your games and saves are kept; other libraries stay untouched.\n\nDoes not install Steam or emulators, change Steam's storage, add shortcuts to Steam or move existing games. Check Console Mode again if it pointed to another library."
         if NSWorkspace.shared.runningApplications.contains(where: { $0.bundleURL?.lastPathComponent == "ES-DE.app" }) {
             alert.informativeText += "\n\nES-DE is running. Quit it first so it won't overwrite updated frontend settings."
             status.stringValue = "Quit ES-DE before updating its configuration."

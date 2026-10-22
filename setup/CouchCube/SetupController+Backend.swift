@@ -224,7 +224,7 @@ extension SetupController {
         case "install-apps": status.stringValue = "Installing your game players. This may take a few minutes."
         case "manage-app": status.stringValue = "Updating apps. Open Activity for live Homebrew output."
         case "erase": status.stringValue = "Preparing your SSD. Keep it connected until this finishes."
-        default: if !readOnly { status.stringValue = "Working on it..." }
+        default: if !readOnly { status.stringValue = "Working on it\u{2026}" }
         }
         do {
             try process.run()

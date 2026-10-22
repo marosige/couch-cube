@@ -179,6 +179,10 @@ extension SetupController {
             }
             addRow(makeWindowsDownloadRow(item), to: appWindowsRows)
         }
+        // No divider under a card's last app (kept in the stack, just hidden, so row positions stay put).
+        for rows in [appMenuRows, appPCRows, appWindowsRows, appRetroRows] {
+            (rows.arrangedSubviews.last as? NSBox)?.isHidden = true
+        }
         for rows in [appMenuRows, appPCRows, appWindowsRows, appRetroRows] {
             guard let hidden = hiddenApps[ObjectIdentifier(rows)] else { continue }
             let note = text("\(hidden) more app\(hidden == 1 ? "" : "s") to get · Expand to show",
@@ -194,7 +198,7 @@ extension SetupController {
     /// Every place an app is listed. One app can appear in several categories (Steam is both a TV menu and a PC game app);
     /// all its rows are built from the same app state and operation, so they always show the same status.
     func appPlacements(_ app: ManagedApp) -> [(rows: NSStackView, title: String?, purpose: String?)] {
-        if app.id == "steam" { return [(appMenuRows, "Steam Big Picture", "Steam TV menu"), (appPCRows, nil, nil)] }
+        if app.id == "steam" { return [(appMenuRows, "Steam Big Picture", "TV menu for Steam games"), (appPCRows, nil, nil)] }
         let rows = app.id == "es-de" ? appMenuRows :
             computerGameApps.contains(app.id) ? appPCRows :
             ["porting-kit", "crossover"].contains(app.id) ? appWindowsRows : appRetroRows
@@ -644,7 +648,7 @@ extension SetupController {
         }
         defaultMenuPicker.isEnabled = task == nil && !appsChecking &&
             defaultMenuPicker.itemArray.contains { $0.representedObject != nil && $0.isEnabled }
-        tvMenuStatus.stringValue = selectedIndex == nil ? "Install Steam or ES-DE in App Store to get started." : ""
+        tvMenuStatus.stringValue = ""
         tvMenuStatus.isHidden = tvMenuStatus.stringValue.isEmpty
         renderConsoleMode()
     }
@@ -684,8 +688,8 @@ extension SetupController {
         let alert = NSAlert()
         alert.messageText = "Update \(updates.count) apps?"
         alert.informativeText = "Quit these apps first: " + updates.map { $0.name }.joined(separator: ", ") +
-            ". Homebrew will update only these managed apps. Self-updating and manually installed apps use their own updaters."
-        alert.addButton(withTitle: "Update all")
+            "."
+        alert.addButton(withTitle: "Update All")
         alert.addButton(withTitle: "Cancel")
         guard alert.runModal() == .alertFirstButtonReturn, explainAppManagementOnce() else { return }
         updateNextApp(updates)
@@ -823,7 +827,7 @@ extension SetupController {
             } else {
                 let alert = NSAlert()
                 alert.messageText = "Switch emulator: manual setup"
-                alert.informativeText = "No verified automatic Switch emulator download is bundled. If you have a compatible Ryujinx-based macOS build, install it as Ryujinx.app in Applications. Configure your own legally obtained keys, firmware and game dumps there, then reopen App Store. Availability and game compatibility are not guaranteed."
+                alert.informativeText = "Put a Ryujinx build in Applications as Ryujinx.app, add your own keys and firmware there, then reopen App Store."
                 alert.runModal()
             }
             return

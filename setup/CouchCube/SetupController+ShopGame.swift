@@ -151,7 +151,7 @@ extension SetupController {
         views.append(shopGamePriceCard(detail))
         if let about = shopGameAboutCard(detail) { views.append(about) }
         if detail.giveaway == nil { views.append(shopGameStoresCard(detail)) }
-        let note = text("Prices from CheapShark and the Mac App Store. Couch Cube never buys anything: every store opens in your browser.",
+        let note = text("Prices from CheapShark and the App Store. You buy in the store itself.",
                         size: 11, secondary: true)
         views.append(note)
         for view in views {
@@ -363,7 +363,6 @@ extension SetupController {
         var views: [NSView] = []
         if let description = steam.description, !description.isEmpty { views.append(text(description, size: 13)) }
         var facts: [(String, String, NSColor?)] = []
-        if let genres = steam.genres, !genres.isEmpty { facts.append(("Genre", genres.joined(separator: ", "), nil)) }
         if let developers = steam.developers, !developers.isEmpty { facts.append(("Developer", developers.joined(separator: ", "), nil)) }
         if let release = steam.release { facts.append(("Released", release, nil)) }
         // Couch-relevant facts are always listed, so a missing feature reads as "no" instead of being invisible.

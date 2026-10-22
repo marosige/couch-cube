@@ -232,7 +232,7 @@ extension SetupController {
         guard task == nil else { status.stringValue = "Wait for the current operation to finish."; return }
         let alert = NSAlert()
         alert.messageText = "Uninstall Couch Cube?"
-        alert.informativeText = "Moves this copy of Couch Cube to Trash and removes its saved Mac selection, login entry and login log. Games, ROMs, BIOS, saves, other installed apps and game-library folders are kept. You can remove other apps individually in App Store."
+        alert.informativeText = "Moves Couch Cube to the Trash and removes its login settings. Your games, saves and other apps are kept."
         alert.addButton(withTitle: "Uninstall")
         alert.addButton(withTitle: "Cancel")
         guard alert.runModal() == .alertFirstButtonReturn else { return }

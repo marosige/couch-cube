@@ -37,7 +37,7 @@ extension SetupController {
         let ready = report?.state == "valid layout" && report?.issues.isEmpty == true
         let frontend = effectiveFrontend
         homeMenuLabel.stringValue = frontend == "steam" ? "Steam Big Picture" :
-            frontend == "es-de" ? "ES-DE" : report == nil ? "Checking your console..." : "Choose a TV menu in Console Mode."
+            frontend == "es-de" ? "ES-DE" : report == nil ? "Checking your console\u{2026}" : "Choose a TV menu in Console Mode."
         let checking = !overviewChecks.isEmpty && report == nil
         if checking { homeProgress.startAnimation(nil) }
         else { homeProgress.stopAnimation(nil) }

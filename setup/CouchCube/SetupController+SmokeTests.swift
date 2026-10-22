@@ -110,11 +110,11 @@ extension SetupController {
         precondition(views(driveDetailRows).contains { ($0 as? NSButton)?.identifier?.rawValue == "drive-initialize" && ($0 as? NSButton)?.isEnabled == true },
                      "A drive without a library offers Initialize")
         precondition(!views(driveDetailRows).contains { $0.identifier?.rawValue == "drive-remove" })
-        precondition(labels(driveDetailRows).contains("Reading this drive..."))
+        precondition(labels(driveDetailRows).contains("Reading this drive\u{2026}"))
         showDriveDetail("ssd3")
         precondition(reads.count == 2 && reads[1].0 == ["drive-detail", "--drive", "ssd3"])
         reads[0].1(0, detailJSON(ssd(1), steam: "[]", retro: "[]"))
-        precondition(driveDetailCache["ssd1"] == nil && driveDetailID == "ssd3" && labels(driveDetailRows).contains("Reading this drive..."),
+        precondition(driveDetailCache["ssd1"] == nil && driveDetailID == "ssd3" && labels(driveDetailRows).contains("Reading this drive\u{2026}"),
                      "A stale result for another drive never replaces the current page")
         reads[1].1(0, detailJSON(ssd(3), steam: """
             [{"path":"/Volumes/G3/SteamLibrary","games":[{"appid":"620","name":"Portal 2","state":"Installed","installed":true,"bytes":1000}]}]
@@ -125,12 +125,12 @@ extension SetupController {
         for heading in ["Couch Cube library", "Storage", "Drive size", "Used by other files", "Couch Cube files", "Free space", "Steam", "Retro games", "Super Nintendo"] {
             precondition(detailLabels.contains(heading), "Drive detail shows \(heading)")
         }
-        precondition(!detailLabels.contains("Reading this drive..."))
+        precondition(!detailLabels.contains("Reading this drive\u{2026}"))
         let buttons = views(driveDetailRows).compactMap { $0 as? NSButton }
         precondition(buttons.contains { $0.identifier?.rawValue == "620" && $0.title == "Play" } &&
                      buttons.contains { $0.identifier?.rawValue == "620" && $0.title == "Manage" && $0.action == #selector(manageSteamGame(_:)) },
                      "Steam games on the drive keep Play and get a Steam manage link")
-        precondition(buttons.contains { $0.identifier?.rawValue == "drive-remove" } && buttons.contains { $0.title == "Use this library..." },
+        precondition(buttons.contains { $0.identifier?.rawValue == "drive-remove" } && buttons.contains { $0.title == "Use this library\u{2026}" },
                      "A ready library that isn't active can be activated or removed")
         precondition(views(driveDetailRows).contains { $0.identifier?.rawValue == "drive-retro-snes" } &&
                      !views(driveDetailRows).contains { $0.identifier?.rawValue.hasPrefix("drive-retro-") == true && $0.identifier?.rawValue != "drive-retro-snes" })
@@ -185,7 +185,7 @@ extension SetupController {
             """.utf8)
         }
         log.calls[0].1(0, games("ssd1", []))
-        precondition(driveGamesCache["ssd1"] == nil && labels(driveDetailRows).contains("Measuring games on this drive..."),
+        precondition(driveGamesCache["ssd1"] == nil && labels(driveDetailRows).contains("Measuring games on this drive\u{2026}"),
                      "A scan for a drive that is no longer shown never lands")
         log.calls[1].1(0, games("ssd3", items))
         let decoded = driveGamesCache["ssd3"]!.games
@@ -247,7 +247,7 @@ extension SetupController {
         showDriveDetail("ssd3")
         precondition(log.calls.count == 2, "Reopening a recently measured drive reuses its results")
         views(driveDetailRows).compactMap { $0 as? NSButton }.first { $0.identifier?.rawValue == "drive-games-rescan" }!.performClick(nil)
-        precondition(log.calls.count == 3 && log.calls[2].0 == "ssd3" && labels(driveDetailRows).contains { $0.hasPrefix("Rescanning...") },
+        precondition(log.calls.count == 3 && log.calls[2].0 == "ssd3" && labels(driveDetailRows).contains { $0.hasPrefix("Rescanning\u{2026}") },
                      "Rescan measures again while showing the previous results")
         log.calls[2].1(1, Data())
         precondition(driveGamesCache["ssd3"] != nil && labels(driveDetailRows).contains("Alpha"),
@@ -528,8 +528,8 @@ extension SetupController {
                             let storageDiagnostics: String = "refresh=\(refreshCount) heading=\(headingCount) texts=\(pageTexts.filter { !$0.isEmpty })"
                             precondition(refreshCount == 1, "The merged page has one drive refresh button: " + storageDiagnostics)
                             precondition(headingCount == 1, "The merged page has one storage heading: " + storageDiagnostics)
-                            precondition(pageTexts.contains("Add or prepare an SSD..."), "The merged page offers SSD setup: " + storageDiagnostics)
-                            precondition(pageTexts.contains("Move library..."), "The merged page offers moving the library: " + storageDiagnostics)
+                            precondition(pageTexts.contains("Add or prepare an SSD\u{2026}"), "The merged page offers SSD setup: " + storageDiagnostics)
+                            precondition(pageTexts.contains("Move library\u{2026}"), "The merged page offers moving the library: " + storageDiagnostics)
                             precondition(texts(self.tabs.tabViewItems[2].view!).isEmpty)
                             self.storageStatus = StorageStatus(locations: [], active: nil, transfer: nil)
                             self.renderStorageLocations()

@@ -172,7 +172,7 @@ extension SetupController {
                 view.widthAnchor.constraint(equalTo: rows.widthAnchor).isActive = true
             }
             if overviewChecks.contains(.steam) {
-                let checking = row([statusIndicator("Checking Steam libraries...", color: .systemBlue, pulsing: true), NSView()])
+                let checking = row([statusIndicator("Checking Steam libraries\u{2026}", color: .systemBlue, pulsing: true), NSView()])
                 checking.distribution = .fill
                 add(checking)
             }

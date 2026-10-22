@@ -77,7 +77,7 @@ extension SetupController {
 
 extension SetupController {
     func windowsGuideButton() -> NSButton {
-        let guide = NSButton(title: "How It Works", target: self, action: #selector(showWindowsGuide))
+        let guide = NSButton(title: "How to Play Windows Games", target: self, action: #selector(showWindowsGuide))
         guide.bezelStyle = .inline
         guide.isBordered = false
         guide.contentTintColor = .controlAccentColor

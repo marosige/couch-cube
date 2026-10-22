@@ -133,7 +133,7 @@ func windowsDownloadStatus(_ item: WindowsDownloadItem, job: WindowsDownloadJob?
     return item.downloaded ? ("Downloaded", .systemGreen, false) : ("Not downloaded", .systemGray, false)
 }
 
-/// Last backend "ERROR: ..." line, for an inline message.
+/// Last backend "ERROR: \u{2026}" line, for an inline message.
 func backendErrorMessage(_ errors: String, fallback: String) -> String {
     let line = errors.split(separator: "\n").last { $0.hasPrefix("ERROR:") }
     let message = line.map { $0.dropFirst(6).trimmingCharacters(in: .whitespaces) } ?? ""
@@ -171,7 +171,7 @@ func appRowStatus(_ app: ManagedApp, operation: AppOperation?, unknown: Bool, ch
         return (verb + phase + "\u{2026}", .systemBlue, true)
     }
     if let failure = operation?.failure { return (failure, .systemRed, false) }
-    if unknown { return (checking ? "Checking..." : "Not checked", checking ? .systemBlue : .systemGray, checking) }
+    if unknown { return (checking ? "Checking\u{2026}" : "Not checked", checking ? .systemBlue : .systemGray, checking) }
     let hasUpdate = app.installed && app.managed && app.update?.isEmpty == false
     return app.installed ? (hasUpdate ? ("Installed · Update available", .systemYellow, false) : ("Installed", .systemGreen, false))
         : ("Not installed", .systemGray, false)

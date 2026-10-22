@@ -24,13 +24,13 @@ extension SetupController {
         storeWalkthroughPanel.alignment = .leading
         storeWalkthroughPanel.spacing = 8
         storeWalkthroughPanel.isHidden = true
-        let note = text("Who is signed in to each game app. Read from the apps' own files; passwords are never read. Mac and Windows apps sign in separately.",
+        let note = text("Read from each app's own files. Couch Cube never sees passwords.",
                         size: 11, secondary: true)
         note.lineBreakMode = .byWordWrapping
         note.maximumNumberOfLines = 0
         note.preferredMaxLayoutWidth = 520
         let header = row([column([storeAccountsSummary, storeAccountsChecked]),
-                          button("Set Up Accounts...", #selector(startStoreWalkthrough)),
+                          button("Set Up Accounts\u{2026}", #selector(startStoreWalkthrough)),
                           button("Check Again", #selector(checkStoreAccounts))])
         (header.arrangedSubviews[0] as? NSStackView)?.spacing = 2
         header.arrangedSubviews[0].setContentHuggingPriority(.defaultLow, for: .horizontal)
@@ -69,9 +69,6 @@ extension SetupController {
             open.setAccessibilityLabel("Open \(client.name) to sign in")
         }
         open.identifier = NSUserInterfaceItemIdentifier(client.id)
-        let again = button("Check Again", #selector(checkStoreAccounts))
-        again.isEnabled = !checking
-        again.setAccessibilityLabel("Check \(client.name) sign-in again")
         let status = text(detail, size: 11, secondary: true)
         status.setAccessibilityIdentifier("storeAccountStatus")
         let dot = NSImageView(image: NSImage(systemSymbolName: "circle.fill", accessibilityDescription: nil)!)
@@ -82,7 +79,7 @@ extension SetupController {
         let title = client.platform == "Mac" ? client.name + " (Mac client)" : client.name
         let result = settingsRow(title, subtitle: detail, symbol: client.kind == "mac" ? "desktopcomputer" : "pc",
                                  color: client.kind == "mac" ? .systemBlue : .systemIndigo,
-                                 trailing: row([open, again]), detail: line)
+                                 trailing: open, detail: line)
         result.identifier = NSUserInterfaceItemIdentifier("store-row-" + client.id)
         result.setAccessibilityElement(false)
         status.setAccessibilityLabel("\(title): \(detail)")

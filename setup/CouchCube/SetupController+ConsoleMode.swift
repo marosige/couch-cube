@@ -179,7 +179,7 @@ extension SetupController {
             signInGuide.addArrangedSubview(row([button("Users & Groups", #selector(openUsersAndGroups)),
                                                 button("Lock Screen", #selector(openLockScreenSettings)),
                                                 button("FileVault", #selector(openFileVaultSettings)),
-                                                button("Apple Guide", #selector(openAutomaticLoginGuide))]))
+                                                button("Learn More", #selector(openAutomaticLoginGuide))]))
         }
         signInGuide.isHidden = signInGuide.arrangedSubviews.isEmpty
 
@@ -205,7 +205,7 @@ extension SetupController {
             ("es-de", "ES-DE", "Your retro consoles and games.", "arcade.stick", .systemRed)
         ] {
             let installed = appStates.first { $0.id == id }?.installed ?? report.map { !$0.missing.contains(id) } ?? false
-            addChoice(choiceRow(title, subtitle: installed ? subtitle : "Not installed \u{2014} get it in App Store.",
+            addChoice(choiceRow(title, subtitle: installed ? subtitle : "Not installed \u{00B7} Get it in App Store",
                                                        symbol: symbol, color: color, selected: effectiveFrontend == id,
                                                        id: "menu-" + id) { [weak self] in
                 guard let self else { return }
@@ -218,7 +218,7 @@ extension SetupController {
                 }
             }, to: tvMenuChoices)
         }
-        addChoice(choiceRow("Cube TV Home", subtitle: "Couch Cube's own TV home screen \u{2014} coming soon.",
+        addChoice(choiceRow("Cube TV", subtitle: "Couch Cube's own TV home screen. Coming soon.",
                                                    symbol: "sparkles.tv.fill", color: .systemPurple, selected: false,
                                                    enabled: false, id: "menu-couchcube") {}, to: tvMenuChoices)
     }

@@ -119,7 +119,7 @@ extension SetupController {
             self.gameArtLoading = false
             guard code == 0, let reply = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
             let art = reply["art"] as? [String: [String: String]] ?? [:]
-            self.gameArtKeyField.placeholderString = reply["enabled"] as? Bool == true ? "Key saved" : "Paste your SteamGridDB API key"
+            self.gameArtKeyField.placeholderString = reply["enabled"] as? Bool == true ? "Key saved" : "API key"
             let error = reply["error"] as? String
             self.gameArtStatus.stringValue = error ?? (art.isEmpty ? "" : "Artwork for \(art.count) game\(art.count == 1 ? "" : "s") on this Mac.")
             self.gameArtStatus.textColor = error == nil ? .secondaryLabelColor : .systemOrange
@@ -132,7 +132,7 @@ extension SetupController {
     }
 
     func gameArtworkCard() -> NSView {
-        gameArtKeyField.placeholderString = "Paste your SteamGridDB API key"
+        gameArtKeyField.placeholderString = "API key"
         gameArtKeyField.target = self
         gameArtKeyField.action = #selector(saveGameArtKey)
         gameArtKeyField.setAccessibilityLabel("SteamGridDB API key")
@@ -143,11 +143,13 @@ extension SetupController {
         gameArtStatus.maximumNumberOfLines = 0
         let get = button("Get a Free Key", #selector(openSteamGridDBKeyPage))
         let remove = button("Remove Key", #selector(removeGameArtKey))
+        let actions = row([get, remove, gameArtStatus, NSView()])
+        actions.edgeInsets = NSEdgeInsets(top: 0, left: 38, bottom: 0, right: 0)
         return card("Game artwork", subtitle: nil, views: [
             settingsRow("SteamGridDB", subtitle: "Optional: banners, logos and icons for retro and Windows games. Saved with your game library.",
                         symbol: "photo.on.rectangle.angled", color: .systemPurple,
-                        trailing: row([gameArtKeyField, button("Save", #selector(saveGameArtKey))]),
-                        detail: row([get, remove, gameArtStatus]))
+                        trailing: row([gameArtKeyField, button("Save", #selector(saveGameArtKey))])),
+            actions
         ])
     }
 
@@ -189,7 +191,7 @@ extension SetupController {
         runBackendInBackground(libraryCommand(["game-art-key", "--clear"])) { [weak self] code, _, _ in
             guard let self, code == 0 else { return }
             self.gameArt = [:]
-            self.gameArtKeyField.placeholderString = "Paste your SteamGridDB API key"
+            self.gameArtKeyField.placeholderString = "API key"
             self.gameArtStatus.stringValue = "Key removed."
             self.gameArtStatus.textColor = .secondaryLabelColor
             self.renderLauncher()

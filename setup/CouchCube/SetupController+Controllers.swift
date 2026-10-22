@@ -615,7 +615,7 @@ extension SetupController {
             updateHomeControllerActivity(entry.id)
         }
         if ordered.isEmpty {
-            activeControllerRows.addArrangedSubview(text("No controllers yet. Plug one in with USB, or put a Bluetooth controller in pairing mode.", size: 12, secondary: true))
+            activeControllerRows.addArrangedSubview(text("No controllers yet. Plug one in, or put a wireless one in pairing mode.", size: 12, secondary: true))
         }
         renderDiscoveredControllers()
     }
@@ -886,7 +886,7 @@ extension SetupController {
         guard let id = controllerID(from: sender), let entry = controllerEntries.first(where: { $0.id == id }) else { return }
         let alert = NSAlert()
         alert.messageText = "Forget \(controllerDisplayName(entry))?"
-        alert.informativeText = "This Mac removes the pairing. Couch Cube keeps its name, color and icon, so they come back when you pair it again."
+        alert.informativeText = "Its name, color and icon come back if you pair it again."
         alert.addButton(withTitle: "Forget Device")
         alert.addButton(withTitle: "Cancel")
         alert.addButton(withTitle: "Forget and Delete Profile")
@@ -1021,7 +1021,7 @@ extension SetupController {
     func devicePairingUserConfirmationRequest(_ sender: Any!, numericValue: BluetoothNumericValue) {
         let alert = NSAlert()
         alert.messageText = "Confirm pairing code"
-        alert.informativeText = "Does the controller show \(String(format: "%06u", numericValue))? Most controllers don't have a screen; choose Pair to continue."
+        alert.informativeText = "Does the controller show \(String(format: "%06u", numericValue))? If it has no screen, click Pair."
         alert.addButton(withTitle: "Pair")
         alert.addButton(withTitle: "Cancel")
         bluetoothPairing?.replyUserConfirmation(alert.runModal() == .alertFirstButtonReturn)
@@ -1032,7 +1032,7 @@ extension SetupController {
         bluetoothPairing = nil
         controllerBusy = controllerBusy.filter { !$0.hasPrefix("pair:") }
         renderDiscoveredControllers()
-        showControllerError("PIN code needed", "This controller asks for a PIN code, which Couch Cube can't enter. Use the Bluetooth Settings button on the Controllers page if you want to pair it there.")
+        showControllerError("PIN code needed", "This controller asks for a PIN code, which Couch Cube can't enter. Pair it in Bluetooth Settings instead.")
         startControllerDiscovery()
     }
 

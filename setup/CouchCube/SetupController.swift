@@ -152,7 +152,7 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
     lazy var askTargetPrice: (String, Double?, String) -> Double?? = { title, current, code in
         let alert = NSAlert()
         alert.messageText = "Target price for \u{201C}\(title)\u{201D}"
-        alert.informativeText = "Cube Shop marks the game when its best price is at or below this, converted at today's ECB rate. Leave it empty to clear the target."
+        alert.informativeText = "Cube Shop marks the game when it drops to this price. Leave it empty to remove the target."
         let places = ShopMoney.minorUnits(code)
         let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 120, height: 24))
         field.placeholderString = places == 0 ? "e.g. 4000" : "e.g. 9.99"
@@ -179,7 +179,7 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
     let defaultMenuPicker = NSPopUpButton()
     let tvMenuStatus = NSTextField(wrappingLabelWithString: "")
     let updateAllButton = NSButton()
-    let homeMenuLabel = NSTextField(wrappingLabelWithString: "Checking your console...")
+    let homeMenuLabel = NSTextField(wrappingLabelWithString: "Checking your console\u{2026}")
     let homePlaySubtitle = NSTextField(labelWithString: "")
     var homeArtworkMenu: String?? = .none
     let homeProgress = NSProgressIndicator()
@@ -417,7 +417,7 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
     var smokeSystemsLoaded = false
     var smokeSteamLoaded = false
     var smokeOverviewRefreshed = false
-    let updateStatus = NSTextField(wrappingLabelWithString: "Checking for updates...")
+    let updateStatus = NSTextField(wrappingLabelWithString: "Checking for updates\u{2026}")
     let updateButton = NSButton()
     var updateTask: Process?
     var updateURL: URL?
@@ -595,7 +595,7 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
 
         libraryTitle.font = .systemFont(ofSize: 13, weight: .semibold)
         libraryDescription.textColor = .secondaryLabelColor
-        libraryAction.title = "Update game library..."
+        libraryAction.title = "Update game library\u{2026}"
         libraryAction.target = self
         libraryAction.action = #selector(setup)
         libraryAction.bezelStyle = .rounded
@@ -699,7 +699,7 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
             rows.alignment = .leading
             rows.spacing = 0
         }
-        helperButton = button("Install Homebrew...", #selector(homebrew))
+        helperButton = button("Install Homebrew\u{2026}", #selector(homebrew))
         helperAdvice.textColor = .secondaryLabelColor
         let appManagementText = text("macOS may block Couch Cube from updating or removing apps. Turn on Couch Cube in Privacy & Security \u{203A} App Management, then try again.", size: 12, secondary: true)
         appManagementHint.addArrangedSubview(appManagementText)
@@ -719,7 +719,7 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
             helperAdvice,
             helperButton
         ])
-        updateAllButton.title = "Update all"
+        updateAllButton.title = "Update All"
         updateAllButton.target = self
         updateAllButton.action = #selector(updateAllApps)
         updateAllButton.bezelStyle = .rounded
@@ -739,12 +739,12 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
         defaultMenuPicker.action = #selector(defaultMenuChanged(_:))
         defaultMenuPicker.setAccessibilityLabel("Default TV menu")
         actions.append(defaultMenuPicker)
-        transferLibraryButton = button("Move library...", #selector(moveLibrary))
-        retireLibraryButton = button("Move old library to Trash...", #selector(retireOldLibrary))
+        transferLibraryButton = button("Move library\u{2026}", #selector(moveLibrary))
+        retireLibraryButton = button("Move old library to Trash\u{2026}", #selector(retireOldLibrary))
         retireLibraryButton.isHidden = true
         // Library storage is part of Game library; the index stays so page numbers remain stable.
         addPage("Library storage", content: column([]))
-        updateButton.title = "View release..."
+        updateButton.title = "View release\u{2026}"
         updateButton.target = self
         updateButton.action = #selector(openUpdate)
         updateButton.isEnabled = false
@@ -752,7 +752,7 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
         addPage("Library storage", content: column([]))
         storageHeading.font = .systemFont(ofSize: 24, weight: .bold)
         storageAdvice.textColor = .secondaryLabelColor
-        storageNext.title = "Use this storage..."
+        storageNext.title = "Use this storage\u{2026}"
         storageNext.target = self
         storageNext.action = #selector(continueStorage)
         storageNext.bezelStyle = .rounded
@@ -761,7 +761,7 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
         portablePreparation.alignment = .leading
         let prepare = card("Prepare a new SSD", subtitle:
             "Erase and format an external SSD, then copy Couch Cube onto it. You'll review the disk before anything is erased.",
-            views: [button("Prepare an SSD...", #selector(prepareDisk))])
+            views: [button("Prepare an SSD\u{2026}", #selector(prepareDisk))])
         portablePreparation.addArrangedSubview(prepare)
         prepare.widthAnchor.constraint(equalTo: portablePreparation.widthAnchor).isActive = true
         addPage("Storage", content: column([
@@ -773,9 +773,9 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
                 summary,
                 button("Refresh connected drives", #selector(refresh)),
                 primary(storageNext),
-                button("Copy this app to SSD...", #selector(copyAppToSSD))
+                button("Copy this app to SSD\u{2026}", #selector(copyAppToSSD))
             ]),
-            button("Change storage type", #selector(backToChoices))
+            button("Change Storage Type", #selector(backToChoices))
         ]))
         preparationResult.isHidden = true
         addPage("Finish", content: column([
@@ -784,20 +784,20 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
             card("Steam libraries", subtitle: "See where your Steam games are installed. Change storage in Steam.", views: [
                 steamGuideRows,
                 row([button("Open Steam Storage", #selector(openSteamStorage)),
-                     button("Refresh Steam status", #selector(refreshSteamStatus))])
+                     button("Refresh Steam Status", #selector(refreshSteamStatus))])
             ]),
             card("1. Sign in & choose game storage", subtitle: nil, views: [
                 steamStorageAdvice,
-                row([button("Open Steam desktop", #selector(openSteamDesktop)),
-                     button("Show SteamLibrary folder", #selector(showSteamFolder))])
+                row([button("Open Steam Desktop", #selector(openSteamDesktop)),
+                     button("Show SteamLibrary Folder", #selector(showSteamFolder))])
             ]),
             card("2. Connect a controller & install a game", subtitle:
                 "Pair it in macOS Bluetooth settings or connect it with USB. Steam → Settings → Controller lets you check the buttons. Retro players may need their own controller setup.",
                 views: [text("Install a game from your Steam library, then choose Play on Home. Existing Steam games stay where they are.", size: 12, secondary: true),
                         button("Controllers", #selector(showControllers))]),
             card("Optional: retro & Windows games in Big Picture", subtitle: nil, views: [
-                retroAdvice, row([button("Open Steam desktop", #selector(openSteamDesktop)),
-                                 button("Open game folders", #selector(openFolder))])
+                retroAdvice, row([button("Open Steam Desktop", #selector(openSteamDesktop)),
+                                 button("Open Game Folders", #selector(openFolder))])
             ])
         ]))
         librarySummary.font = .systemFont(ofSize: 12)
@@ -816,7 +816,7 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
                 storageHeader,
                 text("Keep games on this Mac or an external SSD. Choose a drive to see what's on it.", size: 12, secondary: true),
                 setupFolderStatus, gameLibraryOverviewRows, libraryHealth, libraryTitle, libraryDescription, libraryAction,
-                row([button("Refresh connected drives", #selector(refresh)), button("Add or prepare an SSD...", #selector(choosePortable))])
+                row([button("Refresh connected drives", #selector(refresh)), button("Add or prepare an SSD\u{2026}", #selector(choosePortable))])
             ]),
             card("", subtitle: nil, views: [yourGames, librarySummary]),
             card("Move your library", subtitle: "Copies everything to another drive and checks it. The old copy stays until you remove it.", views: [
@@ -870,7 +870,7 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
         bluetoothSettings.image = ControllerGlyph.bluetooth
         bluetoothSettings.imageScaling = .scaleNone
         let gameControllerSettings = headerIconButton("gearshape", label: "Game Controller Settings", action: #selector(openGameControllerSettings))
-        let pairingHint = text("To add a wireless controller, put it in pairing mode. It appears here with a Connect button. Xbox and other Bluetooth LE controllers may only appear in Bluetooth Settings.", size: 11, secondary: true)
+        let pairingHint = text("Put a wireless controller in pairing mode to add it. If it doesn't show up here (common with Xbox), pair it in Bluetooth Settings.", size: 11, secondary: true)
         addPage("Controllers", content: column([
             controllerBanner,
             card("", subtitle: nil, views: [
@@ -900,24 +900,24 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
         addPage("Console Mode", content: column([
             card("1  Signing in & waking", subtitle: "After a restart, and when the Mac wakes from sleep.", views: [signInChoices, signInGuide]),
             card("2  Open at Login", subtitle: "What starts by itself after you sign in.", views: [afterLoginChoices, consoleDelayRow, autoLaunchStatus]),
-            card("3  On the TV", subtitle: "Which menu Play and the TV mode open.", views: [tvMenuChoices, tvMenuStatus])
+            card("3  On the TV", subtitle: "What Cube TV opens.", views: [tvMenuChoices, tvMenuStatus])
         ]))
         renderConsoleMode()
         addPage("App Settings", content: column([
-            card("App Settings", subtitle: nil, views: [
+            card("Couch Cube", subtitle: nil, views: [
                 settingsRow("App updates", subtitle: "Check for a new version of Couch Cube.",
                             symbol: "arrow.down.circle", color: .systemGreen,
-                            trailing: row([button("Check...", #selector(checkUpdates)), updateButton]),
+                            trailing: row([button("Check\u{2026}", #selector(checkUpdates)), updateButton]),
                             detail: updateStatus),
                 separator(),
                 settingsRow("App location", subtitle: "Find this copy of Couch Cube.", symbol: "folder",
                             color: .systemGray, trailing: button("Show in Finder", #selector(revealApp))),
                 separator(),
                 settingsRow("Remove Couch Cube", subtitle: "Your games, saves and other apps are kept.", symbol: "trash",
-                            color: .systemGray, trailing: button("Uninstall...", #selector(uninstallCouchCube))),
+                            color: .systemGray, trailing: button("Uninstall\u{2026}", #selector(uninstallCouchCube))),
                 separator(),
                 settingsRow("Clean up gaming setup", subtitle: "Choose what to remove from this Mac.", symbol: "trash",
-                            color: .systemRed, trailing: button("Review...", #selector(reviewGamingCleanup)))
+                            color: .systemRed, trailing: button("Review\u{2026}", #selector(reviewGamingCleanup)))
             ]),
             shopSettingsCard(),
             gameArtworkCard(),
@@ -1003,7 +1003,7 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
 
     @objc func checkUpdates() {
         guard updateTask == nil else { return }
-        updateStatus.stringValue = "Checking GitHub for the latest portable release..."
+        updateStatus.stringValue = "Checking GitHub for the latest portable release\u{2026}"
         let process = Process()
         process.executableURL = Bundle.main.resourceURL!.appendingPathComponent("python/bin/python3")
         process.arguments = ["-I", "-B", backend.path, "update-check"]
@@ -1035,7 +1035,7 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
                         ? "Couch Cube \(report.version) is available. Download it and replace the app after quitting."
                         : "You're up to date. Latest published release: \(report.version)."
                     self.updateURL = URL(string: report.url)
-                    self.updateButton.title = "Download..."
+                    self.updateButton.title = "Download\u{2026}"
                     self.updateButton.isHidden = !report.available
                     self.updateButton.isEnabled = report.available && self.updateURL != nil
                     self.couchCubeUpdateAvailable = report.available
@@ -1191,15 +1191,15 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
             "epic-games": "Epic Games for Mac",
             "battle-net": "Blizzard games · World of Warcraft",
             "curseforge": "World of Warcraft addons",
-            "es-de": "Retro game TV menu",
-            "retroarch-metal": "NES · SNES · Nintendo 64 · Game Boy · Game Boy Color · Game Boy Advance · PlayStation · PSP · Mega Drive · Sega CD · Dreamcast",
+            "es-de": "TV menu for retro games",
+            "retroarch-metal": "NES, SNES, N64, Game Boy, PlayStation, PSP, Mega Drive, Dreamcast and more",
             "dolphin": "GameCube · Wii",
             "pcsx2": "PlayStation 2",
             "rpcs3": "PlayStation 3",
             "cemu-wiiu": "Wii U",
             "switch": "Nintendo Switch",
-            "porting-kit": "Compatible Windows games on Mac",
-            "crossover": "Compatible Windows games on Mac · Paid license or trial"
+            "porting-kit": "Free \u{00B7} Ready-made installers for Windows games",
+            "crossover": "Runs Windows games and stores \u{00B7} Paid, free trial"
     ]
 
     var highlightedAppID: String?

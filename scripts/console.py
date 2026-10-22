@@ -2207,7 +2207,7 @@ def frontend_preference():
         return None
     value = read_json(FRONTEND_CONFIG)
     if not isinstance(value, dict) or value.get("default") not in {"steam", "es-de"}:
-        raise SetupError("Invalid TV menu preference. Choose Steam or ES-DE in TV menu.")
+        raise SetupError("Invalid TV menu preference. Choose Steam or ES-DE in Console Mode.")
     return value["default"]
 
 
@@ -2232,7 +2232,7 @@ def default_frontend():
             app_binary(name)
             return "steam" if package == "steam" else "retro"
     if preferred:
-        raise SetupError(f"Your default TV menu ({PACKAGES[preferred]}) is missing. Install it or choose another in TV menu.")
+        raise SetupError(f"Your default TV menu ({PACKAGES[preferred]}) is missing. Install it or choose another in Console Mode.")
     raise SetupError("Install Steam or ES-DE from Couch Cube > Apps first.")
 
 
