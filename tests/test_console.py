@@ -126,9 +126,11 @@ class StorageTests(unittest.TestCase):
         rom = self.storage.root / "ROMs/ps2/mine.iso"
         rom.write_bytes(b"own dump")
         with patch.object(console, "app_binary", return_value=Path("/pcsx2")) as binary, \
+                patch.object(console, "prepare_emulator") as prepare, \
                 patch.object(console, "run") as run:
             console.emulate(self.storage, "ps2", str(rom))
-        binary.assert_called_once_with("PCSX2.app")
+        prepare.assert_called_once_with(self.storage, "pcsx2", Path("/pcsx2"))
+        self.assertEqual(binary.call_count, 2)
         run.assert_called_once_with(["/pcsx2", "-fullscreen", "-batch", str(rom)])
 
     def test_disabled_console_refuses_launch(self):
