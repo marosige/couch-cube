@@ -498,8 +498,14 @@ Enabled consoles also show BIOS filename-check results. Their info page lists
 each expected filename, destination and Found/Not found state in the selected
 storage's `BIOS/retroarch` folder. PS1 accepts any listed alternative; Sega CD
 reports regional BIOS files separately; Dreamcast BIOS files are optional.
-Systems that need no BIOS say so. PCSX2, RPCS3 and Switch emulator-managed BIOS,
-firmware or keys are marked as manual, not falsely reported as missing.
+Systems that need no BIOS say so. PS2, PS3 and Switch use drop folders in the
+library: `BIOS/ps2` (BIOS image), `BIOS/ps3` (`PS3UPDAT.PUP`), `BIOS/switch`
+(`prod.keys` and the firmware `.zip`). Found files show as present; otherwise the state stays
+manual. On the first game launch `scripts/emulator_setup.py` copies them into the emulator
+(never overwriting), installs the PS3 firmware via RPCS3 and applies console defaults once
+(PCSX2 fullscreen and SDL pads 1-4, Dolphin four GameCube ports). An existing config is
+backed up (`.couchcube-backup`) and later launches never touch it again.
+Controller mapping for Dolphin, RPCS3 and Ryujinx is still done in the emulator.
 Only file presence is checked, not contents, hashes or authenticity. No BIOS is
 downloaded; supply only your own legally obtained dumps.
 Console rows show independent emulator and BIOS indicators. The emulator dot is

@@ -1031,6 +1031,7 @@ def generated_files(storage, registrations, systems=None):
     files = {
         "Runtime/console.py": (Path(__file__).read_bytes(), False),
         "Config/bios-map.csv": (BIOS_MAP.read_bytes(), False),
+        "Runtime/emulator_setup.py": (Path(__file__).with_name("emulator_setup.py").read_bytes(), False),
         "Runtime/emulate.sh": ((
             '#!/bin/bash\nset -euo pipefail\n'
             'ROOT="$(cd "$(dirname "$0")/.." && pwd)"\n'
@@ -1156,9 +1157,12 @@ def bios_status(storage, system):
             message = f"{present}/{len(files)} regional BIOS files found" if present else "Regional BIOS files missing"
         return {"state": state, "summary": message, "files": files}
     if system in {"ps2", "ps3", "switch"}:
-        return {"state": "manual", "summary": "BIOS setup in PCSX2 · Not checked" if system == "ps2" else
-                "Firmware setup in RPCS3 · Not checked" if system == "ps3" else
-                "Keys & firmware in emulator · Not checked", "files": []}
+        rows = emulator_setup_tools().bios_files(storage.root, system)
+        if rows and all(row["present"] for row in rows):
+            return {"state": "present", "summary": "Your files are in the library; installed on first launch", "files": rows}
+        return {"state": "manual", "summary": "Put your PS2 BIOS in BIOS/ps2" if system == "ps2" else
+                "Put PS3UPDAT.PUP in BIOS/ps3" if system == "ps3" else
+                "Put prod.keys and the firmware .zip in BIOS/switch", "files": []}
     return {"state": "not-needed", "summary": "No BIOS file required for the configured emulator",
             "files": []}
 
@@ -1258,7 +1262,8 @@ def initialize(storage, systems=None):
         storage.write(MARKER, json_text(state))
     folders = [
         "SteamLibrary", "ROMs", "BIOS/retroarch/dc",
-        "Saves/RetroArch/States", "Saves/Dolphin", "Saves/Native", "Saves/Windows",
+        "Saves/RetroArch/States", "Saves/Dolphin", "Saves/Native",
+        "BIOS/ps2", "BIOS/ps3", "BIOS/switch", "Saves/Windows",
         "Native/Games", "Native/Assets", "Windows/Wrappers", "Windows/Installers", "Windows/Porting Kit",
         "Frontend", "Config", "Runtime", "Launchers",
     ]
@@ -2342,6 +2347,29 @@ def rom_art_tools():
     return module
 
 
+def emulator_setup_tools():
+    spec = importlib.util.spec_from_file_location("console_emulator_setup", Path(__file__).with_name("emulator_setup.py"))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def prepare_emulator(storage, core, binary):
+    """Copy the player's own BIOS/firmware/keys into the emulator and apply console defaults once.
+    A failure here must not block the game from starting, so it is reported and skipped."""
+    try:
+        tools = emulator_setup_tools()
+        marker = storage.read_path(tools.MARKER)
+        state = read_json(marker) if marker.is_file() else {}
+        before = dict(state)
+        for note in tools.prepare(core, storage.root, Path.home(), binary, state):
+            print(note, file=sys.stderr, flush=True)
+        if state != before:
+            storage.write(tools.MARKER, json_text(state))
+    except (OSError, ValueError, subprocess.SubprocessError) as exc:
+        print(f"Emulator setup skipped: {exc}", file=sys.stderr, flush=True)
+
+
 def steamgriddb_tools():
     spec = importlib.util.spec_from_file_location("console_steamgriddb", Path(__file__).with_name("steamgriddb.py"))
     module = importlib.util.module_from_spec(spec)
@@ -2415,6 +2443,8 @@ def emulate(storage, system, rom):
     enabled = selected_systems(read_json(storage.target(MARKER)))
     if system not in enabled:
         raise SetupError("This console is disabled. Enable it in Couch Cube > Consoles.")
+    if core in STANDALONE:
+        prepare_emulator(storage, core, app_binary(PACKAGES[core]))
     if core == "dolphin":
         binary = app_binary("Dolphin.app")
         args = [str(binary), "-b", "-e", str(path), "-u", str(storage.root / "Saves/Dolphin")]
