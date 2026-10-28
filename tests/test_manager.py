@@ -303,7 +303,7 @@ class ManagementTests(unittest.TestCase):
         self.assertTrue(systems["gc"]["emulator_installed"])
         self.assertTrue(systems["wii"]["emulator_installed"])
         self.assertFalse(systems["psx"]["emulator_installed"])
-        self.assertEqual(detect.call_count, 6)
+        self.assertEqual(detect.call_count, 8)
 
     def test_bios_filename_presence_accepts_ps1_alternative_without_reading_contents(self):
         manager.initialize(self.storage, ["psx"])

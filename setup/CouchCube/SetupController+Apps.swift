@@ -36,7 +36,7 @@ extension SetupController {
                 ("curseforge", "CurseForge"), ("discord", "Discord"), ("es-de", "ES-DE"),
                 ("retroarch-metal", "RetroArch"), ("dolphin", "Dolphin"),
                 ("pcsx2", "PCSX2"), ("rpcs3", "RPCS3"), ("cemu-wiiu", "Cemu"),
-                ("switch", "Ryujinx"), ("sikarugir", "Sikarugir"), ("crossover", "CrossOver")
+                ("switch", "Ryujinx"), ("azahar", "Azahar"), ("xemu", "xemu"), ("sikarugir", "Sikarugir"), ("crossover", "CrossOver")
             ]
             appStates = catalog.map {
                 ManagedApp(id: $0.0, name: $0.1, installed: false, path: "", version: "",
@@ -83,7 +83,7 @@ extension SetupController {
                     precondition(self.appMenuRows.arrangedSubviews.count == 4)
                     precondition(self.appPCRows.arrangedSubviews.count == 14)
                     precondition(self.appWindowsRows.arrangedSubviews.count == 4 + 2 * self.windowsDownloads.count)
-                    precondition(self.appRetroRows.arrangedSubviews.count == 12)
+                    precondition(self.appRetroRows.arrangedSubviews.count == 16)
                 }
                 precondition(Set([self.appMenuRows, self.appPCRows, self.appWindowsRows, self.appRetroRows]
                     .compactMap { $0.superview?.superview }.map { ObjectIdentifier($0) }).count == 4,

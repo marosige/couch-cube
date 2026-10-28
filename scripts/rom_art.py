@@ -37,6 +37,15 @@ PLAYLISTS = {
     "segacd": "Sega - Mega-CD - Sega CD",
     "gamegear": "Sega - Game Gear",
     "dreamcast": "Sega - Dreamcast",
+    "nds": "Nintendo - Nintendo DS",
+    "n3ds": "Nintendo - Nintendo 3DS",
+    "mastersystem": "Sega - Master System - Mark III",
+    "sega32x": "Sega - 32X",
+    "saturn": "Sega - Saturn",
+    "pcengine": "NEC - PC Engine - TurboGrafx 16",
+    "neogeo": "SNK - Neo Geo MVS",
+    "arcade": "MAME",
+    "xbox": "Microsoft - Xbox",
 }
 # libretro replaces these characters in thumbnail file names.
 UNSAFE = re.compile(r'[&*/:`<>?\\|"]')

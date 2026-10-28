@@ -17,13 +17,16 @@ extension SetupController {
                 ("n64", "Nintendo 64"), ("gc", "GameCube"), ("wii", "Wii"),
                 ("wiiu", "Wii U"), ("switch", "Nintendo Switch"),
                 ("gb", "Game Boy"), ("gbc", "Game Boy Color"), ("gba", "Game Boy Advance"),
+                ("nds", "Nintendo DS"), ("n3ds", "Nintendo 3DS"),
                 ("psx", "PlayStation"), ("ps2", "PlayStation 2"),
                 ("psp", "PlayStation Portable"), ("ps3", "PlayStation 3"),
-                ("megadrive", "Mega Drive / Genesis"), ("segacd", "Sega CD"), ("dreamcast", "Dreamcast"), ("gamegear", "Game Gear")
+                ("mastersystem", "Sega Master System"), ("megadrive", "Mega Drive / Genesis"), ("segacd", "Sega CD"),
+                ("sega32x", "Sega 32X"), ("saturn", "Sega Saturn"), ("dreamcast", "Dreamcast"), ("gamegear", "Game Gear"),
+                ("pcengine", "PC Engine / TurboGrafx-16"), ("neogeo", "Neo Geo"), ("arcade", "Arcade"), ("xbox", "Xbox")
             ]
             consoleSystems = catalog.map {
                 let package = ["gc": "dolphin", "wii": "dolphin", "wiiu": "cemu-wiiu",
-                               "switch": "switch", "ps2": "pcsx2", "ps3": "rpcs3"][$0.0] ?? "retroarch-metal"
+                               "switch": "switch", "ps2": "pcsx2", "ps3": "rpcs3", "n3ds": "azahar", "xbox": "xemu"][$0.0] ?? "retroarch-metal"
                 return ConsoleSystem(id: $0.0, name: $0.1, enabled: false, package: package,
                                      requirement: "", bios: nil)
             }
@@ -83,7 +86,7 @@ extension SetupController {
             (order.firstIndex(of: $0.id) ?? 100) < (order.firstIndex(of: $1.id) ?? 100)
         }
         var manufacturerRows: [String: NSStackView] = [:]
-        for manufacturer in ["Nintendo", "PlayStation", "SEGA"] {
+        for manufacturer in ["Nintendo", "PlayStation", "SEGA", "Other"] {
             let rows = NSStackView()
             rows.orientation = .vertical
             rows.alignment = .leading
@@ -98,7 +101,7 @@ extension SetupController {
         var previousGroup = ""
         for (index, system) in consoleSystems.enumerated() {
             let group = ConsoleArtwork.groups.first { $0.systems.contains(system.id) }?.title ?? "Other systems"
-            let manufacturer = ["Nintendo", "PlayStation", "SEGA"].first { group.hasPrefix($0) } ?? group
+            let manufacturer = ["Nintendo", "PlayStation", "SEGA", "Other"].first { group.hasPrefix($0) } ?? group
             guard let rows = manufacturerRows[manufacturer] else { continue }
             if group != previousGroup {
                 do {
@@ -278,7 +281,7 @@ extension SetupController {
 
     func emulatorName(_ system: ConsoleSystem) -> String {
         ["retroarch-metal": "RetroArch", "cemu-wiiu": "Cemu", "switch": "Ryujinx",
-         "pcsx2": "PCSX2", "rpcs3": "RPCS3", "dolphin": "Dolphin"][system.package] ?? system.package
+         "pcsx2": "PCSX2", "rpcs3": "RPCS3", "dolphin": "Dolphin", "azahar": "Azahar", "xemu": "xemu"][system.package] ?? system.package
     }
 
     /// Whether the console's emulator is on this Mac; nil until it has been checked.

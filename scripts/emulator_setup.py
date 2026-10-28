@@ -13,7 +13,8 @@ from pathlib import Path
 CONFIG_VERSION = 1
 MARKER = "Config/emulator-setup.json"
 
-BIOS_FOLDERS = {"ps2": "BIOS/ps2", "ps3": "BIOS/ps3", "switch": "BIOS/switch"}
+BIOS_FOLDERS = {"ps2": "BIOS/ps2", "ps3": "BIOS/ps3", "switch": "BIOS/switch", "xbox": "BIOS/xbox"}
+XBOX_FILES = {"bootrom_path": "mcpx_1.0.bin", "flashrom_path": "Complex_4627v1.03.bin", "hdd_path": "xbox_hdd.qcow2"}
 PS2_BIOS_SUFFIXES = {".bin", ".rom0", ".rom1", ".erom", ".mec", ".nvm"}
 PS2_MIN_BYTES = 1_000_000  # real PS2 BIOS images are 4 MB; this skips stray text and tiny files
 
@@ -75,6 +76,10 @@ def bios_files(library, system):
         return [{"filename": row["filename"], "path": str(library / BIOS_FOLDERS[system] / row["filename"]),
                  "present": row["present"], "note": "Your own console dump; drop it into BIOS/switch"}
                 for row in rows]
+    elif system == "xbox":
+        folder = library / BIOS_FOLDERS[system]
+        return [{"filename": name, "path": str(folder / name), "present": _usable(folder / name),
+                 "note": "Your own copy; drop it into " + BIOS_FOLDERS[system]} for name in XBOX_FILES.values()]
     else:
         return []
     return [{"filename": name, "path": str(library / BIOS_FOLDERS[system] / name), "present": found,
@@ -180,6 +185,27 @@ def prepare_switch(library, home):
     return notes
 
 
+def prepare_xemu(library, home, state):
+    notes = []
+    data = home / "Library/Application Support/xemu/xemu"
+    folder = library / BIOS_FOLDERS["xbox"]
+    paths = {}
+    for key, name in XBOX_FILES.items():
+        source = folder / name
+        if _usable(source):
+            _copy_missing(source, data)
+            paths[key] = "'" + str(data / name) + "'"
+        else:
+            notes.append(f"Xbox file missing: put {name} in {BIOS_FOLDERS['xbox']}")
+    if paths and state.get("xemu") != CONFIG_VERSION:
+        config = data / "xemu.toml"
+        _backup_once(config)
+        ini_merge(config, {"sys.files": paths, "general": {"show_welcome": "false"}})
+        state["xemu"] = CONFIG_VERSION
+        notes.append("xemu configured with your Xbox files")
+    return notes
+
+
 def prepare_dolphin(library, state):
     if state.get("dolphin") == CONFIG_VERSION:
         return []
@@ -204,4 +230,6 @@ def prepare(core, library, home, binary=None, state=None, run=subprocess.run):
         return prepare_switch(library, home)
     if core == "dolphin":
         return prepare_dolphin(library, state)
+    if core == "xemu":
+        return prepare_xemu(library, home, state)
     return []

@@ -167,7 +167,7 @@ extension SetupController {
         let gamingApps = Set(["Steam.app", "GOG Galaxy.app", "EA app.app", "Epic Games Launcher.app",
                               "Battle.net.app", "CurseForge.app", "ES-DE.app", "RetroArch.app",
                               "Dolphin.app", "Sikarugir Creator.app", "Discord.app", "CrossOver.app", "PCSX2.app",
-                              "RPCS3.app", "Cemu.app", "Ryujinx.app"])
+                              "RPCS3.app", "Cemu.app", "Ryujinx.app", "Azahar.app", "xemu.app"])
         let running = NSWorkspace.shared.runningApplications.filter {
             guard let url = $0.bundleURL else { return false }
             return gamingApps.contains(url.lastPathComponent) ||
