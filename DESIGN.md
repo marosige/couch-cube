@@ -184,16 +184,16 @@ App Store rows show the app name, Installed/Not installed (green / gray dot; red
 Get and Update start at once (no confirmation); only Remove asks. Before the first update or removal Couch Cube says once that macOS
 needs App Management permission (Privacy & Security › App Management), with **Open App Management** or
 **Continue**, so macOS's "Couch Cube was prevented from modifying apps" is never a surprise. The Windows games card has **How It Works**,
-which opens a guide page (under App Store): a one-line intro (many games have a Mac version), then CrossOver
-(easiest, paid, trial) and Porting Kit (free) as cards with numbered plain steps from getting the app to the
-game appearing in Play, buttons to their App Store rows and Porting Kit's Games Folder, and a note that not
-every game (anti-cheat) runs. An installed Porting Kit row has **Games Folder**:
-it creates `Windows/Porting Kit` in the game library, pins it to the top of Finder's sidebar (which Porting
-Kit's folder dialog shows too) and copies its path, so it's one click away when setting Porting Kit's
-"Applications default path"; the button then reads **Unpin Folder** and takes it off the sidebar again.
-If macOS ignores the pin (checked by reading the list back), Finder shows the folder and the hint says
-⌘⇧G and paste instead. Porting Kit's own setting is not changed by Couch Cube; ports put
-there appear in Play under Windows games. The … menu has Open, Update and Remove….
+which opens a guide page (under App Store): a one-line intro (many games have a Mac version), then
+**Sikarugir** (free, recommended: runs the Windows Steam app) and CrossOver (optional, paid, trial)
+as cards with numbered plain steps, buttons to their App Store rows and to the Windows Steam installer
+row, and a note that not every game (anti-cheat) runs. Sikarugir installs through Homebrew from its own tap
+(`sikarugir-app/sikarugir/sikarugir`, Homebrew adds the tap itself); installed rows have **Open**.
+The player makes a "Steam" wrapper in Sikarugir with the Steam installer Couch Cube downloaded; wrappers
+live in `~/Applications/Sikarugir` and appear in Play under Windows games, including a wrapper named
+Steam (store launchers are hidden elsewhere, but a Sikarugir wrapper is how Windows Steam starts).
+Discord is listed with CurseForge under PC games (Homebrew cask `discord`).
+The … menu has Open, Update and Remove….
 When Homebrew needs administrator rights (Steam's updater, for example) macOS's password dialog appears
 through a `SUDO_ASKPASS` helper (`scripts/askpass.sh`); Couch Cube never stores the password. After a
 failed operation a hint links to Privacy & Security › App Management, which macOS may require.
@@ -241,7 +241,7 @@ then **Games**: the launcher, with games only (launchers and emulators stay in A
 order: installed Steam games (header art read from Steam's local `appcache/librarycache`, never
 downloaded; Steam tools and runtimes hidden) via `steam://rungameid/<id>`; retro games — every ROM of a
 shown console in the library, started straight in its emulator with `emulate`; Windows games —
-Porting Kit ports in `Windows/Porting Kit`, wrappers in `Windows/Wrappers` and CrossOver's program
+Sikarugir wrappers in `~/Applications/Sikarugir` (older Porting Kit ports in `Windows/Porting Kit` still show), wrappers in `Windows/Wrappers` and CrossOver's program
 shortcuts in `~/Applications/CrossOver` (installers, uninstallers and store launchers such as Steam,
 Battle.net, EA app, Epic or GOG Galaxy skipped: Play lists games only); Mac games in
 `Native/Games`; and apps added with **+** (UserDefaults `launcherApps`). The list comes from
@@ -455,7 +455,7 @@ Connections refresh automatically; no manual status refresh is needed.
 The Controllers page uses the same simple activity indication.
 The App Store categories distinguish
 **PC games** (official macOS launchers) from **Windows games**
-(tools for supported Windows games on this Mac). Windows games lists Porting Kit
+(tools for supported Windows games on this Mac). Windows games lists Sikarugir
 and CrossOver together. Existing CrossOver installations in `/Applications` or
 `~/Applications` are detected and can be opened directly. Otherwise Install opens
 CodeWeavers' official site; use your existing license or its trial. Games and
@@ -477,7 +477,7 @@ only after a free-space check. The file must also be a Windows PE/MSI. An existi
 file is reused if identical, otherwise the new file is saved as `Name (2).exe`. Size and
 SHA-256 are recorded. Authenticode signatures are not checked, because macOS has no
 reliable verifier. Couch Cube never runs or installs these files: they show as
-**Downloaded** with Show in Finder, and need Porting Kit or CrossOver to run.
+**Downloaded** with Show in Finder, and need Sikarugir or CrossOver to run.
 These rows never create sidebar tasks, and an installed Windows launcher is never claimed.
 Named sections and row separators organize apps and console families.
 Compact switches sit on the right. Status dots always have text: green means

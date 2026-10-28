@@ -41,7 +41,9 @@ class LibraryGamesTests(unittest.TestCase):
             (self.root / folder).mkdir(parents=True)
         for folder in ["Applications/CrossOver/Steam/Rocket League.app", "Applications/CrossOver/Steam/Setup Steam.app",
                        "Applications/CrossOver/Steam/Steam.app", "Applications/CrossOver/Battle.net/Battle.net.app",
-                       "Applications/CrossOver/Battle.net/Warcraft III.app"]:
+                       "Applications/CrossOver/Battle.net/Warcraft III.app",
+                       "Applications/Sikarugir/Steam.app", "Applications/Sikarugir/Setup Steam.app",
+                       "Applications/Sikarugir/Celeste.app"]:
             (self.home / folder).mkdir(parents=True)
         (self.root / console.MARKER).write_text(json.dumps({"systems": ["snes", "psx"]}))
 
@@ -52,8 +54,9 @@ class LibraryGamesTests(unittest.TestCase):
                          "Descriptor sets launch from their .cue; hidden consoles (N64 here) are left out")
         apps = {(app["kind"], app["name"], app["group"]) for app in report["apps"]}
         self.assertEqual(apps, {("native", "Celeste", None), ("porting-kit", "Warcraft II", None),
+                                ("windows", "Steam", None), ("windows", "Celeste", None),
                                 ("crossover", "Rocket League", "Steam"), ("crossover", "Warcraft III", "Battle.net")},
-                         "Installers, uninstallers and store launchers (Steam, Battle.net) are not games")
+                         "Installers, uninstallers and store launchers (Steam, Battle.net) are not games, except a Sikarugir wrapper, which is how Windows Steam starts")
 
     def test_game_folders_start_their_largest_playable_file(self):
         (self.root / "ROMs/gc/Mario Kart Double Dash").mkdir(parents=True)

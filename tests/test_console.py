@@ -420,3 +420,18 @@ class DriveTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class WindowsAndChatAppTests(unittest.TestCase):
+    def test_sikarugir_installs_from_its_tap_and_discord_is_a_plain_cask(self):
+        self.assertEqual(console.PACKAGES["sikarugir"], "Sikarugir Creator.app")
+        self.assertEqual(console.PACKAGES["discord"], "Discord.app")
+        self.assertNotIn("porting-kit", console.PACKAGES)
+        with patch.object(console, "find_brew", return_value="/brew"), \
+                patch.object(console, "brew_environment", return_value=None), \
+                patch.object(console, "run", side_effect=[
+                    subprocess.CompletedProcess([], 0, stdout=""), None, None]) as run:
+            console.install_packages(["sikarugir", "discord"])
+        self.assertEqual([call.args[0] for call in run.call_args_list[1:]],
+                         [["/brew", "install", "--cask", "sikarugir-app/sikarugir/sikarugir"],
+                          ["/brew", "install", "--cask", "discord"]])
