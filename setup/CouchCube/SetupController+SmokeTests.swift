@@ -1964,6 +1964,7 @@ extension SetupController {
         // Hide everything, then fail: the last saved choices and the group states come back.
         press("Nintendo consoles")
         press("SEGA consoles")
+        press("Other consoles")
         precondition(current().isEmpty && consoleBulkToggles.allSatisfy { $0.toggle.state == .off && $0.count.isHidden })
         saveSystems()
         precondition(saves.count == 2 && saves[1].enabled.isEmpty)
