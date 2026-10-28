@@ -48,28 +48,22 @@ extension SetupController {
         }
         let intro = text("Windows games need a helper app that translates them for the Mac. Check first: many games have a Mac version, shown with a Mac badge in Cube Shop.",
                          size: 13, secondary: true)
-        let portingFolder = windowsGuideFolderButton
-        portingFolder.title = pinnedPortingKitFolder != nil ? "Unpin Folder" : "Games Folder"
-        portingFolder.bezelStyle = .rounded
-        portingFolder.target = self
-        portingFolder.action = #selector(preparePortingKitFolder)
-        portingFolder.setAccessibilityIdentifier("windowsGuidePortingFolder")
-        windowsGuideStatus.font = .systemFont(ofSize: 12)
-        windowsGuideStatus.textColor = .secondaryLabelColor
         return column([
             intro,
-            option("CrossOver", "Easiest. Paid, with a free 14-day trial.", symbol: "star.fill", color: .systemOrange, lines: [
+            option("Sikarugir", "Free. Recommended: runs the Windows Steam app on your Mac.", symbol: "star.fill", color: .systemGreen, lines: [
+                "Get Sikarugir and open it.",
+                "Get the Windows Steam installer (it is saved in your game library, under Downloads).",
+                "In Sikarugir create a new wrapper called \u{201C}Steam\u{201D}. It downloads what it needs itself.",
+                "Open the wrapper, choose Install Software and pick the Steam installer from Downloads.",
+                "Choose Steam as the wrapper\u{2019}s program, sign in to Steam and install your game there.",
+                "The wrapper shows up in Play under Windows games. Open it to start Steam."
+            ], buttons: [appButton("Get Sikarugir", "sikarugir"), appButton("Get Steam Installer", "win-steam")]),
+            option("CrossOver", "Optional. Paid, with a free 14-day trial. Handles more difficult games.", symbol: "shippingbox.fill", color: .systemOrange, lines: [
                 "Get CrossOver and open it.",
                 "Click Install, search for your store (Steam, Battle.net, EA app or Epic Games) and install it.",
                 "Sign in to the store inside CrossOver and install your game there.",
                 "The game shows up in Play under Windows games."
             ], buttons: [appButton("Get CrossOver", "crossover")]),
-            option("Porting Kit", "Free. Ready-made installers for many games.", symbol: "shippingbox.fill", color: .systemBlue, lines: [
-                "Get Porting Kit and open it.",
-                "Click Games Folder below. In Porting Kit open Settings, choose Change next to \u{201C}Applications default path\u{201D} and pick \u{201C}Porting Kit\u{201D} at the top of the sidebar.",
-                "Search for your game in Porting Kit, click Install and follow its steps.",
-                "The game shows up in Play under Windows games. Back here, click Unpin Folder."
-            ], buttons: [appButton("Get Porting Kit", "porting-kit"), portingFolder], footer: windowsGuideStatus),
             text("Not every Windows game runs on a Mac, and online games with anti-cheat usually don't.", size: 11, secondary: true)
         ])
     }

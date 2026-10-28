@@ -1,7 +1,7 @@
 {
   "repository": "marosige/couch-cube",
-  "version": "0.1.0-alpha.12",
-  "build": 12,
+  "version": "0.1.0-alpha.13",
+  "build": 13,
   "asset_prefix": "CouchCube",
   "app_name": "CouchCube.app",
   "bundle_id": "me.marosi.couchcube"

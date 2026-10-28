@@ -348,13 +348,13 @@ extension SetupController {
                         self.renderApps()
                         self.renderTVMenus()
                         self.appsStatus.stringValue = "Installed versions. Updates are checked only when requested."
-                        precondition(Set(self.appStates.map { $0.id }) == Set(["steam", "gog-galaxy", "ea", "epic-games", "battle-net", "curseforge", "es-de", "retroarch-metal", "dolphin", "porting-kit", "crossover", "pcsx2", "rpcs3", "cemu-wiiu", "switch"]))
+                        precondition(Set(self.appStates.map { $0.id }) == Set(["steam", "gog-galaxy", "ea", "epic-games", "battle-net", "curseforge", "discord", "es-de", "retroarch-metal", "dolphin", "sikarugir", "crossover", "pcsx2", "rpcs3", "cemu-wiiu", "switch"]))
                         for app in self.appStates {
                             let iconURL = Bundle.main.resourceURL!.appendingPathComponent("AppIcons/\(app.id).png")
                             precondition(NSImage(contentsOf: iconURL) != nil, "Missing app icon: \(app.id)")
                         }
-                        let porting = self.appStates.firstIndex { $0.id == "porting-kit" }!
-                        precondition(self.appStates[porting + 1].id == "crossover")
+                        let sikarugir = self.appStates.firstIndex { $0.id == "sikarugir" }!
+                        precondition(self.appStates[sikarugir + 1].id == "crossover")
                         let battle = self.appStates.firstIndex { $0.id == "battle-net" }!
                         precondition(self.appStates[battle + 1].id == "curseforge")
                         func buttons(in view: NSView) -> [NSButton] {

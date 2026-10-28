@@ -203,8 +203,6 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
     var launcherLibrary: LibraryGames?
     var romArtRounds = 0
     var launcherSignature = 0
-    let windowsGuideFolderButton = NSButton(title: "Games Folder", target: nil, action: nil)
-    let windowsGuideStatus = NSTextField(wrappingLabelWithString: "")
     var gameArt: [String: [String: String]] = [:]
     var gameArtRounds = 0
     var gameArtLoading = false
@@ -304,8 +302,8 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
             if sorted.map(\.id) != appStates.map(\.id) { appStates = sorted }
         }
     }
-    static let appOrder = ["steam", "gog-galaxy", "ea", "epic-games", "battle-net", "curseforge", "es-de", "retroarch-metal", "dolphin",
-                           "pcsx2", "rpcs3", "cemu-wiiu", "switch", "porting-kit", "crossover"]
+    static let appOrder = ["steam", "gog-galaxy", "ea", "epic-games", "battle-net", "curseforge", "discord", "es-de", "retroarch-metal", "dolphin",
+                           "pcsx2", "rpcs3", "cemu-wiiu", "switch", "sikarugir", "crossover"]
     var appsChecking = false
     /// Startup preload of App Store data; runs in the background as soon as no other command is running.
     var appsPreloadPending = false
@@ -1117,7 +1115,7 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
         return CBManager.authorization != .allowedAlways || bluetoothManager?.state == .poweredOff
     }
 
-    let computerGameApps: Set<String> = ["steam", "gog-galaxy", "ea", "epic-games", "battle-net", "curseforge"]
+    let computerGameApps: Set<String> = ["steam", "gog-galaxy", "ea", "epic-games", "battle-net", "curseforge", "discord"]
     let emulatorApps: Set<String> = ["retroarch-metal", "dolphin", "pcsx2", "rpcs3", "cemu-wiiu", "switch"]
 
     var overviewAppSummary: String {
@@ -1175,7 +1173,7 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
     /// Installed apps that run Windows games (nil until the app list has been read).
     var compatibilityLayers: [String]? {
         guard lastAppsData != nil else { return nil }
-        return ["crossover", "porting-kit"].compactMap { id in appStates.first { $0.id == id && $0.installed }?.name }
+        return ["crossover", "sikarugir"].compactMap { id in appStates.first { $0.id == id && $0.installed }?.name }
     }
 
     /// A compact badge (logo + short label) and the full explanation for tooltips and VoiceOver.
@@ -1196,6 +1194,7 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
             "epic-games": "Epic Games for Mac",
             "battle-net": "Blizzard games · World of Warcraft",
             "curseforge": "World of Warcraft addons",
+            "discord": "Voice and text chat with friends",
             "es-de": "TV menu for retro games",
             "retroarch-metal": "NES, SNES, N64, Game Boy, PlayStation, PSP, Mega Drive, Dreamcast and more",
             "dolphin": "GameCube · Wii",
@@ -1203,7 +1202,7 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
             "rpcs3": "PlayStation 3",
             "cemu-wiiu": "Wii U",
             "switch": "Nintendo Switch",
-            "porting-kit": "Free \u{00B7} Ready-made installers for Windows games",
+            "sikarugir": "Free \u{00B7} Runs Windows Steam and other launchers",
             "crossover": "Runs Windows games and stores \u{00B7} Paid, free trial"
     ]
 

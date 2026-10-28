@@ -45,16 +45,19 @@ PACKAGES = {
     "epic-games": "Epic Games Launcher.app",
     "battle-net": "Battle.net.app",
     "curseforge": "CurseForge.app",
+    "discord": "Discord.app",
     "es-de": "ES-DE.app",
     "retroarch-metal": "RetroArch.app",
     "dolphin": "Dolphin.app",
-    "porting-kit": "Porting Kit.app",
+    "sikarugir": "Sikarugir Creator.app",
     "crossover": "CrossOver.app",
     "pcsx2": "PCSX2.app",
     "rpcs3": "RPCS3.app",
     "cemu-wiiu": "Cemu.app",
     "switch": "Ryujinx.app",
 }
+# Casks that live in a third-party tap are installed by their full name, which makes Homebrew add the tap itself.
+CASK_NAMES = {"sikarugir": "sikarugir-app/sikarugir/sikarugir"}
 MANUAL_APPS = {
     # Notarized DMG (Developer ID: FX GAMES FZ LLC); no Homebrew cask, so the official release page is opened.
     "crossover": "https://www.codeweavers.com/crossover",
@@ -1303,7 +1306,7 @@ def install_packages(packages):
             print(f"Already installed: {package}", flush=True)
             continue
         print(f"Installing host component: {package}", flush=True)
-        run([brew, "install", "--cask", package], env=brew_environment())
+        run([brew, "install", "--cask", CASK_NAMES.get(package, package)], env=brew_environment())
 
 def app_status(check_updates=False, package=None):
     """Installed/managed/update state for every known app, or only `package` (a targeted post-install re-check)."""
@@ -1409,6 +1412,8 @@ def cleanup_plan():
         ("Library/Application Support/Ryujinx", "Ryujinx firmware, games and saves"),
         ("Library/Application Support/CrossOver", "CrossOver bottles and Windows games"),
         ("Library/Application Support/Porting Kit", "Porting Kit wrappers and settings"),
+        ("Library/Application Support/Sikarugir", "Sikarugir engines and Windows games"),
+        ("Library/Application Support/discord", "Discord settings and cache"),
         ("Library/Application Support/Battle.net", "Battle.net data and settings"),
         ("Library/Application Support/Blizzard", "Blizzard data and settings"),
         ("Library/Application Support/CurseForge", "CurseForge profiles and addons"),
@@ -2324,8 +2329,9 @@ STORE_LAUNCHERS = re.compile(r"^(steam|battle\.?net( launcher)?|blizzard battle\
                              r"amazon games|itch|curseforge|xbox|ea app)$", re.I)
 
 
-def app_bundles(folder, depth=1):
-    """`.app` bundles in a folder (and its subfolders up to `depth`), never following symlinks."""
+def app_bundles(folder, depth=1, launchers=False):
+    """`.app` bundles in a folder (and its subfolders up to `depth`), never following symlinks.
+    `launchers=True` keeps store apps such as a Steam wrapper: in Sikarugir the wrapper IS how Windows Steam starts."""
     found = []
     if folder.is_symlink() or not folder.is_dir():
         return found
@@ -2333,10 +2339,10 @@ def app_bundles(folder, depth=1):
         if entry.name.startswith(".") or entry.is_symlink():
             continue
         if entry.suffix == ".app" and entry.is_dir():
-            if not LAUNCHER_SKIP.match(entry.stem) and not STORE_LAUNCHERS.match(entry.stem.strip()):
+            if not LAUNCHER_SKIP.match(entry.stem) and (launchers or not STORE_LAUNCHERS.match(entry.stem.strip())):
                 found.append(entry)
         elif entry.is_dir() and depth > 0:
-            found += app_bundles(entry, depth - 1)
+            found += app_bundles(entry, depth - 1, launchers)
     return found
 
 
@@ -2422,11 +2428,13 @@ def library_games(storage, home=None):
             roms.append({"system": system, "system_name": system_name, "name": name, "path": str(launch),
                          "cover": str(cover) if cover else None})
     apps = []
+    sikarugir_folder = home / "Applications/Sikarugir"
     for kind, folder, depth in [("native", storage.root / "Native/Games", 1),
                                 ("windows", storage.root / "Windows/Wrappers", 1),
                                 ("porting-kit", storage.root / "Windows/Porting Kit", 1),
+                                ("windows", sikarugir_folder, 1),
                                 ("crossover", home / "Applications/CrossOver", 2)]:
-        for app in app_bundles(folder, depth):
+        for app in app_bundles(folder, depth, launchers=folder == sikarugir_folder):
             apps.append({"kind": kind, "name": app.stem, "path": str(app),
                          "group": app.parent.name if kind == "crossover" and app.parent != folder else None})
     return {"roms": roms, "apps": apps}

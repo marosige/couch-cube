@@ -33,10 +33,10 @@ extension SetupController {
             let catalog = [
                 ("steam", "Steam"), ("gog-galaxy", "GOG Galaxy"), ("ea", "EA app"),
                 ("epic-games", "Epic Games Launcher"), ("battle-net", "Battle.net"),
-                ("curseforge", "CurseForge"), ("es-de", "ES-DE"),
+                ("curseforge", "CurseForge"), ("discord", "Discord"), ("es-de", "ES-DE"),
                 ("retroarch-metal", "RetroArch"), ("dolphin", "Dolphin"),
                 ("pcsx2", "PCSX2"), ("rpcs3", "RPCS3"), ("cemu-wiiu", "Cemu"),
-                ("switch", "Ryujinx"), ("porting-kit", "Porting Kit"), ("crossover", "CrossOver")
+                ("switch", "Ryujinx"), ("sikarugir", "Sikarugir"), ("crossover", "CrossOver")
             ]
             appStates = catalog.map {
                 ManagedApp(id: $0.0, name: $0.1, installed: false, path: "", version: "",
@@ -81,7 +81,7 @@ extension SetupController {
                 self.renderGeneral()
                 if self.collapsedAppCategories.isEmpty {
                     precondition(self.appMenuRows.arrangedSubviews.count == 4)
-                    precondition(self.appPCRows.arrangedSubviews.count == 12)
+                    precondition(self.appPCRows.arrangedSubviews.count == 14)
                     precondition(self.appWindowsRows.arrangedSubviews.count == 4 + 2 * self.windowsDownloads.count)
                     precondition(self.appRetroRows.arrangedSubviews.count == 12)
                 }
@@ -201,7 +201,7 @@ extension SetupController {
         if app.id == "steam" { return [(appMenuRows, "Steam Big Picture", "TV menu for Steam games"), (appPCRows, nil, nil)] }
         let rows = app.id == "es-de" ? appMenuRows :
             computerGameApps.contains(app.id) ? appPCRows :
-            ["porting-kit", "crossover"].contains(app.id) ? appWindowsRows : appRetroRows
+            ["sikarugir", "crossover"].contains(app.id) ? appWindowsRows : appRetroRows
         return [(rows, nil, nil)]
     }
 
@@ -250,51 +250,6 @@ extension SetupController {
         control.heightAnchor.constraint(greaterThanOrEqualToConstant: 26).isActive = true
         actions.append(control)
         return control
-    }
-
-    /// The Porting Kit folder pinned to Finder's sidebar by Couch Cube, while it is still there.
-    var pinnedPortingKitFolder: URL? {
-        guard let path = UserDefaults.standard.string(forKey: "portingKitPinnedFolder") else { return nil }
-        let url = URL(fileURLWithPath: path)
-        return ProcessInfo.processInfo.arguments.contains("--smoke-test") || FinderSidebar.contains(url) ? url : nil
-    }
-
-    /// Makes the library's Windows/Porting Kit folder and pins it to the top of Finder's sidebar (which Porting Kit's
-    /// folder dialog shows too), so it's one click away; Unpin Folder takes it off again. If macOS doesn't allow the
-    /// pin, the path goes on the clipboard instead. Porting Kit's own setting isn't changed for you.
-    @objc func preparePortingKitFolder() {
-        if let pinned = pinnedPortingKitFolder {
-            FinderSidebar.unpin(pinned)
-            UserDefaults.standard.removeObject(forKey: "portingKitPinnedFolder")
-            portingKitSay("Removed the Porting Kit folder from Finder's sidebar.")
-            renderApps()
-            return
-        }
-        guard let drive = selected else { portingKitSay("Set up your game library first (Game library)."); return }
-        runBackendInBackground(["porting-kit-folder", "--root", drive.root]) { [weak self] code, data, errors in
-            guard let self else { return }
-            guard code == 0, let reply = try? JSONSerialization.jsonObject(with: data) as? [String: String], let path = reply["path"] else {
-                self.portingKitSay("Couldn't make the Porting Kit folder: " + backendErrorMessage(errors, fallback: "check Game library."))
-                return
-            }
-            NSPasteboard.general.clearContents()
-            NSPasteboard.general.setString(path, forType: .string)
-            if FinderSidebar.pin(URL(fileURLWithPath: path)) {
-                UserDefaults.standard.set(path, forKey: "portingKitPinnedFolder")
-                self.portingKitSay("\u{201C}Porting Kit\u{201D} is now at the top of the sidebar in Finder and in Porting Kit's folder dialog. In Porting Kit, choose Change for \u{201C}Applications default path\u{201D} and pick it, then choose Unpin Folder here.")
-            } else {
-                NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)])
-                self.portingKitSay("Path copied. In Porting Kit, choose Change for \u{201C}Applications default path\u{201D}, press \u{2318}\u{21E7}G, paste and press Return. New ports then appear in Play.")
-            }
-            self.renderApps()
-        }
-    }
-
-    /// Porting Kit folder messages show on the App Store page and in the Windows games guide, wherever it was clicked.
-    func portingKitSay(_ message: String) {
-        appsStatus.stringValue = message
-        windowsGuideStatus.stringValue = message
-        windowsGuideFolderButton.title = pinnedPortingKitFolder != nil ? "Unpin Folder" : "Games Folder"
     }
 
     @objc func openAppManagementSettings() {
@@ -462,7 +417,7 @@ extension SetupController {
         } else if item.downloaded, let file = item.file {
             let size = item.size.map { " \u{00B7} " + ByteCountFormatter.string(fromByteCount: $0, countStyle: .file) } ?? ""
             detail = text((file as NSString).lastPathComponent + size +
-                          " \u{00B7} Not run or installed. Open it with Porting Kit or CrossOver.", size: 11, secondary: true)
+                          " \u{00B7} Not run or installed. Open it with Sikarugir or CrossOver.", size: 11, secondary: true)
             detail.toolTip = file + (item.sha256.map { "\nSHA-256 \($0)" } ?? "")
         } else {
             detail = text("Official Windows installer from \(item.vendor) \u{00B7} Saved to Downloads in your game library",
@@ -545,13 +500,13 @@ extension SetupController {
         let alert = NSAlert()
         alert.messageText = "Running \(item.name)"
         alert.informativeText = "Couch Cube only downloaded the official installer. It doesn't run Windows programs.\n\n" +
-            "To install the launcher, open the installer with a Windows compatibility app such as Porting Kit or CrossOver " +
+            "To install the launcher, open the installer with a Windows compatibility app such as Sikarugir or CrossOver " +
             "(listed above under Windows games). Whether a launcher or game works depends on that app and its settings."
         alert.addButton(withTitle: "OK")
-        alert.addButton(withTitle: "Show Porting Kit & CrossOver")
+        alert.addButton(withTitle: "Show Sikarugir & CrossOver")
         let show = { (response: NSApplication.ModalResponse) in
             guard response == .alertSecondButtonReturn else { return }
-            self.highlightedAppID = "porting-kit"
+            self.highlightedAppID = "sikarugir"
             self.highlightAppRow()
         }
         if window.isVisible && window.attachedSheet == nil { alert.beginSheetModal(for: window, completionHandler: show) }
@@ -583,16 +538,7 @@ extension SetupController {
             slot.setAccessibilityLabel(appRowStatus(app, operation: operation, unknown: false, checking: false).title + " " + app.name)
             controls.addArrangedSubview(slot)
         } else {
-            if app.id == "porting-kit" && app.installed && selected != nil {
-                // Porting Kit asks where to put its ports; this makes the library folder and copies its path.
-                let pinned = pinnedPortingKitFolder != nil
-                let folder = button(pinned ? "Unpin Folder" : "Games Folder", #selector(preparePortingKitFolder))
-                folder.toolTip = pinned ? "Take the Porting Kit folder off Finder's sidebar"
-                    : "Create Couch Cube \u{203A} Windows \u{203A} Porting Kit and pin it to the top of Finder's sidebar for Porting Kit's Applications path"
-                folder.setAccessibilityIdentifier("portingKitFolder")
-                controls.addArrangedSubview(folder)
-            }
-            if app.id == "crossover" && app.installed {
+            if ["sikarugir", "crossover"].contains(app.id) && app.installed {
                 let open = button("Open", #selector(openCrossOver(_:)))
                 open.tag = index
                 controls.addArrangedSubview(open)
@@ -835,7 +781,7 @@ extension SetupController {
     func showAppInStore(_ id: String) {
         highlightedAppID = id
         let category = id == "steam" || id == "es-de" ? "TV menus" : computerGameApps.contains(id) ? "PC games" :
-            ["porting-kit", "crossover"].contains(id) ? "Windows games" : "Retro game emulators"
+            ["sikarugir", "crossover"].contains(id) ? "Windows games" : "Retro game emulators"
         if appStates.first(where: { $0.id == id })?.installed != true && collapsedAppCategories.contains(category),
            let toggle = appCategoryToggles[category] {
             toggleAppCategory(toggle)
@@ -847,7 +793,7 @@ extension SetupController {
     func highlightAppRow() {
         guard let id = highlightedAppID else { return }
         func find(_ view: NSView) -> NSView? {
-            if view.identifier?.rawValue == "app-row-" + id { return view }
+            if view.identifier?.rawValue == "app-row-" + id || view.identifier?.rawValue == "win-row-" + id { return view }
             for child in view.subviews { if let match = find(child) { return match } }
             return nil
         }
@@ -872,13 +818,14 @@ extension SetupController {
     }
 
     @objc func openCrossOver(_ sender: NSButton) {
-        guard appStates.indices.contains(sender.tag), appStates[sender.tag].id == "crossover",
+        guard appStates.indices.contains(sender.tag), ["sikarugir", "crossover"].contains(appStates[sender.tag].id),
               appStates[sender.tag].installed else { return }
+        let name = appStates[sender.tag].name
         NSWorkspace.shared.openApplication(at: URL(fileURLWithPath: appStates[sender.tag].path),
                                           configuration: NSWorkspace.OpenConfiguration()) { _, error in
             if let error = error {
                 DispatchQueue.main.async {
-                    self.appsStatus.stringValue = "Couldn't open CrossOver: \(error.localizedDescription)"
+                    self.appsStatus.stringValue = "Couldn't open \(name): \(error.localizedDescription)"
                     self.append(self.appsStatus.stringValue + "\n")
                 }
             }
