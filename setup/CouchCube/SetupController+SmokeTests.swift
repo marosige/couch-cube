@@ -348,7 +348,7 @@ extension SetupController {
                         self.renderApps()
                         self.renderTVMenus()
                         self.appsStatus.stringValue = "Installed versions. Updates are checked only when requested."
-                        precondition(Set(self.appStates.map { $0.id }) == Set(["steam", "gog-galaxy", "ea", "epic-games", "battle-net", "curseforge", "discord", "es-de", "retroarch-metal", "dolphin", "sikarugir", "crossover", "pcsx2", "rpcs3", "cemu-wiiu", "switch"]))
+                        precondition(Set(self.appStates.map { $0.id }) == Set(["steam", "gog-galaxy", "ea", "epic-games", "battle-net", "curseforge", "discord", "es-de", "retroarch-metal", "dolphin", "sikarugir", "crossover", "pcsx2", "rpcs3", "cemu-wiiu", "switch", "azahar", "xemu"]))
                         for app in self.appStates {
                             let iconURL = Bundle.main.resourceURL!.appendingPathComponent("AppIcons/\(app.id).png")
                             precondition(NSImage(contentsOf: iconURL) != nil, "Missing app icon: \(app.id)")
@@ -892,10 +892,10 @@ extension SetupController {
                     for (index, page) in self.sidebarPages.enumerated() where page < 0 {
                         precondition(!self.tableView(self.sidebar, shouldSelectRow: index), "Sidebar section headings must not navigate")
                     }
-                    precondition(self.systemSwitches.count == 18 && self.activeControllerRows.arrangedSubviews.count == 5)
-                    precondition(self.consoleRows.arrangedSubviews.count == 3,
-                                 "One card each for Nintendo, PlayStation and SEGA")
-                    precondition(self.consoleBulkToggles.map(\.scope) == ["Nintendo consoles", "PlayStation consoles", "SEGA consoles"],
+                    precondition(self.systemSwitches.count == 27 && self.activeControllerRows.arrangedSubviews.count == 5)
+                    precondition(self.consoleRows.arrangedSubviews.count == 4,
+                                 "One card each for Nintendo, PlayStation, SEGA and other systems")
+                    precondition(self.consoleBulkToggles.map(\.scope) == ["Nintendo consoles", "PlayStation consoles", "SEGA consoles", "Other consoles"],
                                  "One show/hide-all switch per manufacturer")
                     let readyBIOS = BIOSStatus(state: "present", summary: "", files: [])
                     for (enabled, installed, bios, expected) in [
@@ -1368,7 +1368,7 @@ extension SetupController {
                     precondition(self.consoleSystems.map { $0.id } == orderedSystems,
                                  "Systems must stay grouped and ordered by original release")
                     let artwork = orderedSystems.compactMap { ConsoleArtwork.image(for: $0).tiffRepresentation }
-                    precondition(artwork.count == 18 && Set(artwork).count == 18,
+                    precondition(artwork.count == 27 && Set(artwork).count == 27,
                                  "Every system must have distinct, renderable original artwork")
                     precondition(orderedSystems.allSatisfy { !ConsoleArtwork.image(for: $0).isTemplate },
                                  "Console artwork must preserve its hardware colors")
@@ -1929,7 +1929,7 @@ extension SetupController {
         let all = Set(consoleSystems.map(\.id))
         let nintendo = home.union(handheld).intersection(all)
         // One switch per manufacturer; no "all consoles" or sub-group switches.
-        precondition(consoleBulkToggles.map(\.scope) == ["Nintendo consoles", "PlayStation consoles", "SEGA consoles"])
+        precondition(consoleBulkToggles.map(\.scope) == ["Nintendo consoles", "PlayStation consoles", "SEGA consoles", "Other consoles"])
         precondition(bulk("Nintendo consoles").toggle.state == .off && !bulk("Nintendo consoles").count.isHidden &&
                      bulk("Nintendo consoles").count.stringValue == "\(home.count) of \(nintendo.count)", "Mixed groups show a count")
         precondition(bulk("Nintendo consoles").toggle.accessibilityLabel()?.contains("\(home.count) of \(nintendo.count) shown") == true)
@@ -1940,6 +1940,7 @@ extension SetupController {
         precondition(pendingEmulatorInstall == nil && pendingAppStoreID == nil, "Showing consoles never installs anything")
         press("PlayStation consoles")
         press("SEGA consoles")
+        press("Other consoles")
         precondition(current() == all && switchesMatch() && consoleBulkToggles.allSatisfy { $0.toggle.state == .on && $0.count.isHidden })
         // A group switch hides only its own systems.
         press("PlayStation consoles")
@@ -1963,6 +1964,7 @@ extension SetupController {
         // Hide everything, then fail: the last saved choices and the group states come back.
         press("Nintendo consoles")
         press("SEGA consoles")
+        press("Other consoles")
         precondition(current().isEmpty && consoleBulkToggles.allSatisfy { $0.toggle.state == .off && $0.count.isHidden })
         saveSystems()
         precondition(saves.count == 2 && saves[1].enabled.isEmpty)

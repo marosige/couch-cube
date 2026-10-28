@@ -303,7 +303,7 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
         }
     }
     static let appOrder = ["steam", "gog-galaxy", "ea", "epic-games", "battle-net", "curseforge", "discord", "es-de", "retroarch-metal", "dolphin",
-                           "pcsx2", "rpcs3", "cemu-wiiu", "switch", "sikarugir", "crossover"]
+                           "pcsx2", "rpcs3", "cemu-wiiu", "switch", "azahar", "xemu", "sikarugir", "crossover"]
     var appsChecking = false
     /// Startup preload of App Store data; runs in the background as soon as no other command is running.
     var appsPreloadPending = false
@@ -1116,7 +1116,7 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
     }
 
     let computerGameApps: Set<String> = ["steam", "gog-galaxy", "ea", "epic-games", "battle-net", "curseforge", "discord"]
-    let emulatorApps: Set<String> = ["retroarch-metal", "dolphin", "pcsx2", "rpcs3", "cemu-wiiu", "switch"]
+    let emulatorApps: Set<String> = ["retroarch-metal", "dolphin", "pcsx2", "rpcs3", "cemu-wiiu", "switch", "azahar", "xemu"]
 
     var overviewAppSummary: String {
         guard report != nil || !appStates.isEmpty else { return "Not checked" }
@@ -1202,6 +1202,8 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
             "rpcs3": "PlayStation 3",
             "cemu-wiiu": "Wii U",
             "switch": "Nintendo Switch",
+            "azahar": "Nintendo 3DS",
+            "xemu": "Xbox",
             "sikarugir": "Free \u{00B7} Runs Windows Steam and other launchers",
             "crossover": "Runs Windows games and stores \u{00B7} Paid, free trial"
     ]

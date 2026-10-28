@@ -34,6 +34,9 @@ xcrun swiftc -target arm64-apple-macos13.0 -swift-version 5 -module-cache-path "
 xcrun swiftc -target arm64-apple-macos13.0 -swift-version 5 -module-cache-path "$ROOT/build/module-cache" \
   -framework AppKit -framework GameController -framework IOKit \
   "$ROOT/setup/ConsoleAutoLaunch.swift" -o "$APP/Contents/MacOS/ConsoleAutoLaunch"
+xcrun swiftc -target arm64-apple-macos13.0 -swift-version 5 -module-cache-path "$ROOT/build/module-cache" \
+  -framework AppKit -framework GameController \
+  "$ROOT/setup/ControllerQuit.swift" -o "$APP/Contents/MacOS/ControllerQuit"
 cp "$ROOT/scripts/console.py" "$APP/Contents/Resources/scripts/console.py"
 cp "$ROOT/scripts/releases.py" "$APP/Contents/Resources/scripts/releases.py"
 cp "$ROOT/scripts/deals.py" "$APP/Contents/Resources/scripts/deals.py"

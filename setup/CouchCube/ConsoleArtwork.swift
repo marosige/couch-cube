@@ -11,11 +11,12 @@ import UniformTypeIdentifiers
 enum ConsoleArtwork {
     static let groups: [(title: String, systems: [String])] = [
         ("Nintendo home consoles", ["nes", "snes", "n64", "gc", "wii", "wiiu", "switch"]),
-        ("Nintendo handhelds", ["gb", "gbc", "gba"]),
+        ("Nintendo handhelds", ["gb", "gbc", "gba", "nds", "n3ds"]),
         ("PlayStation home consoles", ["psx", "ps2", "ps3"]),
         ("PlayStation handhelds", ["psp"]),
-        ("SEGA home consoles", ["megadrive", "segacd", "dreamcast"]),
-        ("SEGA handhelds", ["gamegear"])
+        ("SEGA home consoles", ["mastersystem", "megadrive", "segacd", "sega32x", "saturn", "dreamcast"]),
+        ("SEGA handhelds", ["gamegear"]),
+        ("Other home consoles", ["pcengine", "neogeo", "arcade", "xbox"])
     ]
 
     // Body colors follow each system's best-known retail edition. Very dark plastics are
@@ -38,6 +39,14 @@ enum ConsoleArtwork {
         case "megadrive", "segacd": colors = (0x232428, 0x5B5E66)
         case "gamegear": colors = (0x2B2C31, 0x666A73)
         case "dreamcast": colors = (0xEEEDE8, 0xF3F2EE)
+        case "nds": colors = (0xE3E4E8, 0xECEDEF)
+        case "n3ds": colors = (0x2E78C7, 0x5B9BE3)
+        case "mastersystem", "sega32x": colors = (0x1F2024, 0x585B63)
+        case "saturn": colors = (0xB9BBBF, 0xC8CACD)
+        case "pcengine": colors = (0xEAE8E3, 0xF1EFEB)
+        case "neogeo": colors = (0x2D2F34, 0x62666E)
+        case "arcade": colors = (0xB3282E, 0xE0494F)
+        case "xbox": colors = (0x2F7D32, 0x4CAF50)
         default: return .secondaryLabelColor
         }
         return InterfacePalette.adaptive("Console-\(id)", light: colors.0, dark: colors.1)
@@ -155,6 +164,15 @@ enum ConsoleArtwork {
             case "megadrive": solid(2, 8, 28, 18, 6)
             case "segacd": solid(2, 4, 28, 14, 4); solid(2, 20, 28, 9, 2)
             case "gamegear": solid(1, 7, 30, 18, 6)
+            case "nds": solid(6, 2, 20, 12, 2); solid(6, 17, 20, 13, 2)
+            case "n3ds": solid(5, 2, 22, 12, 2); solid(3, 16, 26, 13, 3)
+            case "mastersystem": solid(2, 9, 28, 15, 2)
+            case "sega32x": solid(8, 4, 16, 24, 2)
+            case "saturn": solid(2, 8, 28, 16, 5)
+            case "pcengine": solid(9, 9, 14, 14, 2)
+            case "neogeo": solid(1, 10, 30, 12, 3)
+            case "xbox": solid(5, 5, 22, 22, 11)
+            case "arcade": solid(7, 2, 18, 28, 2)
             case "dreamcast":
                 solid(3, 5, 26, 23, 4)
                 accent("orange").setFill()
@@ -263,6 +281,51 @@ enum ConsoleArtwork {
                 pad(5, 15)
                 dot(25, 13, 1.8)
                 dot(28, 16, 1.8)
+            case "nds":
+                box(6, 2, 20, 12)
+                box(9, 4, 14, 8, 1)
+                box(6, 17, 20, 13)
+                box(9, 19, 14, 8, 1)
+            case "n3ds":
+                box(5, 2, 22, 12)
+                box(8, 4, 16, 8, 1)
+                box(3, 16, 26, 13, 3)
+                pad(8, 22)
+                dot(24, 21)
+            case "mastersystem":
+                box(2, 9, 28, 15)
+                box(5, 12, 8, 6, 1)
+                stroke(17, 13, 26, 13)
+                stroke(17, 17, 26, 17)
+            case "sega32x":
+                box(8, 4, 16, 24)
+                stroke(11, 9, 21, 9)
+                stroke(11, 13, 21, 13)
+                dot(14, 22)
+            case "saturn":
+                box(2, 8, 28, 16, 5)
+                disc(7, 10, 10)
+                stroke(19, 12, 26, 12)
+                dot(24, 19)
+            case "pcengine":
+                box(9, 9, 14, 14)
+                stroke(12, 13, 20, 13)
+                dot(14, 17)
+            case "neogeo":
+                box(1, 10, 30, 12, 3)
+                box(4, 13, 9, 6, 1)
+                dot(21, 15)
+                dot(25, 15)
+            case "xbox":
+                box(5, 5, 22, 22, 11)
+                stroke(10, 10, 22, 22)
+                stroke(22, 10, 10, 22)
+            case "arcade":
+                box(7, 2, 18, 28)
+                box(10, 5, 12, 9, 1)
+                stroke(10, 19, 22, 19)
+                dot(13, 23)
+                dot(18, 23)
             case "segacd":
                 box(2, 4, 28, 14, 4)
                 disc(11, 6, 10)

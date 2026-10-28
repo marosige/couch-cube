@@ -2,9 +2,11 @@
 """Safe storage setup and launch backend for the native macOS setup app."""
 
 import argparse
+import contextlib
 import csv
 import hashlib
 import importlib.util
+import io
 import json
 import os
 from pathlib import Path
@@ -18,8 +20,11 @@ import subprocess
 import sys
 import tempfile
 import time
+import urllib.parse
+import urllib.request
 import uuid
 import xml.etree.ElementTree as ET
+import zipfile
 
 PROJECT = Path(__file__).resolve().parent.parent
 BIOS_MAP = PROJECT / ("Config" if Path(__file__).parent.name == "Runtime" else "config") / "bios-map.csv"
@@ -55,6 +60,8 @@ PACKAGES = {
     "rpcs3": "RPCS3.app",
     "cemu-wiiu": "Cemu.app",
     "switch": "Ryujinx.app",
+    "azahar": "Azahar.app",
+    "xemu": "xemu.app",
 }
 # Casks that live in a third-party tap are installed by their full name, which makes Homebrew add the tap itself.
 CASK_NAMES = {"sikarugir": "sikarugir-app/sikarugir/sikarugir"}
@@ -65,6 +72,7 @@ MANUAL_APPS = {
     "rpcs3": "https://rpcs3.net/download",
     "cemu-wiiu": "https://cemu.info/",
     "switch": None,
+    "azahar": "https://azahar-emu.org/",
 }
 # Folder names match ES-DE's macOS system definitions.
 SYSTEMS = {
@@ -86,11 +94,22 @@ SYSTEMS = {
     "ps2": ("PlayStation 2", "iso|chd|cso|bin", "pcsx2"),
     "ps3": ("PlayStation 3", "self|bin", "rpcs3"),
     "switch": ("Nintendo Switch", "nsp|xci|nca|nro|nso", "switch"),
+    "nds": ("Nintendo DS", "nds|zip|7z", "melonds"),
+    "n3ds": ("Nintendo 3DS", "3ds|3dsx|cci|cxi", "azahar"),
+    "mastersystem": ("Sega Master System", "sms|zip|7z", "genesis_plus_gx"),
+    "sega32x": ("Sega 32X", "32x|zip|7z", "picodrive"),
+    "saturn": ("Sega Saturn", "cue|chd|m3u|iso|ccd", "mednafen_saturn"),
+    "pcengine": ("PC Engine / TurboGrafx-16", "pce|sgx|cue|chd|m3u|zip|7z", "mednafen_pce"),
+    "neogeo": ("Neo Geo", "zip|7z", "fbneo"),
+    "arcade": ("Arcade", "zip|7z", "mame2003_plus"),
+    "xbox": ("Xbox", "iso|xiso", "xemu"),
 }
-STANDALONE = {"dolphin", "pcsx2", "rpcs3", "cemu-wiiu", "switch"}
+STANDALONE = {"dolphin", "pcsx2", "rpcs3", "cemu-wiiu", "switch", "azahar", "xemu"}
+# Systems that need a separate emulator app (or own BIOS) stay off until the player turns them on.
+DEFAULT_OFF = {"wiiu", "ps2", "ps3", "switch", "n3ds", "xbox"}
 
 def selected_systems(state):
-    selected = state.get("systems", [key for key in SYSTEMS if key not in {"wiiu", "ps2", "ps3", "switch"}])
+    selected = state.get("systems", [key for key in SYSTEMS if key not in DEFAULT_OFF])
     if (not isinstance(selected, list) or any(not isinstance(item, str) or item not in SYSTEMS for item in selected)
             or len(set(selected)) != len(selected)):
         raise SetupError("Invalid console selection in the library manifest.")
@@ -1051,6 +1070,9 @@ def generated_files(storage, registrations, systems=None):
             b'savefiles_in_content_dir = "false"\n'
             b'savestates_in_content_dir = "false"\n', False),
     }
+    quit_helper = PROJECT.parent / "MacOS/ControllerQuit"
+    if quit_helper.is_file():
+        files["Runtime/ControllerQuit"] = (quit_helper.read_bytes(), True)
     if systems is not None:
         for system in SYSTEMS:
             if system not in systems and storage.read_path("ROMs/" + system).is_dir():
@@ -1155,17 +1177,24 @@ def bios_status(storage, system):
         elif system == "dreamcast":
             state = "present" if present == len(files) else "optional"
             message = "BIOS filenames found" if present == len(files) else "Optional BIOS files missing · HLE available"
+        elif system in {"nds", "pcengine"}:
+            state = "present" if present == len(files) else "optional"
+            message = "BIOS filenames found" if present == len(files) else "Optional BIOS files missing · most games run without"
+        elif system == "saturn":
+            state = "present" if present else "missing"
+            message = "Saturn BIOS found" if present else "Saturn BIOS missing · one regional file is enough"
         else:
             state = "present" if present == len(files) else "partial" if present else "missing"
             message = f"{present}/{len(files)} regional BIOS files found" if present else "Regional BIOS files missing"
         return {"state": state, "summary": message, "files": files}
-    if system in {"ps2", "ps3", "switch"}:
+    if system in {"ps2", "ps3", "switch", "xbox"}:
         rows = emulator_setup_tools().bios_files(storage.root, system)
         if rows and all(row["present"] for row in rows):
             return {"state": "present", "summary": "Your files are in the library; installed on first launch", "files": rows}
         return {"state": "manual", "summary": "Put your PS2 BIOS in BIOS/ps2" if system == "ps2" else
                 "Put PS3UPDAT.PUP in BIOS/ps3" if system == "ps3" else
-                "Put prod.keys and the firmware .zip in BIOS/switch", "files": []}
+                "Put prod.keys and the firmware .zip in BIOS/switch" if system == "switch" else
+                "Put the Xbox BIOS files in BIOS/xbox", "files": []}
     return {"state": "not-needed", "summary": "No BIOS file required for the configured emulator",
             "files": []}
 
@@ -1239,6 +1268,8 @@ def systems_status(storage=None):
                              "Your own PS2 BIOS. Current Homebrew build may require Rosetta." if key == "ps2" else
                              "Your own games; configure controllers in Cemu." if key == "wiiu" else
                              "Dolphin; configure controllers in the emulator." if core == "dolphin" else
+                             "Azahar (3DS). Install it from its website, then Couch Cube starts it." if core == "azahar" else
+                             "xemu. Needs your own Xbox BIOS files and XISO game images." if core == "xemu" else
                              f"RetroArch core: {core}. Some systems need your own BIOS.")}
             for key, (name, _, core) in SYSTEMS.items()]
     if storage:
@@ -1266,7 +1297,7 @@ def initialize(storage, systems=None):
     folders = [
         "SteamLibrary", "ROMs", "BIOS/retroarch/dc",
         "Saves/RetroArch/States", "Saves/Dolphin", "Saves/Native",
-        "BIOS/ps2", "BIOS/ps3", "BIOS/switch", "Saves/Windows",
+        "BIOS/ps2", "BIOS/ps3", "BIOS/switch", "BIOS/xbox", "Saves/Windows",
         "Native/Games", "Native/Assets", "Windows/Wrappers", "Windows/Installers", "Windows/Porting Kit",
         "Frontend", "Config", "Runtime", "Launchers",
     ]
@@ -2440,6 +2471,64 @@ def library_games(storage, home=None):
     return {"roms": roms, "apps": apps}
 
 
+CORE_URL = "https://buildbot.libretro.com/nightly/apple/osx/arm64/latest/{core}_libretro.dylib.zip"
+CORE_HOST = "buildbot.libretro.com"
+MAX_CORE_BYTES = 200 << 20
+
+
+class _NoRedirects(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, *args, **kwargs):
+        return None
+
+
+def install_core(core, destination):
+    """Download one RetroArch core from libretro's own build server (https only, that host only, size-limited)."""
+    if core not in {entry[2] for entry in SYSTEMS.values()} or not re.fullmatch(r"[a-z0-9_]+", core):
+        raise SetupError("Unknown RetroArch core.")
+    member = core + "_libretro.dylib"
+    url = CORE_URL.format(core=core)
+    parts = urllib.parse.urlsplit(url)
+    if parts.scheme != "https" or parts.hostname != CORE_HOST:
+        raise SetupError("Core downloads are limited to libretro's build server.")
+    print(f"Downloading RetroArch core: {core}", file=sys.stderr, flush=True)
+    try:
+        opener = urllib.request.build_opener(_NoRedirects)
+        with opener.open(urllib.request.Request(url, headers={"User-Agent": "CouchCube"}), timeout=60) as reply:
+            data = reply.read(MAX_CORE_BYTES + 1)
+        if len(data) > MAX_CORE_BYTES:
+            raise SetupError("The core download is unexpectedly large; nothing was saved.")
+        with zipfile.ZipFile(io.BytesIO(data)) as archive:
+            info = archive.getinfo(member)
+            if info.file_size > MAX_CORE_BYTES:
+                raise SetupError("The core file is unexpectedly large; nothing was saved.")
+            payload = archive.read(info)
+    except (OSError, ValueError, KeyError, zipfile.BadZipFile) as exc:
+        raise SetupError(f"Couldn't download core {member} ({exc}). Install it in RetroArch > Online Updater > Core Downloader.")
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile(dir=destination.parent, delete=False) as temp:
+        temp.write(payload)
+    os.chmod(temp.name, 0o755)
+    os.replace(temp.name, destination)
+
+
+@contextlib.contextmanager
+def controller_quit(storage, binary):
+    """While a game runs, holding Select + Start on any controller for two seconds quits the emulator (many
+    standalone emulators have no controller hotkey for it). Skipped quietly when the helper isn't in the library."""
+    helper = storage.root / "Runtime/ControllerQuit"
+    watcher = None
+    if helper.is_file() and not helper.is_symlink() and os.access(helper, os.X_OK):
+        try:
+            watcher = subprocess.Popen([str(helper), "--binary", str(binary)])
+        except OSError:
+            watcher = None
+    try:
+        yield
+    finally:
+        if watcher is not None:
+            watcher.terminate()
+
+
 def emulate(storage, system, rom):
     if system not in SYSTEMS:
         raise SetupError("Unknown emulation system.")
@@ -2461,16 +2550,19 @@ def emulate(storage, system, rom):
         flags = {"pcsx2": ["-fullscreen", "-batch", str(path)],
                  "rpcs3": ["--no-gui", str(path)],
                  "cemu-wiiu": ["-f", "-g", str(path)],
-                 "switch": ["-f", str(path)]}
+                 "switch": ["-f", str(path)],
+                 "azahar": ["-f", str(path)],
+                 "xemu": ["-full-screen", "-dvd_path", str(path)]}
         args = [str(binary)] + flags[core]
     else:
         binary = app_binary("RetroArch.app")
         core_path = Path.home() / "Library/Application Support/RetroArch/cores" / (core + "_libretro.dylib")
         if not core_path.is_file():
-            raise SetupError(f"Missing core: {core_path.name}. Install it in RetroArch > Online Updater > Core Downloader.")
+            install_core(core, core_path)
         args = [str(binary), "-L", str(core_path), "--appendconfig",
                 str(storage.root / "Config/retroarch-console.cfg"), str(path)]
-    run(args)
+    with controller_quit(storage, args[0]):
+        run(args)
 
 
 def vdf_value(text, key):

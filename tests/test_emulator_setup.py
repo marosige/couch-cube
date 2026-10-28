@@ -97,6 +97,20 @@ class EmulatorSetupTests(unittest.TestCase):
             self.assertIn(f"SIDevice{port} = 6", ini)
         self.assertEqual(setup.prepare("dolphin", self.library, self.home, state=state), [])
 
+    def test_xemu_gets_xbox_files_and_config_once(self):
+        self.assertTrue(any("missing" in note for note in setup.prepare("xemu", self.library, self.home, state={})))
+        for name in setup.XBOX_FILES.values():
+            self.put("BIOS/xbox/" + name)
+        state = {}
+        setup.prepare("xemu", self.library, self.home, state=state)
+        data = self.home / "Library/Application Support/xemu/xemu"
+        toml = (data / "xemu.toml").read_text()
+        self.assertIn("[sys.files]", toml)
+        self.assertIn("bootrom_path = '" + str(data / "mcpx_1.0.bin") + "'", toml)
+        self.assertTrue((data / "xbox_hdd.qcow2").is_file())
+        self.assertEqual(state, {"xemu": 1})
+        self.assertEqual(setup.prepare("xemu", self.library, self.home, state=state), [])
+
     def test_bios_rows_reflect_drop_folders(self):
         self.assertFalse(setup.bios_files(self.library, "ps3")[0]["present"])
         self.put("BIOS/ps3/ps3updat.pup")

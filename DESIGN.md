@@ -508,6 +508,17 @@ backed up (`.couchcube-backup`) and later launches never touch it again.
 Controller mapping for Dolphin, RPCS3 and Ryujinx is still done in the emulator.
 Only file presence is checked, not contents, hashes or authenticity. No BIOS is
 downloaded; supply only your own legally obtained dumps.
+More systems: Nintendo DS (melonDS), Nintendo 3DS (Azahar, installed from its website), Sega Master
+System, 32X and Saturn (Beetle Saturn needs one regional BIOS), PC Engine, Neo Geo and Arcade
+(FinalBurn Neo, MAME 2003-Plus) and Xbox (xemu, Homebrew; drop `mcpx_1.0.bin`, `Complex_4627v1.03.bin`
+and `xbox_hdd.qcow2` into `BIOS/xbox`). Console cards group them under Nintendo, SEGA and "Other".
+Azahar and xemu start off. A RetroArch core that is missing is downloaded on the first launch from
+libretro's own build server (`buildbot.libretro.com`, https only, no redirects, 200 MB limit, only the
+expected `<core>_libretro.dylib` is taken from the zip); if that fails the old hint to use RetroArch's
+Core Downloader is shown.
+**Quit with the controller:** while a game runs, holding Select + Start on any controller for two seconds
+closes the emulator and returns to the TV menu (`ControllerQuit`, copied into the library's `Runtime`),
+because Cemu, Ryujinx and Azahar have no controller hotkey for it.
 Console rows show independent emulator and BIOS indicators. The emulator dot is
 gray when hidden or unknown, green when installed, red when not installed, and
 yellow with an explicit **Update available** label when a known managed update is

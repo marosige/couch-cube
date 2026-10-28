@@ -309,7 +309,9 @@ class StorageTests(unittest.TestCase):
         rom.write_bytes(b"test")
         with patch.object(console, "app_binary", return_value=Path("/Applications/RetroArch.app/Contents/MacOS/RetroArch")), \
                 patch.object(Path, "home", return_value=self.base / "empty-home"):
-            with self.assertRaisesRegex(console.SetupError, "Core Downloader"):
+            with patch.object(console, "install_core", side_effect=console.SetupError(
+                    "Couldn't download core. Install it in RetroArch > Online Updater > Core Downloader.")), \
+                    self.assertRaisesRegex(console.SetupError, "Core Downloader"):
                 console.emulate(self.storage, "nes", str(rom))
 
     def test_dolphin_userdata_and_rom_argument(self):
@@ -369,12 +371,12 @@ class StorageTests(unittest.TestCase):
         result = subprocess.run(["bash", str(project / "scripts/check-bios.sh")], env=env, capture_output=True, text=True)
         self.assertEqual(result.returncode, 2)
         self.assertEqual(result.stdout.count("[OPTIONAL ALTERNATIVE]"), 5)
-        self.assertEqual(result.stdout.count("[OPTIONAL]"), 2)
-        self.assertEqual(result.stdout.count("[REGION NOT FOUND]"), 3)
-        self.assertIn("Total missing required BIOS groups: 1", result.stdout)
+        self.assertEqual(result.stdout.count("[OPTIONAL]"), 6)
+        self.assertEqual(result.stdout.count("[REGION NOT FOUND]"), 5)
+        self.assertIn("Total missing required BIOS groups: 2", result.stdout)
         bios = project / "BIOS"
         (bios / "dc").mkdir(parents=True)
-        for name in ["scph1001.bin", "dc/dc_boot.bin", "dc/dc_flash.bin", "bios_CD_U.bin"]:
+        for name in ["scph1001.bin", "dc/dc_boot.bin", "dc/dc_flash.bin", "bios_CD_U.bin", "mpr-17933.bin"]:
             (bios / name).write_bytes(b"fixture")
         result = subprocess.run(["bash", str(project / "scripts/check-bios.sh")], env=env, capture_output=True, text=True)
         self.assertEqual(result.returncode, 0)
@@ -435,3 +437,60 @@ class WindowsAndChatAppTests(unittest.TestCase):
         self.assertEqual([call.args[0] for call in run.call_args_list[1:]],
                          [["/brew", "install", "--cask", "sikarugir-app/sikarugir/sikarugir"],
                           ["/brew", "install", "--cask", "discord"]])
+
+
+class CoreDownloadTests(unittest.TestCase):
+    def make_zip(self, name, payload=b"core"):
+        import zipfile as zf
+        buffer = io.BytesIO()
+        with zf.ZipFile(buffer, "w") as archive:
+            archive.writestr(name, payload)
+        return buffer.getvalue()
+
+    def reply(self, data):
+        stream = io.BytesIO(data)
+        stream.__enter__ = lambda *a: stream
+        return stream
+
+    def test_core_comes_from_libretro_buildbot_and_is_installed_executable(self):
+        with tempfile.TemporaryDirectory() as temp:
+            target = Path(temp) / "cores/fbneo_libretro.dylib"
+            opener = unittest.mock.MagicMock()
+            opener.open.return_value.__enter__.return_value = io.BytesIO(self.make_zip("fbneo_libretro.dylib"))
+            with patch.object(console.urllib.request, "build_opener", return_value=opener):
+                console.install_core("fbneo", target)
+            self.assertEqual(target.read_bytes(), b"core")
+            self.assertTrue(os.access(target, os.X_OK))
+            request = opener.open.call_args.args[0]
+            self.assertEqual(request.full_url,
+                             "https://buildbot.libretro.com/nightly/apple/osx/arm64/latest/fbneo_libretro.dylib.zip")
+
+    def test_unknown_core_and_wrong_archive_member_are_refused(self):
+        with tempfile.TemporaryDirectory() as temp:
+            with self.assertRaises(console.SetupError):
+                console.install_core("../evil", Path(temp) / "x")
+            opener = unittest.mock.MagicMock()
+            opener.open.return_value.__enter__.return_value = io.BytesIO(self.make_zip("other.dylib"))
+            with patch.object(console.urllib.request, "build_opener", return_value=opener), \
+                    self.assertRaisesRegex(console.SetupError, "Core Downloader"):
+                console.install_core("fbneo", Path(temp) / "x")
+            self.assertFalse((Path(temp) / "x").exists())
+
+    def test_controller_quit_helper_runs_only_while_the_game_runs(self):
+        with tempfile.TemporaryDirectory() as temp:
+            storage = unittest.mock.MagicMock()
+            storage.root = Path(temp)
+            (Path(temp) / "Runtime").mkdir()
+            helper = Path(temp) / "Runtime/ControllerQuit"
+            helper.write_text("#!/bin/sh\n")
+            helper.chmod(0o755)
+            with patch.object(console.subprocess, "Popen") as popen:
+                with console.controller_quit(storage, "/emu"):
+                    popen.assert_called_once_with([str(helper), "--binary", "/emu"])
+                    popen.return_value.terminate.assert_not_called()
+                popen.return_value.terminate.assert_called_once()
+            helper.unlink()
+            with patch.object(console.subprocess, "Popen") as popen:
+                with console.controller_quit(storage, "/emu"):
+                    pass
+                popen.assert_not_called()

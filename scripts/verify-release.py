@@ -69,6 +69,9 @@ def verify_app(app, working_directory, distribution="local"):
     helper = app / "Contents/MacOS/ConsoleAutoLaunch"
     assert helper.is_file()
     run([str(helper), "--self-test"], cwd=working_directory)
+    quit_helper = app / "Contents/MacOS/ControllerQuit"
+    assert quit_helper.is_file()
+    run([str(quit_helper), "--self-test"], cwd=working_directory)
     run(["/bin/bash", "-n", str(resources / "Install Homebrew.command")])
     python = resources / "python/bin/python3"
     run(["/usr/bin/codesign", "--verify", "--deep", "--strict", str(app)])

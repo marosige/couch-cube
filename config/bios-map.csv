@@ -9,3 +9,9 @@ dreamcast,dc/dc_flash.bin,Flycast flash; see core documentation
 segacd,bios_CD_U.bin,Genesis Plus GX US BIOS; other regions use different names
 segacd,bios_CD_E.bin,Genesis Plus GX European games BIOS; only needed for this region
 segacd,bios_CD_J.bin,Genesis Plus GX Japanese games BIOS; only needed for this region
+saturn,sega_101.bin,Beetle Saturn Japanese BIOS; one regional BIOS is enough
+saturn,mpr-17933.bin,Beetle Saturn US/EU BIOS; one regional BIOS is enough
+pcengine,syscard3.pce,Beetle PCE System Card 3; only needed for CD games
+nds,bios7.bin,melonDS optional ARM7 BIOS; most games run without
+nds,bios9.bin,melonDS optional ARM9 BIOS; most games run without
+nds,firmware.bin,melonDS optional firmware; most games run without
