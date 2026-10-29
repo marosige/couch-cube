@@ -671,3 +671,10 @@ per-file copy pills stay, and **Copy all filenames** copies every missing name o
 
 The two actions are one button that reads **Start Gaming Session** or **End Gaming Session** depending on whether a session is
 running (same in the Cube TV menu, below the divider).
+
+### Cube TV uses macOS's own full screen
+
+Cube TV (and a web app's window) is an ordinary macOS window that enters native full screen, like the green button does:
+its own Space, the Dock and menu bar tuck away, ⌘Tab, Mission Control, ⌘W and ⌘Q keep working, and the green button leaves
+full screen. Earlier builds used a custom borderless overlay above everything, which could trap the screen; it is gone.
+Ways out of Cube TV: the power menu → Switch to Desktop, ⌘W, ⌘Q, or the green button. The mouse pointer hides until it moves.
