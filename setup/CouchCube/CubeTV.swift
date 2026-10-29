@@ -396,10 +396,11 @@ final class CubeTVController {
         tv.contentView = NSHostingView(rootView: CubeTVView(model: model))
         tv.setFrame(screen.frame, display: true)
         window = tv
-        NSApp.presentationOptions = [.hideDock, .hideMenuBar]
         NSCursor.hide()
         NSApp.activate(ignoringOtherApps: true)
         tv.makeKeyAndOrderFront(nil)
+        tv.orderFrontRegardless()
+        NSApp.presentationOptions = [.hideDock, .hideMenuBar]
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             self?.handle(event) == true ? nil : event
         }
@@ -429,6 +430,7 @@ final class CubeTVController {
         model.page = .home
         NSApp.activate(ignoringOtherApps: true)
         window?.makeKeyAndOrderFront(nil)
+        window?.orderFrontRegardless()
     }
 
     /// A web app took over the controllers while it was open; take them back.

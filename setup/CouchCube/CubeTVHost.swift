@@ -199,7 +199,8 @@ extension SetupController {
         }
     }
 
-    /// The controller's Home button: Cube TV comes back, whatever is in front. Needs the system's own Home gesture off.
+    /// The controller's Home button (or a quick tap of Select + Start) brings Cube TV back, whatever is in front.
+    /// Handlers fire at once; a 0.1 s poll catches presses the handlers miss, the way the in-game quit helper reads pads.
     func startHomeWatcher() {
         guard !homeWatcherStarted else { return }
         homeWatcherStarted = true
@@ -208,16 +209,56 @@ extension SetupController {
         NotificationCenter.default.addObserver(forName: .GCControllerDidConnect, object: nil, queue: .main) { [weak self] note in
             if let pad = note.object as? GCController { self?.bindHome(pad) }
         }
+        homeTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in self?.pollHome() }
     }
 
     private func bindHome(_ pad: GCController) {
         guard let home = pad.extendedGamepad?.buttonHome else { return }
         home.preferredSystemGestureState = .disabled
         home.pressedChangedHandler = { [weak self] _, _, pressed in
-            guard pressed, let self else { return }
-            self.cubeTV.host = self
-            self.cubeTV.goHome()
+            if pressed { self?.homePressed("Home button") }
         }
+    }
+
+    private func pollHome() {
+        var homeDown = false
+        var comboDown = false
+        for pad in GCController.controllers() {
+            guard let gamepad = pad.extendedGamepad else { continue }
+            if gamepad.buttonHome?.isPressed == true { homeDown = true }
+            if gamepad.buttonOptions?.isPressed == true && gamepad.buttonMenu.isPressed { comboDown = true }
+        }
+        if homeDown && !homeWasDown { homePressed("Home button") }
+        homeWasDown = homeDown
+        if comboDown {
+            if comboStart == nil { comboStart = Date() }
+        } else if let start = comboStart {
+            comboStart = nil
+            // A quick tap goes home; holding for two seconds is the in-game quit and is left alone.
+            if Date().timeIntervalSince(start) < 0.8 { homePressed("Select + Start") }
+        }
+        renderHomeStatus()
+    }
+
+    func homePressed(_ source: String) {
+        homeLast = (Date(), source)
+        guard Date().timeIntervalSince(homeFiredAt) > 1 else { return }
+        homeFiredAt = Date()
+        cubeTV.host = self
+        cubeTV.goHome()
+    }
+
+    func renderHomeStatus() {
+        let pads = GCController.controllers()
+        let hasHome = pads.contains { $0.extendedGamepad?.buttonHome != nil }
+        var line = pads.isEmpty ? "No controller connected."
+            : hasHome ? "Home button found on your controller." : "Your controller reports no Home button; tap Select + Start instead."
+        if let last = homeLast {
+            line += " Last: \(last.1) at \(DateFormatter.localizedString(from: last.0, dateStyle: .none, timeStyle: .medium))."
+        } else if !pads.isEmpty {
+            line += " Press it to test: nothing seen yet."
+        }
+        if homeStatus.stringValue != line { homeStatus.stringValue = line }
     }
 
     /// Keeps the Play tile and the running list current, and brings Cube TV back when the last game closes.
