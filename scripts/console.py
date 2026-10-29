@@ -1073,10 +1073,6 @@ def generated_files(storage, registrations, systems=None):
     quit_helper = PROJECT.parent / "MacOS/ControllerQuit"
     if quit_helper.is_file():
         files["Runtime/ControllerQuit"] = (quit_helper.read_bytes(), True)
-    if systems is not None:
-        for system in SYSTEMS:
-            if system not in systems and storage.read_path("ROMs/" + system).is_dir():
-                files[f"ROMs/{system}/noload.txt"] = (b"Disabled by Couch Cube. Re-enable in Consoles.\n", False)
     files["Config/steam-shortcuts.txt"] = (
         ("Steam > Games > Add a Non-Steam Game > Browse. Add these .app bundles:\n\n"
          + "\n".join(str(root / "Launchers" / (name + ".app")) for name in
@@ -1150,43 +1146,52 @@ def refresh_generated(storage, state):
         storage.write("Frontend/ES-DE/settings/es_settings.xml", settings)
     storage.check()
 
-def _bios_files(folder):
-    """Real files in a BIOS folder; Finder's .DS_Store does not count."""
+LEGACY_NOLOAD = b"Disabled by Couch Cube. Re-enable in Consoles.\n"
+JUNK_FILES = {".DS_Store", "noload.txt"}
+
+
+def _real_files(folder):
+    """Real files in a console folder; Finder's .DS_Store and the old noload.txt marker do not count."""
     found = []
     for directory, _, names in os.walk(folder, followlinks=False):
-        found += [Path(directory) / name for name in names if name != ".DS_Store"]
+        found += [Path(directory) / name for name in names if name not in JUNK_FILES]
     return found
 
 
 def _remove_empty_tree(folder):
-    """Removes a folder that holds no files, bottom-up with rmdir only: a file can never be deleted this way."""
+    """Removes a folder that holds no real files, bottom-up with rmdir only: a user's file can never be deleted this way."""
     for directory, _, names in os.walk(folder, topdown=False, followlinks=False):
-        if ".DS_Store" in names:
-            os.unlink(Path(directory) / ".DS_Store")
+        for name in names:
+            if name in JUNK_FILES:
+                os.unlink(Path(directory) / name)
         os.rmdir(directory)
 
 
-def sync_bios_folders(storage, enabled):
-    """One BIOS folder per shown console (BIOS/<console>). A console you hide keeps its BIOS files: the folder gets a
-    leading dot (hidden in Finder) and returns when the console is shown again. A hidden console's folder with no
-    BIOS files in it is removed."""
+def sync_console_folders(storage, base, enabled):
+    """One folder per shown console under ROMs/ or BIOS/. A console you hide keeps its files: the folder gets a leading
+    dot (hidden in Finder, and ES-DE skips it) and returns when the console is shown again. A hidden console's folder
+    with no files in it is removed. Needs no marker files."""
     enabled = set(enabled)
     for system in SYSTEMS:
-        visible = storage.read_path("BIOS/" + system)
-        hidden = storage.read_path("BIOS/." + system)
+        visible = storage.read_path(f"{base}/{system}")
+        hidden = storage.read_path(f"{base}/.{system}")
+        for folder in (visible, hidden):
+            marker = folder / "noload.txt"
+            if folder.is_dir() and marker.is_file() and not marker.is_symlink() and marker.read_bytes() == LEGACY_NOLOAD:
+                storage.target(str(marker.relative_to(storage.root))).unlink()
         if system in enabled:
             if hidden.is_dir() and not visible.exists():
-                os.rename(storage.target("BIOS/." + system), storage.target("BIOS/" + system))
+                os.rename(storage.target(f"{base}/.{system}"), storage.target(f"{base}/{system}"))
             elif not visible.exists():
-                storage.mkdir("BIOS/" + system)
+                storage.mkdir(f"{base}/{system}")
             continue
         if visible.is_dir() and not visible.is_symlink():
-            if not _bios_files(visible):
-                _remove_empty_tree(storage.target("BIOS/" + system))
+            if not _real_files(visible):
+                _remove_empty_tree(storage.target(f"{base}/{system}"))
             elif not hidden.exists():
-                os.rename(storage.target("BIOS/" + system), storage.target("BIOS/." + system))
-        if hidden.is_dir() and not hidden.is_symlink() and not _bios_files(hidden):
-            _remove_empty_tree(storage.target("BIOS/." + system))
+                os.rename(storage.target(f"{base}/{system}"), storage.target(f"{base}/.{system}"))
+        if hidden.is_dir() and not hidden.is_symlink() and not _real_files(hidden):
+            _remove_empty_tree(storage.target(f"{base}/.{system}"))
 
 
 def sync_system_bios(storage, system):
@@ -1212,10 +1217,8 @@ def select_systems(storage, systems):
         raise SetupError("Unknown or duplicate console selection.")
     state = read_json(storage.target(MARKER))
     state["systems"] = systems
-    for system in systems:
-        if not storage.read_path("ROMs/" + system).is_dir():
-            storage.mkdir("ROMs/" + system)
-    sync_bios_folders(storage, systems)
+    sync_console_folders(storage, "ROMs", systems)
+    sync_console_folders(storage, "BIOS", systems)
     refresh_generated(storage, state)
     print("Console selection saved. Existing ROMs and saves were kept.", flush=True)
 
@@ -1360,10 +1363,10 @@ def initialize(storage, systems=None):
         "Native/Games", "Native/Assets", "Windows/Wrappers", "Windows/Installers", "Windows/Porting Kit",
         "Frontend", "Config", "Runtime", "Launchers",
     ]
-    folders += ["ROMs/" + system for system in selected_systems(state)]
     for folder in folders:
         storage.mkdir(folder)
-    sync_bios_folders(storage, selected_systems(state))
+    sync_console_folders(storage, "ROMs", selected_systems(state))
+    sync_console_folders(storage, "BIOS", selected_systems(state))
     refresh_generated(storage, state)
     if template:
         storage.target(SSD_TEMPLATE).unlink()
@@ -2607,12 +2610,12 @@ def emulate(storage, system, rom):
         raise SetupError("Unknown emulation system.")
     path = Path(rom).absolute()
     reject_symlinks(path)
-    if not path.is_relative_to(storage.root / "ROMs" / system) or not path.is_file():
-        raise SetupError("ROM must be a file in the selected system's ROM folder.")
     core = SYSTEMS[system][2]
     enabled = selected_systems(read_json(storage.target(MARKER)))
     if system not in enabled:
         raise SetupError("This console is disabled. Enable it in Couch Cube > Consoles.")
+    if not path.is_relative_to(storage.root / "ROMs" / system) or not path.is_file():
+        raise SetupError("ROM must be a file in the selected system's ROM folder.")
     if core in STANDALONE:
         prepare_emulator(storage, core, app_binary(PACKAGES[core]))
     if core == "dolphin":
