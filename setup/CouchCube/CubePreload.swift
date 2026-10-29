@@ -1,6 +1,6 @@
 import AppKit
 
-/// Preload manager: launchers and emulators that open hidden before game night and close afterwards.
+/// Preload manager: launchers and emulators that open hidden before gaming session and close afterwards.
 extension SetupController {
     var preloadPaths: [String] {
         get {
@@ -30,17 +30,20 @@ extension SetupController {
             stack.alignment = .leading
             stack.spacing = 8
         }
-        let auto = NSButton(checkboxWithTitle: "Start game night when Couch Cube opens", target: self, action: #selector(preloadAutoChanged(_:)))
+        sessionButton.bezelStyle = .rounded
+        sessionButton.target = self
+        sessionButton.action = #selector(toggleGamingSessionClicked)
+        updateSessionButton()
+        let auto = NSButton(checkboxWithTitle: "Start gaming session when Couch Cube opens", target: self, action: #selector(preloadAutoChanged(_:)))
         auto.state = UserDefaults.standard.bool(forKey: Self.preloadAutoKey) ? .on : .off
-        let note = text("Preloaded apps stay open in the background and use some memory and power. Close them when game night is over, or when a demanding game is lagging.",
+        let note = text("Preloaded apps stay open in the background and use some memory and power. Close them when gaming session is over, or when a demanding game is lagging.",
                         size: 11, secondary: true)
         let focusNote = text("Gaming Focus: create a Shortcut with the \u{201C}Set Focus\u{201D} action (for example Gaming, which macOS includes) "
-                             + "and type its name here. It runs when game night starts; a second Shortcut can switch the Focus off when it ends.",
+                             + "and type its name here. It runs when gaming session starts; a second Shortcut can switch the Focus off when it ends.",
                              size: 11, secondary: true)
         renderPreload()
         return column([preloadList,
-                       row([button("Add App\u{2026}", #selector(addPreloadApp)), button("Start Game Night", #selector(startGameNightClicked)),
-                            button("End Game Night", #selector(endGameNightClicked))]),
+                       row([button("Add App\u{2026}", #selector(addPreloadApp)), sessionButton]),
                        auto, note,
                        focusRow("Focus on", key: Self.focusOnKey, placeholder: "Shortcut name, e.g. Gaming Focus On"),
                        focusRow("Focus off", key: Self.focusOffKey, placeholder: "Shortcut name (optional)"),
@@ -63,7 +66,12 @@ extension SetupController {
         UserDefaults.standard.set(sender.stringValue.trimmingCharacters(in: .whitespaces), forKey: key)
     }
 
+    func updateSessionButton() {
+        sessionButton.title = gamingSessionActive ? "End Gaming Session" : "Start Gaming Session"
+    }
+
     func renderPreload() {
+        updateSessionButton()
         clearRows(preloadList)
         let paths = preloadPaths
         if paths.isEmpty {
@@ -97,7 +105,7 @@ extension SetupController {
             }
         }
         clearRows(runningList)
-        let heading = text("Running now \u{00B7} tick the apps that should always close when game night starts", size: 13)
+        let heading = text("Running now \u{00B7} tick the apps that should always close when gaming session starts", size: 13)
         heading.font = .systemFont(ofSize: 13, weight: .semibold)
         runningList.addArrangedSubview(heading)
         let saved = quitAtStart
@@ -127,7 +135,7 @@ extension SetupController {
             let spacer = NSView()
             spacer.setContentHuggingPriority(.init(1), for: .horizontal)
             runningList.addArrangedSubview(row([iconView(url.map { NSWorkspace.shared.icon(forFile: $0.path) } ?? NSImage()), text(name),
-                                                text("Always quits at game night", size: 12, secondary: true), spacer, remove]))
+                                                text("Always quits at gaming session", size: 12, secondary: true), spacer, remove]))
         }
         runningList.addArrangedSubview(button("Add App to Quit\u{2026}", #selector(addQuitAtStart)))
     }
@@ -161,7 +169,7 @@ extension SetupController {
 
     @objc func addQuitAtStart() {
         let panel = NSOpenPanel()
-        panel.title = "Choose apps to quit when game night starts"
+        panel.title = "Choose apps to quit when gaming session starts"
         panel.prompt = "Add"
         panel.allowedContentTypes = [.application]
         panel.allowsMultipleSelection = true
@@ -176,20 +184,34 @@ extension SetupController {
         renderPreload()
     }
 
-    /// Game night starts: the apps saved to quit close, the preload apps open hidden, and the Focus Shortcut runs.
-    func startGameNight() {
+    /// Gaming session starts: the apps saved to quit close, the preload apps open hidden, and the Focus Shortcut runs.
+    func startGamingSession() {
         let mine = Bundle.main.bundleIdentifier
         for id in quitAtStart where id != mine && id != "com.apple.finder" {
             NSRunningApplication.runningApplications(withBundleIdentifier: id).forEach { $0.terminate() }
         }
         preloadNow()
         runFocusShortcut(Self.focusOnKey)
+        gamingSessionActive = true
+        updateSessionButton()
     }
 
-    /// Game night ends: the preloaded apps close and the Focus switches off.
-    func endGameNight() {
+    /// Gaming session ends: the preloaded apps close and the Focus switches off.
+    func endGamingSession() {
         for path in preloadPaths { runningApp(at: path)?.terminate() }
         runFocusShortcut(Self.focusOffKey)
+        gamingSessionActive = false
+        updateSessionButton()
+    }
+
+    /// One action for both: ends the session when one is running, starts it otherwise.
+    func toggleGamingSession() {
+        if gamingSessionActive { endGamingSession() } else { startGamingSession() }
+    }
+
+    var gamingSessionActive: Bool {
+        get { UserDefaults.standard.bool(forKey: Self.gamingSessionKey) }
+        set { UserDefaults.standard.set(newValue, forKey: Self.gamingSessionKey) }
     }
 
     func runFocusShortcut(_ key: String) {
@@ -213,9 +235,7 @@ extension SetupController {
         }
     }
 
-    @objc func startGameNightClicked() { startGameNight() }
-
-    @objc func endGameNightClicked() { endGameNight() }
+    @objc func toggleGamingSessionClicked() { toggleGamingSession() }
 
     @objc func preloadAutoChanged(_ sender: NSButton) {
         UserDefaults.standard.set(sender.state == .on, forKey: Self.preloadAutoKey)

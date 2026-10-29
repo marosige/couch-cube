@@ -112,12 +112,11 @@ enum TVPage { case home, detail, controllers, store }
 
 /// The power menu (Start), like the Steam Deck's: back to games, sleep, restart, turn off, quit.
 enum TVMenuAction: CaseIterable {
-    case sleep, restart, turnOff, quit, preload, closePreloaded
+    case sleep, restart, turnOff, quit, session
 
     var title: String {
         switch self {
-        case .preload: return "Start Game Night"
-        case .closePreloaded: return "End Game Night"
+        case .session: return "Gaming Session"
         case .sleep: return "Sleep"
         case .restart: return "Restart"
         case .turnOff: return "Turn Off"
@@ -127,8 +126,7 @@ enum TVMenuAction: CaseIterable {
 
     var symbol: String {
         switch self {
-        case .preload: return "bolt.fill"
-        case .closePreloaded: return "bolt.slash.fill"
+        case .session: return "bolt.fill"
         case .sleep: return "moon.fill"
         case .restart: return "arrow.clockwise"
         case .turnOff: return "power"
@@ -155,6 +153,8 @@ final class CubeTVModel: ObservableObject {
     @Published var padIndex = 0
     @Published var testText = ""
     @Published var menuOpen = false
+    /// A gaming session is running: the menu offers to end it instead of starting one.
+    @Published var sessionActive = false
     @Published var menuIndex = 0
     @Published var confirming: TVMenuAction?
 
@@ -543,6 +543,7 @@ final class CubeTVController {
     /// Controllers, pairing and the store change while Cube TV is open, so they are read every second or two.
     func refresh() {
         guard let host else { return }
+        if model.sessionActive != host.gamingSessionActive { model.sessionActive = host.gamingSessionActive }
         var store = model.store
         store.replace(host.tvStoreShelves())
         if store.signature != model.store.signature { model.store = store }
@@ -568,8 +569,9 @@ final class CubeTVController {
 
     private func perform(_ action: TVMenuAction) {
         switch action {
-        case .preload: host?.startGameNight()
-        case .closePreloaded: host?.endGameNight()
+        case .session:
+            host?.toggleGamingSession()
+            model.sessionActive = host?.gamingSessionActive ?? false
         case .quit: close()
         case .sleep: run("/usr/bin/pmset", ["sleepnow"])
         case .restart: systemEvent("aevtrrst")

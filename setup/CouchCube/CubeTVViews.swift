@@ -325,10 +325,11 @@ struct CubeTVView: View {
                 Text("Cube TV").font(.system(size: 34, weight: .bold)).foregroundColor(.white).padding(.bottom, 12)
                 ForEach(Array(TVMenuAction.allCases.enumerated()), id: \.element) { index, action in
                     let selected = index == model.menuIndex
-                    if action == .preload { Divider().overlay(Color.white.opacity(0.25)).padding(.vertical, 6) }
+                    if action == .session { Divider().overlay(Color.white.opacity(0.25)).padding(.vertical, 6) }
                     HStack(spacing: 16) {
-                        Image(systemName: action.symbol).frame(width: 32)
-                        Text(model.confirming == action ? "Press again to \(action.title.lowercased())" : action.title)
+                        Image(systemName: action == .session && model.sessionActive ? "bolt.slash.fill" : action.symbol).frame(width: 32)
+                        Text(model.confirming == action ? "Press again to \(action.title.lowercased())"
+                             : action == .session ? (model.sessionActive ? "End Gaming Session" : "Start Gaming Session") : action.title)
                         Spacer()
                     }
                     .font(.system(size: 26, weight: .medium))
