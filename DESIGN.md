@@ -720,3 +720,10 @@ Code: `CubeTV.swift`. Not yet: collections, controller pairing, store, web apps.
 CurseForge (addons) and Discord (chat) have their own **Game Companions** card between PC games and Windows
 games; they are not game launchers. Sidebar page names use Title Case on every word (Game Library, Retro Consoles,
 App Settings...).
+
+### BIOS folders per console
+
+Every shown console has its own `BIOS/<console>` folder (psx, ps2, switch...). Files put there reach RetroArch's
+system folder when a game starts (never overwriting). Hiding a console that has BIOS files renames its folder to
+`BIOS/.<console>` (hidden in Finder) and showing it again renames it back; a hidden console whose BIOS folder has no
+files has the folder removed (only empty folders, never files). `BIOS/retroarch` stays the shared RetroArch folder.
