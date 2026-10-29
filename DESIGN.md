@@ -663,3 +663,8 @@ When Cube TV is the TV menu, the **Play tile is just its picture** (`assets/app-
 showing a made-up Cube TV home screen, the Mac mini bottom right on the oak cabinet), with no logo, name or dimming.
 `scripts/cube-tv-icon.py` draws it and the square app-style icon (`cube-tv.png`). `assets/header.svg` (the non-SSD
 header, exported to `header.png`) now shows the TV larger, with the same home screen on it.
+
+### Retro Consoles: BIOS shortcuts
+
+A console that uses BIOS files has **Open BIOS Folder** next to **Open ROM Folder** on its page. Under the missing files, the
+per-file copy pills stay, and **Copy all filenames** copies every missing name of that folder in one string, separated by spaces.
