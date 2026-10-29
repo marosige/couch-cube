@@ -64,7 +64,7 @@ enum TVWebApps {
 
 /// A web app in its own full-screen window. It can only open its own site's pages, there is no address bar and no
 /// new tabs. Controllers and keyboard steer it; Start (or Command-W) goes back to Cube TV.
-final class TVWebWindowController: NSObject, WKNavigationDelegate, WKUIDelegate {
+final class TVWebWindowController: NSObject, WKNavigationDelegate, WKUIDelegate, NSWindowDelegate {
     static var current: TVWebWindowController?
 
     private let app: TVWebApp
@@ -73,7 +73,7 @@ final class TVWebWindowController: NSObject, WKNavigationDelegate, WKUIDelegate 
     private let webView: WKWebView
     private let input = TVPadInput()
     private var monitor: Any?
-    private var previousOptions: NSApplication.PresentationOptions = []
+    private var finished = false
 
     static func open(_ app: TVWebApp, onExit: @escaping () -> Void = {}) {
         if let current {
@@ -91,26 +91,21 @@ final class TVWebWindowController: NSObject, WKNavigationDelegate, WKUIDelegate 
         let configuration = WKWebViewConfiguration()
         configuration.mediaTypesRequiringUserActionForPlayback = []
         webView = WKWebView(frame: .zero, configuration: configuration)
-        let frame = NSScreen.main?.frame ?? NSRect(x: 0, y: 0, width: 1280, height: 720)
-        window = CubeTVWindow(contentRect: frame, styleMask: [.borderless], backing: .buffered, defer: false)
+        window = CubeTVWindow.standard(title: app.name)
         super.init()
+        window.delegate = self
         webView.customUserAgent = TVWebApps.userAgent(for: app)
         webView.navigationDelegate = self
         webView.uiDelegate = self
         webView.allowsBackForwardNavigationGestures = false
-        window.backgroundColor = .black
-        window.level = NSWindow.Level(rawValue: NSWindow.Level.popUpMenu.rawValue + 1)
-        window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         window.contentView = webView
-        window.setFrame(frame, display: true)
     }
 
     private func show() {
         if let url = URL(string: app.url) { webView.load(URLRequest(url: url)) }
-        previousOptions = NSApp.presentationOptions
-        NSApp.presentationOptions = [.hideDock, .hideMenuBar]
         NSApp.activate(ignoringOtherApps: true)
         window.makeKeyAndOrderFront(nil)
+        window.toggleFullScreen(nil)
         window.makeFirstResponder(webView)
         monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             guard let self, event.modifierFlags.contains(.command), event.keyCode == 13 else { return event }
@@ -132,15 +127,19 @@ final class TVWebWindowController: NSObject, WKNavigationDelegate, WKUIDelegate 
         hint("Start (or \u{2318}W) goes back to Cube TV")
     }
 
+    func windowWillClose(_ notification: Notification) { exit() }
+
     func exit() {
+        guard !finished else { return }
+        finished = true
+        window.delegate = nil
         input.unbind()
         if let monitor { NSEvent.removeMonitor(monitor) }
         monitor = nil
         webView.stopLoading()
         webView.navigationDelegate = nil
         webView.uiDelegate = nil
-        window.orderOut(nil)
-        NSApp.presentationOptions = previousOptions
+        window.close()
         Self.current = nil
         onExit()
     }

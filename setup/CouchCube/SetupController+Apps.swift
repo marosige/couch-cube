@@ -714,7 +714,15 @@ extension SetupController {
             ("Games", text(detail.map { $0.games.count == 1 ? "1 game" : "\($0.games.count) games" } ?? (selected == nil ? "No game library" : "Counting\u{2026}"),
                            size: 13))
         ]
-        if let bios = system.bios, bios.state != "not-needed" { facts.append(("BIOS", text(bios.summary, size: 13))) }
+        if let bios = system.bios, bios.state != "not-needed" {
+            var biosLine: [NSView] = [text(bios.summary, size: 13)]
+            if let root = selected?.root {
+                let folder = root + "/BIOS/" + system.id
+                biosLine.append(pill("Open BIOS Folder", symbol: "folder", action: #selector(openBIOSFolder(_:)), value: folder,
+                                     help: "Open the BIOS folder for " + system.name))
+            }
+            facts.append(("BIOS", row(biosLine)))
+        }
         let grid = NSGridView(views: facts.map { fact -> [NSView] in
             let name = text(fact.0, size: 12, secondary: true)
             return [name, fact.1]
@@ -727,15 +735,9 @@ extension SetupController {
         // Games, with saves and states
         if let detail {
             add(separator())
-            let open = button("Open ROM Folder", #selector(openBIOSFolder(_:)))
-            open.identifier = NSUserInterfaceItemIdentifier(detail.folder)
-            var openButtons: [NSView] = [open]
-            if let bios = system.bios, bios.state != "not-needed", let root = selected?.root {
-                let openBIOS = button("Open BIOS Folder", #selector(openBIOSFolder(_:)))
-                openBIOS.identifier = NSUserInterfaceItemIdentifier(root + "/BIOS/" + system.id)
-                openButtons.insert(openBIOS, at: 0)
-            }
-            add(row([heading("Games"), NSView()] + openButtons))
+            let open = pill("Open ROM Folder", symbol: "folder", action: #selector(openBIOSFolder(_:)), value: detail.folder,
+                            help: "Open the ROM folder for " + system.name)
+            add(row([heading("Games"), NSView(), open]))
             if detail.games.isEmpty {
                 add(text("No games yet. Put this console's games in its ROM folder.", size: 12, secondary: true))
             }

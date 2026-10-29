@@ -614,7 +614,7 @@ Console Mode → **Cube TV** (the default Play launcher; also the "Open Cube TV"
 same games as Play (Steam, retro, Windows, Mac, added), one shelf per group, 320 × 180 cards, the focused
 card scaled up with a white ring, and its art blurred behind a large title. Arrow keys / D-pad / left stick
 move one step per push, Return, Space or the bottom button play (the window closes while the game starts),
-Esc or the right button open the power menu (Sleep, Restart, Turn Off, Switch to Desktop, then Preload Apps and Close Preloaded Apps (for a demanding game that lags) below a divider; Restart and Turn Off are red and need a second press; the list wraps around). Art: Steam header, SteamGridDB grid, libretro cover, else the app icon.
+Esc or the right button open the power menu (Sleep, Restart, Turn Off, Switch to Desktop, then Start or End Gaming Session below a divider; Restart and Turn Off are red and need a second press; the list wraps around). Art: Steam header, SteamGridDB grid, libretro cover, else the app icon.
 Code: `CubeTV.swift`. Not yet: collections, controller pairing, store, web apps.
 
 ### Cube TV: Home button, running apps, preload
@@ -625,8 +625,8 @@ Code: `CubeTV.swift`. Not yet: collections, controller pairing, store, web apps.
 - **Running Now.** The first Cube TV shelf lists open apps (not Couch Cube or Finder): Switch to, Quit, and
   Force Quit (asks for a second press). Launching a game hides Cube TV; when the last game quits, Cube TV
   returns by itself.
-- **Preload** (Console Mode, card 5, and Cube TV menu → Preload Apps). Apps the owner picks (Steam by
-  default) open hidden before game night; Close Preloaded quits them. "Running now" below lists every open app with Quit.
+- **Preload** (Console Mode, card 5, and Cube TV menu → Gaming Session). Apps the owner picks (Steam by
+  default) open hidden before gaming session; Close Preloaded quits them. "Running now" below lists every open app with Quit.
 
 ### App Store: Game Companions
 
@@ -649,22 +649,32 @@ files has the folder removed (only empty folders, never files). `BIOS/retroarch`
   type a price, a percent off the usual price (`30%`), or nothing to remove it; Return saves, Esc puts the pill back.
   Under the price, a small pill carries the all-time-low text ("Lowest −47% $7.99"); clicking it sets that low as the target.
 
-### Game Night (Console Mode card 5)
+### Gaming Session (Console Mode card 5)
 
-**Start Game Night** quits the apps saved to quit (tick "Always quit" on a running app, or Add App to Quit), opens the
+**Start Gaming Session** quits the apps saved to quit (tick "Always quit" on a running app, or Add App to Quit), opens the
 preload apps hidden (Steam and Battle.net by default when installed; installed launchers and emulators are offered as
-one-click "+" suggestions), and runs the optional Focus Shortcut ("Set Focus" action, e.g. Gaming). **End Game Night**
+one-click "+" suggestions), and runs the optional Focus Shortcut ("Set Focus" action, e.g. Gaming). **End Gaming Session**
 closes the preload apps and runs the Focus-off Shortcut. The same two actions are in the Cube TV menu.
 Every running app has its Quit button at the end of its row.
 
 ### Cube TV picture and home header
 
 When Cube TV is the TV menu, the **Play tile is just its picture** (`assets/app-icons/cube-tv-tile.png`: a wall-mounted TV
-showing a made-up Cube TV home screen, the Mac mini bottom right on the oak cabinet), with no logo, name or dimming.
+showing a made-up Cube TV home screen, the Mac mini bottom right on the oak cabinet), with no logo or dimming; the name "Cube TV" sits on top of it like on the other tiles. The picture is anchored to the right: in a narrow window the Mac mini stays visible and the TV slides into view as the tile grows.
 `scripts/cube-tv-icon.py` draws it and the square app-style icon (`cube-tv.png`). `assets/header.svg` (the non-SSD
 header, exported to `header.png`) now shows the TV larger, with the same home screen on it.
 
 ### Retro Consoles: BIOS shortcuts
 
-A console that uses BIOS files has **Open BIOS Folder** next to **Open ROM Folder** on its page. Under the missing files, the
+A console that uses BIOS files has a small **Open BIOS Folder** link in its BIOS row, and **Open ROM Folder** (same quiet style) sits in the Games section. Under the missing files, the
 per-file copy pills stay, and **Copy all filenames** copies every missing name of that folder in one string, separated by spaces.
+
+The two actions are one button that reads **Start Gaming Session** or **End Gaming Session** depending on whether a session is
+running (same in the Cube TV menu, below the divider).
+
+### Cube TV uses macOS's own full screen
+
+Cube TV (and a web app's window) is an ordinary macOS window that enters native full screen, like the green button does:
+its own Space, the Dock and menu bar tuck away, ⌘Tab, Mission Control, ⌘W and ⌘Q keep working, and the green button leaves
+full screen. Earlier builds used a custom borderless overlay above everything, which could trap the screen; it is gone.
+Ways out of Cube TV: the power menu → Switch to Desktop, ⌘W, ⌘Q, or the green button. The mouse pointer hides until it moves.

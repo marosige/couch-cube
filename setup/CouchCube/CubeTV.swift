@@ -112,12 +112,11 @@ enum TVPage { case home, detail, controllers, store }
 
 /// The power menu (Start), like the Steam Deck's: back to games, sleep, restart, turn off, quit.
 enum TVMenuAction: CaseIterable {
-    case sleep, restart, turnOff, quit, preload, closePreloaded
+    case sleep, restart, turnOff, quit, session
 
     var title: String {
         switch self {
-        case .preload: return "Start Game Night"
-        case .closePreloaded: return "End Game Night"
+        case .session: return "Gaming Session"
         case .sleep: return "Sleep"
         case .restart: return "Restart"
         case .turnOff: return "Turn Off"
@@ -127,8 +126,7 @@ enum TVMenuAction: CaseIterable {
 
     var symbol: String {
         switch self {
-        case .preload: return "bolt.fill"
-        case .closePreloaded: return "bolt.slash.fill"
+        case .session: return "bolt.fill"
         case .sleep: return "moon.fill"
         case .restart: return "arrow.clockwise"
         case .turnOff: return "power"
@@ -155,6 +153,8 @@ final class CubeTVModel: ObservableObject {
     @Published var padIndex = 0
     @Published var testText = ""
     @Published var menuOpen = false
+    /// A gaming session is running: the menu offers to end it instead of starting one.
+    @Published var sessionActive = false
     @Published var menuIndex = 0
     @Published var confirming: TVMenuAction?
 
@@ -357,10 +357,26 @@ final class TVPadInput {
 final class CubeTVWindow: NSWindow {
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { true }
+
+    /// A normal macOS window that enters macOS's own full screen (a Space of its own, Dock and menu bar tucked away,
+    /// \u{2318}Tab, Mission Control and the green button all work), never a custom overlay that can trap the screen.
+    static func standard(title: String) -> CubeTVWindow {
+        let window = CubeTVWindow(contentRect: NSRect(x: 0, y: 0, width: 1280, height: 720),
+                                  styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
+                                  backing: .buffered, defer: false)
+        window.title = title
+        window.titlebarAppearsTransparent = true
+        window.titleVisibility = .hidden
+        window.backgroundColor = .black
+        window.collectionBehavior = [.fullScreenPrimary]
+        window.isReleasedWhenClosed = false
+        window.center()
+        return window
+    }
 }
 
 /// Couch Cube's own TV mode: a full-screen window, steered by keyboard and every connected controller.
-final class CubeTVController {
+final class CubeTVController: NSObject, NSWindowDelegate {
     weak var host: SetupController?
     private var window: CubeTVWindow?
     private let model = CubeTVModel()
@@ -384,26 +400,21 @@ final class CubeTVController {
     }
 
     func show() {
-        guard window == nil, let screen = NSScreen.main else { return }
+        guard window == nil else { return }
         wireModel()
         model.page = .home
         model.menuOpen = false
         cachedItems = host?.tvItems() ?? []
         buildHome()
         refresh()
-        let tv = CubeTVWindow(contentRect: screen.frame, styleMask: [.borderless], backing: .buffered, defer: false)
-        tv.backgroundColor = .black
-        // Above a game's full-screen Space, so the controller's Home button can bring Cube TV over a running game.
-        tv.level = .popUpMenu
-        tv.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+        let tv = CubeTVWindow.standard(title: "Cube TV")
+        tv.delegate = self
         tv.contentView = NSHostingView(rootView: CubeTVView(model: model))
-        tv.setFrame(screen.frame, display: true)
         window = tv
-        NSCursor.hide()
         NSApp.activate(ignoringOtherApps: true)
         tv.makeKeyAndOrderFront(nil)
-        tv.orderFrontRegardless()
-        NSApp.presentationOptions = [.hideDock, .hideMenuBar]
+        tv.toggleFullScreen(nil)
+        NSCursor.setHiddenUntilMouseMoves(true)
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             self?.handle(event) == true ? nil : event
         }
@@ -413,16 +424,25 @@ final class CubeTVController {
 
     func close() {
         guard let window else { return }
+        window.delegate = nil
+        tearDown()
+        self.window = nil
+        window.close()
+    }
+
+    /// The red button or \u{2318}W closed the window: let go of the controllers, the keys and the timer.
+    func windowWillClose(_ notification: Notification) {
+        tearDown()
+        window = nil
+    }
+
+    private func tearDown() {
         if let keyMonitor { NSEvent.removeMonitor(keyMonitor) }
         keyMonitor = nil
         refreshTimer?.invalidate()
         refreshTimer = nil
         input.unbind()
         if model.page == .controllers { host?.tvStopControllerSearch() }
-        NSCursor.unhide()
-        NSApp.presentationOptions = []
-        window.orderOut(nil)
-        self.window = nil
     }
 
     /// The controller's Home button: Cube TV comes forward at its home screen, over whatever is running.
@@ -433,7 +453,6 @@ final class CubeTVController {
         model.page = .home
         NSApp.activate(ignoringOtherApps: true)
         window?.makeKeyAndOrderFront(nil)
-        window?.orderFrontRegardless()
     }
 
     /// A web app took over the controllers while it was open; take them back.
@@ -543,6 +562,7 @@ final class CubeTVController {
     /// Controllers, pairing and the store change while Cube TV is open, so they are read every second or two.
     func refresh() {
         guard let host else { return }
+        if model.sessionActive != host.gamingSessionActive { model.sessionActive = host.gamingSessionActive }
         var store = model.store
         store.replace(host.tvStoreShelves())
         if store.signature != model.store.signature { model.store = store }
@@ -568,8 +588,9 @@ final class CubeTVController {
 
     private func perform(_ action: TVMenuAction) {
         switch action {
-        case .preload: host?.startGameNight()
-        case .closePreloaded: host?.endGameNight()
+        case .session:
+            host?.toggleGamingSession()
+            model.sessionActive = host?.gamingSessionActive ?? false
         case .quit: close()
         case .sleep: run("/usr/bin/pmset", ["sleepnow"])
         case .restart: systemEvent("aevtrrst")

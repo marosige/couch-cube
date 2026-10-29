@@ -193,7 +193,7 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
     var homeControllerImages: [String: [NSImageView]] = [:]
     var homeSessionControllers: [String] = []
     var homeObservedConnections = Set<String>()
-    let homePlayBackground = NSView()
+    let homePlayBackground = PlayPictureView()
     /// The Play tile's name and dimming layer; Cube TV's picture is the whole tile, so it hides both.
     var homePlayTitle: NSTextField!
     var homePlayShade: NSView!
@@ -206,6 +206,8 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
     static let preloadAppsKey = "preloadApps"
     static let preloadAutoKey = "preloadAuto"
     static let quitAtStartKey = "quitAtStart"
+    static let gamingSessionKey = "gamingSession"
+    let sessionButton = NSButton()
     static let focusOnKey = "gameNightFocusOn"
     static let focusOffKey = "gameNightFocusOff"
     var launcherLibrary: LibraryGames?
@@ -939,7 +941,7 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
             card("3  On the TV", subtitle: "What Cube TV opens.", views: [tvMenuChoices, tvMenuStatus]),
             card("4  Cube TV", subtitle: "Couch Cube's own TV home screen. Start opens its menu; B goes back; the controller's Home button brings it back over any game.",
                  views: [row([button("Open Cube TV", #selector(openCubeTV)), button("Add Web App\u{2026}", #selector(addWebApp))]), cubeHomeStatus]),
-            card("5  Game Night", subtitle: "Before game night: open launchers like Steam in the background, quit apps that get in the way, and switch on a Focus.",
+            card("5  Gaming Session", subtitle: "Before you play: open launchers like Steam in the background, quit apps that get in the way, and switch on a Focus.",
                  views: [preloadCardContent()])
         ]))
         renderConsoleMode()
@@ -1037,7 +1039,7 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
         if !ProcessInfo.processInfo.arguments.contains("--smoke-test") {
             startHomeWatcher()
             startRunningWatcher()
-            if UserDefaults.standard.bool(forKey: Self.preloadAutoKey) { startGameNight() }
+            if UserDefaults.standard.bool(forKey: Self.preloadAutoKey) { startGamingSession() }
         }
         if ProcessInfo.processInfo.arguments.contains("--cube-tv"), !ProcessInfo.processInfo.arguments.contains("--smoke-test") {
             window.orderOut(nil)
