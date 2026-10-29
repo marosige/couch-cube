@@ -112,22 +112,20 @@ enum TVPage { case home, detail, controllers, store }
 
 /// The power menu (Start), like the Steam Deck's: back to games, sleep, restart, turn off, quit.
 enum TVMenuAction: CaseIterable {
-    case resume, preload, sleep, restart, turnOff, quit
+    case sleep, restart, turnOff, quit, preload
 
     var title: String {
         switch self {
-        case .resume: return "Back to Games"
         case .preload: return "Preload Apps"
         case .sleep: return "Sleep"
         case .restart: return "Restart"
         case .turnOff: return "Turn Off"
-        case .quit: return "Quit Cube TV"
+        case .quit: return "Switch to Desktop"
         }
     }
 
     var symbol: String {
         switch self {
-        case .resume: return "play.fill"
         case .preload: return "bolt.fill"
         case .sleep: return "moon.fill"
         case .restart: return "arrow.clockwise"
@@ -138,6 +136,8 @@ enum TVMenuAction: CaseIterable {
 
     /// Restart and Turn Off end everyone's session, so they ask for a second press.
     var needsConfirmation: Bool { self == .restart || self == .turnOff }
+
+    var isDanger: Bool { self == .restart || self == .turnOff }
 }
 
 /// Cube TV's pages and focus. Navigation is plain state so the keyboard and every controller share it.
@@ -203,7 +203,8 @@ final class CubeTVModel: ObservableObject {
 
     func move(dx: Int, dy: Int) {
         if menuOpen {
-            menuIndex = min(max(menuIndex + dy, 0), TVMenuAction.allCases.count - 1)
+            let count = TVMenuAction.allCases.count
+            menuIndex = (menuIndex + dy + count) % count
             confirming = nil
             return
         }
@@ -396,10 +397,11 @@ final class CubeTVController {
         tv.contentView = NSHostingView(rootView: CubeTVView(model: model))
         tv.setFrame(screen.frame, display: true)
         window = tv
-        NSApp.presentationOptions = [.hideDock, .hideMenuBar]
         NSCursor.hide()
         NSApp.activate(ignoringOtherApps: true)
         tv.makeKeyAndOrderFront(nil)
+        tv.orderFrontRegardless()
+        NSApp.presentationOptions = [.hideDock, .hideMenuBar]
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             self?.handle(event) == true ? nil : event
         }
@@ -429,6 +431,7 @@ final class CubeTVController {
         model.page = .home
         NSApp.activate(ignoringOtherApps: true)
         window?.makeKeyAndOrderFront(nil)
+        window?.orderFrontRegardless()
     }
 
     /// A web app took over the controllers while it was open; take them back.
@@ -563,7 +566,6 @@ final class CubeTVController {
 
     private func perform(_ action: TVMenuAction) {
         switch action {
-        case .resume: break
         case .preload: host?.preloadNow()
         case .quit: close()
         case .sleep: run("/usr/bin/pmset", ["sleepnow"])

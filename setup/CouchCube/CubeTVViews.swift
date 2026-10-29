@@ -313,6 +313,11 @@ struct CubeTVView: View {
         .ignoresSafeArea()
     }
 
+    private func fill(_ action: TVMenuAction, _ selected: Bool) -> Color {
+        if action.isDanger { return selected ? Color(red: 0.92, green: 0.2, blue: 0.2) : Color(red: 0.55, green: 0.12, blue: 0.12) }
+        return selected ? Color.white : Color.white.opacity(0.16)
+    }
+
     private var powerMenu: some View {
         ZStack {
             Color.black.opacity(0.65)
@@ -320,19 +325,25 @@ struct CubeTVView: View {
                 Text("Cube TV").font(.system(size: 34, weight: .bold)).foregroundColor(.white).padding(.bottom, 12)
                 ForEach(Array(TVMenuAction.allCases.enumerated()), id: \.element) { index, action in
                     let selected = index == model.menuIndex
+                    if action == .preload { Divider().overlay(Color.white.opacity(0.25)).padding(.vertical, 6) }
                     HStack(spacing: 16) {
                         Image(systemName: action.symbol).frame(width: 32)
                         Text(model.confirming == action ? "Press again to \(action.title.lowercased())" : action.title)
                         Spacer()
                     }
                     .font(.system(size: 26, weight: .medium))
-                    .foregroundColor(selected ? .black : .white)
+                    .foregroundColor(selected && !action.isDanger ? .black : .white)
                     .padding(.horizontal, 24).padding(.vertical, 14)
                     .frame(width: 520)
-                    .background(RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .fill(selected ? Color.white : Color.white.opacity(0.12)))
+                    .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(fill(action, selected)))
+                    .scaleEffect(selected ? 1.03 : 1)
+                    .animation(.easeOut(duration: 0.12), value: selected)
                 }
             }
+            .padding(36)
+            .background(RoundedRectangle(cornerRadius: 28, style: .continuous).fill(Color(white: 0.1)))
+            .overlay(RoundedRectangle(cornerRadius: 28, style: .continuous).stroke(Color.white.opacity(0.18), lineWidth: 1))
+            .shadow(color: .black.opacity(0.6), radius: 40, y: 20)
         }
     }
 }
