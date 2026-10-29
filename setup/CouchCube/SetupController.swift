@@ -201,6 +201,7 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
     let launcherSearch = NSSearchField()
     static let launcherAppsKey = "launcherApps"
     var launcherLibrary: LibraryGames?
+    let cubeTV = CubeTVController()
     var romArtRounds = 0
     var launcherSignature = 0
     var gameArt: [String: [String: String]] = [:]
@@ -485,6 +486,7 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
         appMenu.addItem(withTitle: "About Couch Cube", action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: "")
         appMenu.addItem(.separator())
         appMenu.addItem(withTitle: "Settings…", action: #selector(openSettings), keyEquivalent: ",").target = self
+        appMenu.addItem(withTitle: "Open Cube TV Preview", action: #selector(openCubeTV), keyEquivalent: "t").target = self
         appMenu.addItem(.separator())
         appMenu.addItem(withTitle: "Quit Couch Cube", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         let appItem = NSMenuItem()
