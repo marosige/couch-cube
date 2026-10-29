@@ -1700,7 +1700,7 @@ extension SetupController {
                     precondition(self.homeMenuLabel.stringValue == "ES-DE")
                     precondition(self.homePlayBackground.layer?.contents != nil && self.homeArtworkMenu == .some("es-de"),
                                  "The Cube TV tile shows the ES-DE artwork")
-                    for menu in ["steam", "es-de", nil] as [String?] {
+                    for menu in ["steam", "es-de", "cube-tv", nil] as [String?] {
                         precondition(TVMenuArtwork.image(for: menu).cgImage(forProposedRect: nil, context: nil, hints: nil) != nil)
                     }
                     self.preferredFrontend = nil
