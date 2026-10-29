@@ -158,4 +158,83 @@ extension SetupController {
         TVWebApps.saved = TVWebApps.saved.filter { "web-" + $0.id != id }
         renderLauncher()
     }
+
+    // MARK: Running apps and the Home button
+
+    /// Apps that are open right now: not Couch Cube, Finder or other system helpers.
+    func tvRunningApps() -> [NSRunningApplication] {
+        let hidden: Set<String> = ["me.marosi.couchcube", "com.apple.finder", "com.apple.dock", "com.apple.loginwindow"]
+        return NSWorkspace.shared.runningApplications.filter {
+            $0.activationPolicy == .regular && !$0.isTerminated && !hidden.contains($0.bundleIdentifier ?? "")
+        }
+    }
+
+    /// Games and apps you would want to see on the TV: running, but not just a launcher waiting in the background.
+    func tvForegroundApps() -> [NSRunningApplication] {
+        let preloaded = Set(preloadPaths)
+        return tvRunningApps().filter { !$0.isHidden && !preloaded.contains($0.bundleURL?.path ?? "") }
+    }
+
+    func tvRunning() -> [TVGame] {
+        tvRunningApps().map { app in
+            var game = TVGame(id: "running-\(app.processIdentifier)", title: app.localizedName ?? "App",
+                              subtitle: app.isHidden ? "Preloaded in the background" : "Running")
+            game.kind = .running
+            game.pid = app.processIdentifier
+            game.image = app.icon
+            game.art = .icon
+            game.closesTV = false
+            return game
+        }
+    }
+
+    func tvRunningAction(pid: pid_t, action: Int) {
+        guard let app = NSRunningApplication(processIdentifier: pid) else { return }
+        switch action {
+        case 0:
+            app.unhide()
+            app.activate(options: [.activateAllWindows])
+        case 1: app.terminate()
+        default: app.forceTerminate()
+        }
+    }
+
+    /// The controller's Home button: Cube TV comes back, whatever is in front. Needs the system's own Home gesture off.
+    func startHomeWatcher() {
+        guard !homeWatcherStarted else { return }
+        homeWatcherStarted = true
+        GCController.shouldMonitorBackgroundEvents = true
+        for pad in GCController.controllers() { bindHome(pad) }
+        NotificationCenter.default.addObserver(forName: .GCControllerDidConnect, object: nil, queue: .main) { [weak self] note in
+            if let pad = note.object as? GCController { self?.bindHome(pad) }
+        }
+    }
+
+    private func bindHome(_ pad: GCController) {
+        guard let home = pad.extendedGamepad?.buttonHome else { return }
+        home.preferredSystemGestureState = .disabled
+        home.pressedChangedHandler = { [weak self] _, _, pressed in
+            guard pressed, let self else { return }
+            self.cubeTV.host = self
+            self.cubeTV.goHome()
+        }
+    }
+
+    /// Keeps the Play tile and the running list current, and brings Cube TV back when the last game closes.
+    func startRunningWatcher() {
+        let center = NSWorkspace.shared.notificationCenter
+        for name in [NSWorkspace.didLaunchApplicationNotification, NSWorkspace.didTerminateApplicationNotification,
+                     NSWorkspace.didHideApplicationNotification, NSWorkspace.didUnhideApplicationNotification] {
+            center.addObserver(forName: name, object: nil, queue: .main) { [weak self] note in
+                guard let self else { return }
+                self.renderGeneral()
+                self.renderPreload()
+                let ended = note.name == NSWorkspace.didTerminateApplicationNotification
+                if ended, self.tvResumeAfterGame, !self.cubeTV.isOpen, self.tvForegroundApps().isEmpty {
+                    self.tvResumeAfterGame = false
+                    self.openCubeTV()
+                }
+            }
+        }
+    }
 }

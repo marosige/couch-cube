@@ -703,3 +703,14 @@ card scaled up with a white ring, and its art blurred behind a large title. Arro
 move one step per push, Return, Space or the bottom button play (the window closes while the game starts),
 Esc or the right button open the power menu (Back to Games, Sleep, Restart, Turn Off and Quit Cube TV; Restart and Turn Off need a second press). Art: Steam header, SteamGridDB grid, libretro cover, else the app icon.
 Code: `CubeTV.swift`. Not yet: collections, controller pairing, store, web apps.
+
+### Cube TV: Home button, running apps, preload
+
+- **Home button.** While Couch Cube runs, the controller's Home/Guide button (system gesture switched off,
+  background events on) brings Cube TV forward at its home screen, over a running game. Whether macOS lets an
+  app override its own Home gesture in the background is unverified on real hardware.
+- **Running Now.** The first Cube TV shelf lists open apps (not Couch Cube or Finder): Switch to, Quit, and
+  Force Quit (asks for a second press). Launching a game hides Cube TV; when the last game quits, Cube TV
+  returns by itself. The Play tile shows "Running: <name>".
+- **Preload** (Console Mode, card 5, and Cube TV menu → Preload Apps). Apps the owner picks (Steam by
+  default) open hidden before game night; Close Preloaded quits them. "Running now" below lists every open app with Quit.

@@ -99,6 +99,8 @@ final class TVWebWindowController: NSObject, WKNavigationDelegate, WKUIDelegate 
         webView.uiDelegate = self
         webView.allowsBackForwardNavigationGestures = false
         window.backgroundColor = .black
+        window.level = NSWindow.Level(rawValue: NSWindow.Level.popUpMenu.rawValue + 1)
+        window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         window.contentView = webView
         window.setFrame(frame, display: true)
     }

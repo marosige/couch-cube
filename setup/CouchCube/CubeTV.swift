@@ -5,7 +5,7 @@ import SwiftUI
 /// One tile on Cube TV: a game, an app, a Cube TV page or a store deal.
 struct TVGame: Identifiable {
     enum Art { case fill, fit, icon }
-    enum Kind { case game, app, page, deal }
+    enum Kind { case game, app, page, deal, running }
     /// A store deal or wishlist entry: what the detail page shows and how the wishlist is changed.
     struct Deal {
         let key: String
@@ -32,6 +32,8 @@ struct TVGame: Identifiable {
     var closesTV = true
     /// An SF Symbol drawn on the plate instead of an image (Cube TV pages and web apps).
     var symbol: String?
+    /// A running app (kind .running): what Switch to / Quit / Force Quit act on.
+    var pid: pid_t = 0
     /// The Play page group a game belongs to (Steam games, Retro games...), for Cube TV's shelves.
     var subtitleSection = ""
 
@@ -110,11 +112,12 @@ enum TVPage { case home, detail, controllers, store }
 
 /// The power menu (Start), like the Steam Deck's: back to games, sleep, restart, turn off, quit.
 enum TVMenuAction: CaseIterable {
-    case resume, sleep, restart, turnOff, quit
+    case resume, preload, sleep, restart, turnOff, quit
 
     var title: String {
         switch self {
         case .resume: return "Back to Games"
+        case .preload: return "Preload Apps"
         case .sleep: return "Sleep"
         case .restart: return "Restart"
         case .turnOff: return "Turn Off"
@@ -125,6 +128,7 @@ enum TVMenuAction: CaseIterable {
     var symbol: String {
         switch self {
         case .resume: return "play.fill"
+        case .preload: return "bolt.fill"
         case .sleep: return "moon.fill"
         case .restart: return "arrow.clockwise"
         case .turnOff: return "power"
@@ -143,6 +147,7 @@ final class CubeTVModel: ObservableObject {
     @Published var store = TVShelfSet()
     @Published var detail: TVGame?
     @Published var detailIndex = 0
+    @Published var detailConfirm = false
     @Published var pads: [TVPad] = []
     @Published var pairable: [TVPairable] = []
     @Published var padIndex = 0
@@ -159,6 +164,8 @@ final class CubeTVModel: ObservableObject {
     var onPair: (String) -> Void = { _ in }
     var onToggleWishlist: (TVGame) -> Void = { _ in }
     var onLaunched: (TVGame) -> Void = { _ in }
+    /// 0 = switch to the app, 1 = quit it, 2 = force quit it.
+    var onRunning: (TVGame, Int) -> Void = { _, _ in }
     var isFavorite: (String) -> Bool = { _ in false }
     var toggleFavorite: (String) -> Void = { _ in }
 
@@ -168,6 +175,7 @@ final class CubeTVModel: ObservableObject {
 
     var detailButtons: [String] {
         guard let game = detail else { return [] }
+        if game.kind == .running { return ["Switch to \(game.title)", "Quit", detailConfirm ? "Press again to Force Quit" : "Force Quit"] }
         if let deal = game.deal { return [deal.inWishlist ? "Remove from Wishlist" : "Add to Wishlist"] }
         return ["Play", isFavorite(game.id) ? "Remove from Favorites" : "Add to Favorites"]
     }
@@ -202,7 +210,9 @@ final class CubeTVModel: ObservableObject {
         switch page {
         case .home: home.move(dx: dx, dy: dy)
         case .store: store.move(dx: dx, dy: dy)
-        case .detail: detailIndex = min(max(detailIndex + dx + dy, 0), max(detailButtons.count - 1, 0))
+        case .detail:
+            detailIndex = min(max(detailIndex + dx + dy, 0), max(detailButtons.count - 1, 0))
+            detailConfirm = false
         case .controllers: padIndex = min(max(padIndex + dy, 0), max(controllerRows - 1, 0))
         }
     }
@@ -223,8 +233,9 @@ final class CubeTVModel: ObservableObject {
         case .home, .store:
             guard let game = focused else { return }
             switch game.kind {
-            case .game, .deal:
+            case .game, .deal, .running:
                 detail = game
+                detailConfirm = false
                 detailIndex = 0
                 page = .detail
             case .app, .page:
@@ -232,7 +243,24 @@ final class CubeTVModel: ObservableObject {
             }
         case .detail:
             guard let game = detail else { return }
-            if game.deal != nil {
+            if game.kind == .running {
+                switch detailIndex {
+                case 0:
+                    onRunning(game, 0)
+                    onClose()
+                case 1:
+                    onRunning(game, 1)
+                    page = .home
+                default:
+                    if detailConfirm {
+                        onRunning(game, 2)
+                        detailConfirm = false
+                        page = .home
+                    } else {
+                        detailConfirm = true
+                    }
+                }
+            } else if game.deal != nil {
                 onToggleWishlist(game)
             } else if detailIndex == 0 {
                 run(game)
@@ -362,6 +390,9 @@ final class CubeTVController {
         refresh()
         let tv = CubeTVWindow(contentRect: screen.frame, styleMask: [.borderless], backing: .buffered, defer: false)
         tv.backgroundColor = .black
+        // Above a game's full-screen Space, so the controller's Home button can bring Cube TV over a running game.
+        tv.level = .popUpMenu
+        tv.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         tv.contentView = NSHostingView(rootView: CubeTVView(model: model))
         tv.setFrame(screen.frame, display: true)
         window = tv
@@ -390,6 +421,16 @@ final class CubeTVController {
         self.window = nil
     }
 
+    /// The controller's Home button: Cube TV comes forward at its home screen, over whatever is running.
+    func goHome() {
+        guard window != nil else { host?.openCubeTV(); return }
+        model.menuOpen = false
+        model.confirming = nil
+        model.page = .home
+        NSApp.activate(ignoringOtherApps: true)
+        window?.makeKeyAndOrderFront(nil)
+    }
+
     /// A web app took over the controllers while it was open; take them back.
     func resumeInput() {
         guard window != nil else { return }
@@ -406,8 +447,11 @@ final class CubeTVController {
             if let index = self.favorites.firstIndex(of: id) { self.favorites.remove(at: index) } else { self.favorites.append(id) }
             self.buildHome()
         }
+        model.onRunning = { [weak self] game, action in self?.host?.tvRunningAction(pid: game.pid, action: action) }
         model.onLaunched = { [weak self] game in
-            guard let self, game.kind == .game else { return }
+            guard let self else { return }
+            self.host?.tvResumeAfterGame = game.closesTV
+            guard game.kind == .game else { return }
             self.recent = Array(([game.id] + self.recent.filter { $0 != game.id }).prefix(12))
         }
         model.onOpenPage = { [weak self] page in
@@ -467,6 +511,8 @@ final class CubeTVController {
         let items = cachedItems
         var shelves: [TVShelf] = []
         func games(_ ids: [String]) -> [TVGame] { ids.compactMap { id in items.first { $0.id == id && $0.kind == .game } } }
+        let running = host.tvRunning()
+        if !running.isEmpty { shelves.append(TVShelf(id: "running", title: "Running Now", games: running)) }
         let continuing = games(recent)
         if !continuing.isEmpty { shelves.append(TVShelf(id: "recent", title: "Continue", games: continuing)) }
         let liked = games(favorites)
@@ -499,6 +545,8 @@ final class CubeTVController {
            let updated = model.store.shelves.flatMap(\.games).first(where: { $0.id == detail.id }) {
             model.detail = updated
         }
+        let runningIDs = host.tvRunning().map(\.id)
+        if runningIDs != model.home.shelves.first(where: { $0.id == "running" })?.games.map(\.id) ?? [] { buildHome() }
         let pads = GCController.controllers().map { pad -> TVPad in
             let level = pad.battery.map { "\(Int(($0.batteryLevel * 100).rounded()))%" } ?? ""
             return TVPad(id: Self.padID(pad), name: pad.vendorName ?? "Controller", battery: level, player: pad.playerIndex.rawValue + 1)
@@ -516,6 +564,7 @@ final class CubeTVController {
     private func perform(_ action: TVMenuAction) {
         switch action {
         case .resume: break
+        case .preload: host?.preloadNow()
         case .quit: close()
         case .sleep: run("/usr/bin/pmset", ["sleepnow"])
         case .restart: systemEvent("aevtrrst")
