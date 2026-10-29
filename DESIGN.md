@@ -666,7 +666,7 @@ header, exported to `header.png`) now shows the TV larger, with the same home sc
 
 ### Retro Consoles: BIOS shortcuts
 
-A console that uses BIOS files has **Open BIOS Folder** next to **Open ROM Folder** on its page. Under the missing files, the
+A console that uses BIOS files has a small **Open BIOS Folder** link in its BIOS row, and **Open ROM Folder** (same quiet style) sits in the Games section. Under the missing files, the
 per-file copy pills stay, and **Copy all filenames** copies every missing name of that folder in one string, separated by spaces.
 
 The two actions are one button that reads **Start Gaming Session** or **End Gaming Session** depending on whether a session is
