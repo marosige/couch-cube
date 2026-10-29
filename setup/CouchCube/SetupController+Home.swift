@@ -50,14 +50,14 @@ extension SetupController {
         if homeArtworkMenu != frontend || homePlayBackground.layer?.contents == nil {
             homeArtworkMenu = frontend
             let path = appStates.first { $0.id == frontend && $0.installed && !$0.path.isEmpty }?.path
-            // Cube TV's own picture (TV, Mac mini, the home screen) is the whole tile: no logo, no name, no dimming.
+            // Cube TV's own picture (TV, Mac mini, the home screen) is the whole tile: no logo and no dimming; the name stays on top like on the other tiles.
             let tilePicture = frontend == "cube-tv"
                 ? Bundle.main.resourceURL.flatMap { NSImage(contentsOf: $0.appendingPathComponent("AppIcons/cube-tv-tile.png")) } : nil
             let art = tilePicture ?? TVMenuArtwork.image(for: frontend, appIcon: path.map { NSWorkspace.shared.icon(forFile: $0) })
             homePlayBackground.layer?.contentsGravity = .resizeAspectFill
             homePlayBackground.layer?.contents = art.cgImage(forProposedRect: nil, context: nil, hints: nil)
             homePlayBackground.imageAspect = tilePicture.map { $0.size.height > 0 ? $0.size.width / $0.size.height : 0 } ?? 0
-            homePlayTitle.isHidden = tilePicture != nil
+            homePlayTitle.isHidden = false
             homePlayShade.isHidden = tilePicture != nil
         }
         homePlaySubtitle.stringValue = frontend == nil ? homeMenuLabel.stringValue : ""

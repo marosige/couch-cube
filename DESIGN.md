@@ -660,7 +660,7 @@ Every running app has its Quit button at the end of its row.
 ### Cube TV picture and home header
 
 When Cube TV is the TV menu, the **Play tile is just its picture** (`assets/app-icons/cube-tv-tile.png`: a wall-mounted TV
-showing a made-up Cube TV home screen, the Mac mini bottom right on the oak cabinet), with no logo, name or dimming. The picture is anchored to the right: in a narrow window the Mac mini stays visible and the TV slides into view as the tile grows.
+showing a made-up Cube TV home screen, the Mac mini bottom right on the oak cabinet), with no logo or dimming; the name "Cube TV" sits on top of it like on the other tiles. The picture is anchored to the right: in a narrow window the Mac mini stays visible and the TV slides into view as the tile grows.
 `scripts/cube-tv-icon.py` draws it and the square app-style icon (`cube-tv.png`). `assets/header.svg` (the non-SSD
 header, exported to `header.png`) now shows the TV larger, with the same home screen on it.
 
