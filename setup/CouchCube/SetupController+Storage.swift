@@ -88,7 +88,7 @@ extension SetupController {
         return line
     }
 
-    /// Game library shows the same mode, icon and "· Active" marker as the Library Settings tiles.
+    /// Game Library shows the same mode, icon and "· Active" marker as the Library Settings tiles.
     func updateSelectedStorageMarker() {
         guard let mode = selected?.mode ?? preferredMode else {
             selectedStorageIcon.isHidden = true
@@ -152,7 +152,7 @@ extension SetupController {
         drive.mode == "local" ? "This Mac" : drive.name.replacingOccurrences(of: " (portable console)", with: "")
     }
 
-    /// One shared model for Game library and Library storage: This Mac, every connected drive, and honest placeholders.
+    /// One shared model for Game Library and Library storage: This Mac, every connected drive, and honest placeholders.
     func storageOverviewEntries() -> [StorageOverviewEntry] {
         guard let storage = storageStatus else {
             return [StorageOverviewEntry(id: nil, mode: "local", title: "This Mac", state: "checking", active: false, path: nil),
@@ -898,7 +898,7 @@ extension SetupController {
         let portable = preferredMode == "portable"
         storageHeading.stringValue = portable ? "External SSD" : "Mac storage"
         storageAdvice.stringValue = portable
-            ? "Create your game folders on this SSD. Steam storage is configured in Game library's Steam setup guide. Preparing a new SSD is optional and erases it."
+            ? "Create your game folders on this SSD. Steam storage is configured in Game Library's Steam setup guide. Preparing a new SSD is optional and erases it."
             : "Create Couch Cube's folders on this Mac. Steam can keep using its current library. No apps are installed and no Steam games are moved in this step."
         portablePreparation.isHidden = !portable
         renderDrives()

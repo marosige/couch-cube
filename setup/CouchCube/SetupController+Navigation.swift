@@ -93,7 +93,7 @@ extension SetupController {
     }
 
     func selectPage(_ index: Int) {
-        // Library storage (2, 3) now lives in Game library.
+        // Library storage (2, 3) now lives in Game Library.
         if index == 2 || index == 3 { selectPage(6); return }
         guard (0..<tabs.numberOfTabViewItems).contains(index) else { return }
         let previousPage = currentPage

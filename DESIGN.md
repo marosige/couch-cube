@@ -21,8 +21,8 @@ spacing and overflow; View menu commands also support Command-[ and Command-].
 The page title is an unbordered informational toolbar item. Content uses the
 system safe area instead of a fixed-height imitation titlebar.
 The Couch Cube section groups Play (the home screen), Controllers and Cube Shop.
-Settings groups Game library, App Store, Retro consoles, Console Mode and App Settings,
-in that order. Game library also contains what used to be Library storage.
+Settings groups Game Library, App Store, Retro Consoles, Console Mode and App Settings,
+in that order. Game Library also contains what used to be Library storage.
 
 **Cube Shop** (it replaced the Deals page and always opens on Home) is a native,
 read-only Mac game store for PC games: **Home**, **Deals**, **Free Games** and **Wishlist**, plus
@@ -176,7 +176,7 @@ button. Developers can set `COUCH_CUBE_DEBUG_ACTIVITY=1` to bring back automatic
 The sidebar uses monochrome symbols without colored square backgrounds,
 inspired by Apple Music. Red/yellow attention badges remain distinct.
 Home has two compact cards: Play (opens the selected TV menu) and controllers.
-There is no separate Play page. Steam setup is a guide reached from Game library.
+There is no separate Play page. Steam setup is a guide reached from Game Library.
 Additional rows appear only for setup problems, missing game apps or status errors.
 App categories and settings retain distinct rounded native NSBox groups with
 system colors and subtle separators in both appearances.
@@ -225,7 +225,7 @@ removal still asks for confirmation. Version details are available on hover.
 The app's Couch Cube branding opens this page. It links to the newest published
 release (including alpha releases) with an Installer DMG and SSD pack ZIP.
 For the SSD pack, unzip its contents onto your SSD, open `CouchCube.app` and
-configure Settings → Game library before adding games. The empty `Couch Cube` folders are a template:
+configure Settings → Game Library before adding games. The empty `Couch Cube` folders are a template:
 storage setup checks and binds them to the current volume; it does not erase the SSD.
 A modified template with extra files is preserved rather than overwritten.
 Emulators, games and BIOS are not included.
@@ -283,7 +283,7 @@ counts recommended ones, so a page with both shows two dots with their own numbe
 Hover a dot for the task list grouped by severity. Dots update in place: titles
 and icons keep their position whether a row shows none, one or two dots.
 Guided setup (always on, no setting) keeps the sidebar simple: only one
-page is marked at a time, in order Game library (storage first), App Store, Console Mode, Retro
+page is marked at a time, in order Game Library (storage first), App Store, Console Mode, Retro
 consoles, Controllers, App Settings. That page's dots include all its
 tasks, setup and maintenance alike (red and yellow counts can both show); the next page is marked once it is done. Every
 page stays freely reachable, and warnings inside pages are unchanged. Guided markers appear only after the
@@ -323,7 +323,7 @@ over USB moves onto that profile in place. Xbox, Switch Pro and most other pads 
 shared ID across USB and Bluetooth on macOS, so use **Same Controller As** to join them
 yourself; two controllers of the same model are never merged by name alone, and Joy-Cons
 are never joined to anything.
-Library storage is merged into **Settings → Game library**: one Where your games live
+Library storage is merged into **Settings → Game Library**: one Where your games live
 overview with Refresh connected drives, Add or prepare an SSD, your games and Move library.
 There is no separate Library storage page, Setup overview or intermediate Choose storage screen.
 The app can stay installed on the Mac while managing either local or SSD content.
@@ -340,11 +340,11 @@ removal if source files changed, copied content is missing, Steam files remain,
 or automatic console mode still points to the old library. It never empties Trash.
 An interrupted transfer keeps the source and reports any staging/destination
 folder to inspect before retrying; it does not silently delete partial files.
-App Store manages software; Retro consoles manages visible systems and BIOS checks.
-In Retro consoles, each manufacturer card (Nintendo, PlayStation, SEGA) has one switch that
+App Store manages software; Retro Consoles manages visible systems and BIOS checks.
+In Retro Consoles, each manufacturer card (Nintendo, PlayStation, SEGA) has one switch that
 shows or hides every console on it in one batch (a mixed group shows "3 of 7"); showing
 consoles never installs emulators.
-Game library shows where your games live and each drive's games, with a Steam setup guide.
+Game Library shows where your games live and each drive's games, with a Steam setup guide.
 Console Mode asks three questions in the order they happen, each answered by tapping a row with a
 checkmark (no Save buttons, no confirmations): **1 Signing in & waking** (after a restart and when
 the Mac wakes from sleep) — type your password, password once then Apple Watch (links to Touch ID &
@@ -354,7 +354,7 @@ nothing, open Couch Cube in its window (a macOS Login Item via SMAppService), or
 true console experience) when a controller is on and no keyboard or mouse is connected, or **Always open the TV menu** after every
 sign-in (the LaunchAgent, with its wait in seconds; `login --always`).
 **3 On the TV** — Steam Big Picture, ES-DE (a missing one leads to App Store) or Cube TV Home
-(Couch Cube's own, shown as coming soon). The Play tile is titled **Cube TV**, with the chosen menu beneath. Game library also sets up and switches the drive; App Settings groups app updates,
+(Couch Cube's own, shown as coming soon). The Play tile is titled **Cube TV**, with the chosen menu beneath. Game Library also sets up and switches the drive; App Settings groups app updates,
 app location, uninstall and gaming cleanup. **Clean up gaming setup** opens its own page (not a
 popup): what was found, grouped in cards (Apps, Games and data…) with each item's icon, name and path,
 Select all, then a Remove card that lists the selection, offers to move Couch Cube to the Trash too, and
@@ -540,7 +540,7 @@ Dark plastics are lifted slightly in Dark Mode. Icon backgrounds stay clear; the
 sidebar stays monochrome.
 PlayStation and SEGA each have their own card.
 
-1. **Create game folders in Settings → Game library.** Choose this Mac or an SSD. This creates Couch Cube's
+1. **Create game folders in Settings → Game Library.** Choose this Mac or an SSD. This creates Couch Cube's
    folders and launcher files only: no apps are installed, no games are moved,
    and Steam's settings are unchanged.
 2. **Choose Consoles and App Store.** Switch on only the systems you want; new
@@ -577,7 +577,7 @@ PlayStation and SEGA each have their own card.
    edit Steam's library database; these settings have no supported public
    automation interface.
 
-**Game library** starts with **Where your games live**, the drive overview
+**Game Library** starts with **Where your games live**, the drive overview
 for setup, switching and transfers. **This Mac** is always listed; every
 connected external drive gets its own row, and with none connected a disabled
 **External SSD — Connect one** row appears. The icon carries the readiness mark
@@ -625,8 +625,8 @@ consoles, with **+** (add a game) and a folder button. The overview's **…** me
 has Check Library and Change Storage. App Store categories collapse with the chevron in their
 header; collapsed categories still show installed apps, and the choice is remembered.
 
-**Steam integration:** Game library shows installed Steam game counts
-on local and external volumes. Game library lists names, manifest-reported install/
+**Steam integration:** Game Library shows installed Steam game counts
+on local and external volumes. Game Library lists names, manifest-reported install/
 update state and recorded size; Steam setup summarizes each library and path.
 Disconnected libraries show Offline rather than a misleading zero count. Partial
 or unreadable metadata is explicitly reported. These are local Steam manifests,
@@ -651,7 +651,7 @@ shown there as coming soon too.
 Consoles controls system visibility in ES-DE, not emulator installation. The future
 Couch Cube menu will use the same saved selection. Steam's own library is unchanged.
 
-**Settings → Game library** manages storage setup and transfers. The **Steam setup guide** in Game library
+**Settings → Game Library** manages storage setup and transfers. The **Steam setup guide** in Game Library
 shows the exact storage path and manual steps; Couch Cube does not verify
 Steam sign-in, controller configuration or completion of those steps.
 
@@ -714,3 +714,16 @@ Code: `CubeTV.swift`. Not yet: collections, controller pairing, store, web apps.
   returns by itself. The Play tile shows "Running: <name>".
 - **Preload** (Console Mode, card 5, and Cube TV menu → Preload Apps). Apps the owner picks (Steam by
   default) open hidden before game night; Close Preloaded quits them. "Running now" below lists every open app with Quit.
+
+### App Store: Game Companions
+
+CurseForge (addons) and Discord (chat) have their own **Game Companions** card between PC games and Windows
+games; they are not game launchers. Sidebar page names use Title Case on every word (Game Library, Retro Consoles,
+App Settings...).
+
+### BIOS folders per console
+
+Every shown console has its own `BIOS/<console>` folder (psx, ps2, switch...). Files put there reach RetroArch's
+system folder when a game starts (never overwriting). Hiding a console that has BIOS files renames its folder to
+`BIOS/.<console>` (hidden in Finder) and showing it again renames it back; a hidden console whose BIOS folder has no
+files has the folder removed (only empty folders, never files). `BIOS/retroarch` stays the shared RetroArch folder.

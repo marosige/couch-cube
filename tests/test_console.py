@@ -84,11 +84,13 @@ class StorageTests(unittest.TestCase):
         console.select_systems(self.storage, ["gc", "wii", "wiiu", "ps2", "ps3", "switch"])
         state = console.read_json(self.storage.root / console.MARKER)
         self.assertIn("switch", state["systems"])
-        self.assertTrue((rom.parent / "noload.txt").exists())
+        hidden = self.storage.root / "ROMs/.snes/mine.sfc"
+        self.assertEqual(hidden.read_bytes(), b"own game")
+        self.assertFalse(rom.parent.exists())
         config = ET.parse(self.storage.root / "Frontend/ES-DE/custom_systems/es_systems.xml")
         self.assertEqual({item.findtext("name") for item in config.findall("system")}, set(state["systems"]))
         console.select_systems(self.storage, state["systems"] + ["snes"])
-        self.assertFalse((rom.parent / "noload.txt").exists())
+        self.assertFalse(hidden.parent.exists())
         self.assertEqual(rom.read_bytes(), b"own game")
 
     def test_console_selection_preserves_customized_files_and_manifest(self):
@@ -109,7 +111,6 @@ class StorageTests(unittest.TestCase):
             console.select_systems(self.storage, enabled)
         written = {call.args[0] for call in write.call_args_list}
         self.assertEqual(written, {
-            "ROMs/snes/noload.txt",
             "Frontend/ES-DE/custom_systems/es_systems.xml",
             console.MARKER,
         })
@@ -119,7 +120,7 @@ class StorageTests(unittest.TestCase):
         self.assertEqual({call.args[0] for call in write.call_args_list}, {
             "Frontend/ES-DE/custom_systems/es_systems.xml", console.MARKER,
         })
-        self.assertFalse((self.storage.root / "ROMs/snes/noload.txt").exists())
+        self.assertTrue((self.storage.root / "ROMs/snes").is_dir())
 
     def test_ps2_launch_does_not_require_retroarch(self):
         self.initialize()

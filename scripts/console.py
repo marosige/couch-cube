@@ -1073,10 +1073,6 @@ def generated_files(storage, registrations, systems=None):
     quit_helper = PROJECT.parent / "MacOS/ControllerQuit"
     if quit_helper.is_file():
         files["Runtime/ControllerQuit"] = (quit_helper.read_bytes(), True)
-    if systems is not None:
-        for system in SYSTEMS:
-            if system not in systems and storage.read_path("ROMs/" + system).is_dir():
-                files[f"ROMs/{system}/noload.txt"] = (b"Disabled by Couch Cube. Re-enable in Consoles.\n", False)
     files["Config/steam-shortcuts.txt"] = (
         ("Steam > Games > Add a Non-Steam Game > Browse. Add these .app bundles:\n\n"
          + "\n".join(str(root / "Launchers" / (name + ".app")) for name in
@@ -1150,14 +1146,79 @@ def refresh_generated(storage, state):
         storage.write("Frontend/ES-DE/settings/es_settings.xml", settings)
     storage.check()
 
+LEGACY_NOLOAD = b"Disabled by Couch Cube. Re-enable in Consoles.\n"
+JUNK_FILES = {".DS_Store", "noload.txt"}
+
+
+def _real_files(folder):
+    """Real files in a console folder; Finder's .DS_Store and the old noload.txt marker do not count."""
+    found = []
+    for directory, _, names in os.walk(folder, followlinks=False):
+        found += [Path(directory) / name for name in names if name not in JUNK_FILES]
+    return found
+
+
+def _remove_empty_tree(folder):
+    """Removes a folder that holds no real files, bottom-up with rmdir only: a user's file can never be deleted this way."""
+    for directory, _, names in os.walk(folder, topdown=False, followlinks=False):
+        for name in names:
+            if name in JUNK_FILES:
+                os.unlink(Path(directory) / name)
+        os.rmdir(directory)
+
+
+def sync_console_folders(storage, base, enabled):
+    """One folder per shown console under ROMs/ or BIOS/. A console you hide keeps its files: the folder gets a leading
+    dot (hidden in Finder, and ES-DE skips it) and returns when the console is shown again. A hidden console's folder
+    with no files in it is removed. Needs no marker files."""
+    enabled = set(enabled)
+    for system in SYSTEMS:
+        visible = storage.read_path(f"{base}/{system}")
+        hidden = storage.read_path(f"{base}/.{system}")
+        for folder in (visible, hidden):
+            marker = folder / "noload.txt"
+            if folder.is_dir() and marker.is_file() and not marker.is_symlink() and marker.read_bytes() == LEGACY_NOLOAD:
+                storage.target(str(marker.relative_to(storage.root))).unlink()
+        if system in enabled:
+            if hidden.is_dir() and not visible.exists():
+                os.rename(storage.target(f"{base}/.{system}"), storage.target(f"{base}/{system}"))
+            elif not visible.exists():
+                storage.mkdir(f"{base}/{system}")
+            continue
+        if visible.is_dir() and not visible.is_symlink():
+            if not _real_files(visible):
+                _remove_empty_tree(storage.target(f"{base}/{system}"))
+            elif not hidden.exists():
+                os.rename(storage.target(f"{base}/{system}"), storage.target(f"{base}/.{system}"))
+        if hidden.is_dir() and not hidden.is_symlink() and not _real_files(hidden):
+            _remove_empty_tree(storage.target(f"{base}/.{system}"))
+
+
+def sync_system_bios(storage, system):
+    """BIOS files dropped into a console's own folder reach RetroArch's system directory (never overwriting)."""
+    folder = storage.read_path("BIOS/" + system)
+    if not folder.is_dir():
+        return
+    with BIOS_MAP.open(newline="") as file:
+        entries = [entry for entry in csv.DictReader(file) if entry["system"] == system]
+    for entry in entries:
+        target = storage.read_path("BIOS/retroarch/" + entry["filename"])
+        if target.exists():
+            continue
+        for candidate in [folder / entry["filename"], folder / Path(entry["filename"]).name]:
+            if candidate.is_file() and not candidate.is_symlink():
+                storage.target("BIOS/retroarch/" + entry["filename"]).parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(candidate, storage.target("BIOS/retroarch/" + entry["filename"]))
+                break
+
+
 def select_systems(storage, systems):
     if len(set(systems)) != len(systems) or any(system not in SYSTEMS for system in systems):
         raise SetupError("Unknown or duplicate console selection.")
     state = read_json(storage.target(MARKER))
     state["systems"] = systems
-    for system in systems:
-        if not storage.read_path("ROMs/" + system).is_dir():
-            storage.mkdir("ROMs/" + system)
+    sync_console_folders(storage, "ROMs", systems)
+    sync_console_folders(storage, "BIOS", systems)
     refresh_generated(storage, state)
     print("Console selection saved. Existing ROMs and saves were kept.", flush=True)
 
@@ -1167,7 +1228,8 @@ def bios_status(storage, system):
     with BIOS_MAP.open(newline="") as file:
         entries = [entry for entry in csv.DictReader(file) if entry["system"] == system]
     files = [{"filename": entry["filename"], "path": str(root / entry["filename"]),
-              "present": storage.read_path("BIOS/retroarch/" + entry["filename"]).is_file(),
+              "present": storage.read_path("BIOS/retroarch/" + entry["filename"]).is_file()
+              or storage.read_path("BIOS/" + system + "/" + entry["filename"]).is_file(),
               "note": entry["notes"]} for entry in entries]
     if files:
         present = sum(item["present"] for item in files)
@@ -1297,13 +1359,14 @@ def initialize(storage, systems=None):
     folders = [
         "SteamLibrary", "ROMs", "BIOS/retroarch/dc",
         "Saves/RetroArch/States", "Saves/Dolphin", "Saves/Native",
-        "BIOS/ps2", "BIOS/ps3", "BIOS/switch", "BIOS/xbox", "Saves/Windows",
+        "Saves/Windows",
         "Native/Games", "Native/Assets", "Windows/Wrappers", "Windows/Installers", "Windows/Porting Kit",
         "Frontend", "Config", "Runtime", "Launchers",
     ]
-    folders += ["ROMs/" + system for system in selected_systems(state)]
     for folder in folders:
         storage.mkdir(folder)
+    sync_console_folders(storage, "ROMs", selected_systems(state))
+    sync_console_folders(storage, "BIOS", selected_systems(state))
     refresh_generated(storage, state)
     if template:
         storage.target(SSD_TEMPLATE).unlink()
@@ -2547,12 +2610,12 @@ def emulate(storage, system, rom):
         raise SetupError("Unknown emulation system.")
     path = Path(rom).absolute()
     reject_symlinks(path)
-    if not path.is_relative_to(storage.root / "ROMs" / system) or not path.is_file():
-        raise SetupError("ROM must be a file in the selected system's ROM folder.")
     core = SYSTEMS[system][2]
     enabled = selected_systems(read_json(storage.target(MARKER)))
     if system not in enabled:
         raise SetupError("This console is disabled. Enable it in Couch Cube > Consoles.")
+    if not path.is_relative_to(storage.root / "ROMs" / system) or not path.is_file():
+        raise SetupError("ROM must be a file in the selected system's ROM folder.")
     if core in STANDALONE:
         prepare_emulator(storage, core, app_binary(PACKAGES[core]))
     if core == "dolphin":
@@ -2569,6 +2632,7 @@ def emulate(storage, system, rom):
         args = [str(binary)] + flags[core]
     else:
         binary = app_binary("RetroArch.app")
+        sync_system_bios(storage, system)
         core_path = Path.home() / "Library/Application Support/RetroArch/cores" / (core + "_libretro.dylib")
         if not core_path.is_file():
             install_core(core, core_path)

@@ -78,7 +78,7 @@ extension SetupController {
             }
         }
         for (check, page, title) in [(OverviewCheck.storage, 6, "Library storage couldn't be checked"),
-                                     (.menu, 1, "Apps couldn't be checked"), (.consoles, 7, "Retro consoles couldn't be checked"),
+                                     (.menu, 1, "Apps couldn't be checked"), (.consoles, 7, "Retro Consoles couldn't be checked"),
                                      (.automatic, 10, "Console mode couldn't be checked"), (.steam, 6, "Steam couldn't be checked")]
             where overviewCheckFailures.contains(check) {
             tasks.append(SidebarTask(page: page, color: .systemYellow, title: title, setup: false))
