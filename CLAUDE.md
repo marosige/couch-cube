@@ -60,5 +60,6 @@ the **Release** workflow; start it by hand (workflow_dispatch) to verify without
 ## Principles already in the code
 
 - Never erase, delete or overwrite without explicit, typed confirmation; re-validate plans by token.
-- Network: only allow-listed HTTPS hosts, size limits, no credentials, no in-app browser.
+- Network: only allow-listed HTTPS hosts, size limits, no credentials, no in-app browser. The one WebKit
+  exception is Cube TV's web apps (`CubeTVWebApps.swift`): no address bar, main-frame navigation only to the app's own domain.
 - No games, BIOS, firmware or keys are ever downloaded or bundled.

@@ -2,35 +2,113 @@ import AppKit
 import GameController
 import SwiftUI
 
-/// One game on Cube TV, flattened from a `LauncherItem` so the SwiftUI side needs nothing else.
+/// One tile on Cube TV: a game, an app, a Cube TV page or a store deal.
 struct TVGame: Identifiable {
     enum Art { case fill, fit, icon }
+    enum Kind { case game, app, page, deal }
+    /// A store deal or wishlist entry: what the detail page shows and how the wishlist is changed.
+    struct Deal {
+        let key: String
+        let payload: [String: String]
+        let price: String
+        let was: String?
+        let savings: Int
+        let store: String?
+        let inWishlist: Bool
+    }
+
     let id: String
     let title: String
     let subtitle: String
-    let image: NSImage?
-    let art: Art
-    let remoteURL: URL?
-    let launch: () -> Void
+    var image: NSImage?
+    var art: Art = .icon
+    var remoteURL: URL?
+    var tint: NSColor?
+    var kind: Kind = .game
+    var deal: Deal?
+    /// Starts a game or app, or opens a page.
+    var launch: () -> Void = {}
+    /// Games and native apps hand the screen over; web apps and pages keep Cube TV underneath.
+    var closesTV = true
+    /// An SF Symbol drawn on the plate instead of an image (Cube TV pages and web apps).
+    var symbol: String?
+    /// The Play page group a game belongs to (Steam games, Retro games...), for Cube TV's shelves.
+    var subtitleSection = ""
+
+    init(id: String, title: String, subtitle: String) {
+        self.id = id
+        self.title = title
+        self.subtitle = subtitle
+    }
 
     init(_ item: LauncherItem) {
-        id = item.id
-        title = item.title
-        subtitle = item.subtitle
+        self.init(id: item.id, title: item.title, subtitle: item.subtitle)
         image = item.artwork
         art = item.artwork == nil ? .icon : item.coverArt ? .fit : item.wideArtwork ? .fill : .icon
         remoteURL = item.wideArtwork ? nil : item.artworkURL
         launch = item.launch
+        kind = item.section == .added || item.section == .apps ? .app : .game
+        subtitleSection = item.section.rawValue
     }
 }
 
 struct TVShelf: Identifiable {
     let id: String
     let title: String
-    let games: [TVGame]
+    var games: [TVGame]
 }
 
-/// The power menu (Esc or the right button), like the Steam Deck's: resume, sleep, restart, turn off, quit.
+/// Rows of tiles and where the focus is in them.
+struct TVShelfSet {
+    var shelves: [TVShelf] = []
+    var row = 0
+    var columns: [Int] = []
+
+    var focused: TVGame? {
+        guard shelves.indices.contains(row), columns.indices.contains(row),
+              shelves[row].games.indices.contains(columns[row]) else { return nil }
+        return shelves[row].games[columns[row]]
+    }
+
+    /// Replaces the shelves but keeps the focus on the same shelf and position.
+    mutating func replace(_ new: [TVShelf]) {
+        var remembered: [String: Int] = [:]
+        for (index, shelf) in shelves.enumerated() where columns.indices.contains(index) { remembered[shelf.id] = columns[index] }
+        let keepShelf = shelves.indices.contains(row) ? shelves[row].id : nil
+        shelves = new
+        columns = new.map { min(remembered[$0.id] ?? 0, max($0.games.count - 1, 0)) }
+        row = keepShelf.flatMap { id in new.firstIndex { $0.id == id } } ?? min(row, max(new.count - 1, 0))
+    }
+
+    /// What changes the picture: used to publish only real changes.
+    var signature: String {
+        shelves.map { shelf in
+            shelf.id + ":" + shelf.games.map { "\($0.id)|\($0.image != nil)|\($0.deal?.inWishlist ?? false)|\($0.deal?.price ?? "")" }.joined(separator: ",")
+        }.joined(separator: ";")
+    }
+
+    mutating func move(dx: Int, dy: Int) {
+        guard !shelves.isEmpty else { return }
+        if dy != 0 { row = min(max(row + dy, 0), shelves.count - 1) }
+        if dx != 0, !shelves[row].games.isEmpty { columns[row] = min(max(columns[row] + dx, 0), shelves[row].games.count - 1) }
+    }
+}
+
+struct TVPad: Identifiable, Equatable {
+    let id: String
+    let name: String
+    let battery: String
+    let player: Int
+}
+
+struct TVPairable: Identifiable, Equatable {
+    let id: String
+    let name: String
+}
+
+enum TVPage { case home, detail, controllers, store }
+
+/// The power menu (Start), like the Steam Deck's: back to games, sleep, restart, turn off, quit.
 enum TVMenuAction: CaseIterable {
     case resume, sleep, restart, turnOff, quit
 
@@ -58,38 +136,61 @@ enum TVMenuAction: CaseIterable {
     var needsConfirmation: Bool { self == .restart || self == .turnOff }
 }
 
-/// Cube TV's focus and shelves. Navigation is plain row/column state so keyboard and every controller share it.
+/// Cube TV's pages and focus. Navigation is plain state so the keyboard and every controller share it.
 final class CubeTVModel: ObservableObject {
-    @Published var shelves: [TVShelf] = []
-    @Published var row = 0
-    @Published var columns: [Int] = []
+    @Published var page = TVPage.home
+    @Published var home = TVShelfSet()
+    @Published var store = TVShelfSet()
+    @Published var detail: TVGame?
+    @Published var detailIndex = 0
+    @Published var pads: [TVPad] = []
+    @Published var pairable: [TVPairable] = []
+    @Published var padIndex = 0
+    @Published var testText = ""
     @Published var menuOpen = false
     @Published var menuIndex = 0
     @Published var confirming: TVMenuAction?
+
     var onClose: () -> Void = {}
     var onAction: (TVMenuAction) -> Void = { _ in }
+    var onOpenPage: (TVPage) -> Void = { _ in }
+    var onClosePage: (TVPage) -> Void = { _ in }
+    var onCyclePlayer: (String) -> Void = { _ in }
+    var onPair: (String) -> Void = { _ in }
+    var onToggleWishlist: (TVGame) -> Void = { _ in }
+    var onLaunched: (TVGame) -> Void = { _ in }
+    var isFavorite: (String) -> Bool = { _ in false }
+    var toggleFavorite: (String) -> Void = { _ in }
 
-    func load(_ items: [LauncherItem]) {
-        shelves = LauncherSection.allCases.compactMap { section in
-            let games = items.filter { $0.section == section }
-                .sorted { $0.title.localizedStandardCompare($1.title) == .orderedAscending }
-                .map(TVGame.init)
-            return games.isEmpty ? nil : TVShelf(id: section.rawValue, title: section.rawValue, games: games)
-        }
-        row = 0
-        columns = Array(repeating: 0, count: shelves.count)
+    var activeSet: TVShelfSet { page == .store ? store : home }
+
+    var focused: TVGame? { activeSet.focused }
+
+    var detailButtons: [String] {
+        guard let game = detail else { return [] }
+        if let deal = game.deal { return [deal.inWishlist ? "Remove from Wishlist" : "Add to Wishlist"] }
+        return ["Play", isFavorite(game.id) ? "Remove from Favorites" : "Add to Favorites"]
     }
 
-    var focused: TVGame? {
-        guard shelves.indices.contains(row), columns.indices.contains(row),
-              shelves[row].games.indices.contains(columns[row]) else { return nil }
-        return shelves[row].games[columns[row]]
-    }
+    var controllerRows: Int { pads.count + pairable.count }
 
-    func back() {
+    func openMenu() {
         menuOpen.toggle()
         menuIndex = 0
         confirming = nil
+    }
+
+    /// Escape and the right controller button: step back one level; from the home screen the keyboard opens the menu.
+    func back(menuAtHome: Bool) {
+        if menuOpen { openMenu(); return }
+        switch page {
+        case .home: if menuAtHome { openMenu() }
+        case .detail: page = .home
+        case .controllers, .store:
+            let left = page
+            page = .home
+            onClosePage(left)
+        }
     }
 
     func move(dx: Int, dy: Int) {
@@ -98,9 +199,12 @@ final class CubeTVModel: ObservableObject {
             confirming = nil
             return
         }
-        guard !shelves.isEmpty else { return }
-        if dy != 0 { row = min(max(row + dy, 0), shelves.count - 1) }
-        if dx != 0 { columns[row] = min(max(columns[row] + dx, 0), shelves[row].games.count - 1) }
+        switch page {
+        case .home: home.move(dx: dx, dy: dy)
+        case .store: store.move(dx: dx, dy: dy)
+        case .detail: detailIndex = min(max(detailIndex + dx + dy, 0), max(detailButtons.count - 1, 0))
+        case .controllers: padIndex = min(max(padIndex + dy, 0), max(controllerRows - 1, 0))
+        }
     }
 
     func select() {
@@ -115,181 +219,107 @@ final class CubeTVModel: ObservableObject {
             onAction(action)
             return
         }
-        guard let game = focused else { return }
+        switch page {
+        case .home, .store:
+            guard let game = focused else { return }
+            switch game.kind {
+            case .game, .deal:
+                detail = game
+                detailIndex = 0
+                page = .detail
+            case .app, .page:
+                run(game)
+            }
+        case .detail:
+            guard let game = detail else { return }
+            if game.deal != nil {
+                onToggleWishlist(game)
+            } else if detailIndex == 0 {
+                run(game)
+            } else {
+                toggleFavorite(game.id)
+                objectWillChange.send()
+            }
+        case .controllers:
+            if padIndex < pads.count { onCyclePlayer(pads[padIndex].id) }
+            else if padIndex - pads.count < pairable.count { onPair(pairable[padIndex - pads.count].id) }
+        }
+    }
+
+    private func run(_ game: TVGame) {
+        onLaunched(game)
         game.launch()
-        onClose()
+        if game.closesTV { onClose() }
     }
 }
 
-struct TVArt: View {
-    let game: TVGame
+/// Keyboard-free input: every connected controller steers Cube TV. One step per push on the pad or stick.
+final class TVPadInput {
+    var onMove: (Int, Int) -> Void = { _, _ in }
+    var onSelect: () -> Void = {}
+    var onBack: () -> Void = {}
+    var onStart: () -> Void = {}
+    var onChange: (GCController, String) -> Void = { _, _ in }
+    private var last = (x: 0, y: 0)
+    private var observer: NSObjectProtocol?
 
-    var body: some View {
-        ZStack {
-            LinearGradient(colors: [Color(white: 0.22), Color(white: 0.12)], startPoint: .top, endPoint: .bottom)
-            if let url = game.remoteURL {
-                AsyncImage(url: url) { phase in
-                    if let image = phase.image { image.resizable().aspectRatio(contentMode: .fill) } else { icon }
-                }
-            } else if let image = game.image {
-                switch game.art {
-                case .fill: Image(nsImage: image).resizable().aspectRatio(contentMode: .fill)
-                case .fit: Image(nsImage: image).resizable().aspectRatio(contentMode: .fit).padding(8)
-                case .icon: icon
-                }
-            } else {
-                icon
+    func bind() {
+        for pad in GCController.controllers() { bind(pad) }
+        if observer == nil {
+            observer = NotificationCenter.default.addObserver(forName: .GCControllerDidConnect, object: nil, queue: .main) { [weak self] note in
+                if let pad = note.object as? GCController { self?.bind(pad) }
             }
         }
     }
 
-    private var icon: some View {
-        Group {
-            if let image = game.image {
-                Image(nsImage: image).resizable().aspectRatio(contentMode: .fit).frame(width: 84, height: 84)
-            } else {
-                Image(systemName: "gamecontroller.fill").font(.system(size: 56)).foregroundColor(.white.opacity(0.5))
-            }
-        }
-    }
-}
-
-struct TVCard: View {
-    let game: TVGame
-    let focused: Bool
-    static let size = CGSize(width: 320, height: 180)
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            TVArt(game: game)
-                .frame(width: Self.size.width, height: Self.size.height)
-                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-                .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .stroke(Color.white.opacity(focused ? 0.95 : 0), lineWidth: 4))
-                .scaleEffect(focused ? 1.08 : 1)
-                .shadow(color: .black.opacity(focused ? 0.6 : 0), radius: 24, y: 14)
-            Text(game.title).font(.system(size: 20, weight: .semibold)).foregroundColor(.white)
-                .lineLimit(1).opacity(focused ? 1 : 0.7)
-        }
-        .frame(width: Self.size.width)
-        .animation(.easeOut(duration: 0.15), value: focused)
-    }
-}
-
-struct CubeTVView: View {
-    @ObservedObject var model: CubeTVModel
-
-    var body: some View {
-        ZStack(alignment: .topLeading) {
-            Color.black
-            if let game = model.focused {
-                TVArt(game: game).blur(radius: 40).opacity(0.45).clipped()
-                    .animation(.easeOut(duration: 0.3), value: game.id)
-            }
-            LinearGradient(colors: [.clear, .black.opacity(0.85)], startPoint: .top, endPoint: .bottom)
-            browser
-            if model.menuOpen { powerMenu }
-        }
-        .ignoresSafeArea()
-    }
-
-    private var powerMenu: some View {
-        ZStack {
-            Color.black.opacity(0.65)
-            VStack(spacing: 10) {
-                Text("Cube TV").font(.system(size: 34, weight: .bold)).foregroundColor(.white).padding(.bottom, 12)
-                ForEach(Array(TVMenuAction.allCases.enumerated()), id: \.element) { index, action in
-                    let selected = index == model.menuIndex
-                    HStack(spacing: 16) {
-                        Image(systemName: action.symbol).frame(width: 32)
-                        Text(model.confirming == action ? "Press again to \(action.title.lowercased())" : action.title)
-                        Spacer()
-                    }
-                    .font(.system(size: 26, weight: .medium))
-                    .foregroundColor(selected ? .black : .white)
-                    .padding(.horizontal, 24).padding(.vertical, 14)
-                    .frame(width: 520)
-                    .background(RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .fill(selected ? Color.white : Color.white.opacity(0.12)))
-                }
-            }
+    func unbind() {
+        if let observer { NotificationCenter.default.removeObserver(observer) }
+        observer = nil
+        for pad in GCController.controllers() {
+            guard let gamepad = pad.extendedGamepad else { continue }
+            gamepad.dpad.valueChangedHandler = nil
+            gamepad.leftThumbstick.valueChangedHandler = nil
+            gamepad.buttonA.pressedChangedHandler = nil
+            gamepad.buttonB.pressedChangedHandler = nil
+            gamepad.buttonMenu.pressedChangedHandler = nil
+            gamepad.valueChangedHandler = nil
         }
     }
 
-    private var browser: some View {
-        ZStack(alignment: .topLeading) {
-            VStack(alignment: .leading, spacing: 0) {
-                hero.frame(height: 300)
-                if model.shelves.isEmpty {
-                    Text("Your games appear here: Steam games, ROMs in your game library and Windows games.")
-                        .font(.system(size: 24)).foregroundColor(.white.opacity(0.7)).padding(.horizontal, 80)
-                    Spacer()
-                } else {
-                    shelves
-                }
-                hints
-            }
+    private func bind(_ pad: GCController) {
+        guard let gamepad = pad.extendedGamepad else { return }
+        let direction: GCControllerDirectionPadValueChangedHandler = { [weak self] _, x, y in self?.directional(x: x, y: y) }
+        gamepad.dpad.valueChangedHandler = direction
+        gamepad.leftThumbstick.valueChangedHandler = direction
+        gamepad.buttonA.pressedChangedHandler = { [weak self] _, _, pressed in if pressed { self?.onSelect() } }
+        gamepad.buttonB.pressedChangedHandler = { [weak self] _, _, pressed in if pressed { self?.onBack() } }
+        gamepad.buttonMenu.pressedChangedHandler = { [weak self] _, _, pressed in if pressed { self?.onStart() } }
+        gamepad.valueChangedHandler = { [weak self] pad, _ in
+            if let controller = pad.controller { self?.onChange(controller, TVPadInput.pressedText(pad)) }
         }
     }
 
-    private var hero: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Spacer()
-            Text(model.focused?.title ?? "Cube TV")
-                .font(.system(size: 64, weight: .bold)).foregroundColor(.white).lineLimit(1)
-            Text(model.focused?.subtitle ?? "")
-                .font(.system(size: 26, weight: .medium)).foregroundColor(.white.opacity(0.7))
-        }
-        .padding(.horizontal, 80).padding(.bottom, 24)
-        .frame(maxWidth: .infinity, alignment: .leading)
+    /// Neutral names (never A/B/X/Y or shapes), so every brand of controller reads the same.
+    static func pressedText(_ gamepad: GCExtendedGamepad) -> String {
+        var names: [String] = []
+        let buttons: [(GCControllerButtonInput, String)] = [
+            (gamepad.buttonA, "bottom button"), (gamepad.buttonB, "right button"), (gamepad.buttonX, "left button"),
+            (gamepad.buttonY, "top button"), (gamepad.leftShoulder, "left bumper"), (gamepad.rightShoulder, "right bumper"),
+            (gamepad.leftTrigger, "left trigger"), (gamepad.rightTrigger, "right trigger"), (gamepad.buttonMenu, "Start")
+        ]
+        for (button, name) in buttons where button.isPressed { names.append(name) }
+        if gamepad.dpad.up.isPressed { names.append("pad up") }
+        if gamepad.dpad.down.isPressed { names.append("pad down") }
+        if gamepad.dpad.left.isPressed { names.append("pad left") }
+        if gamepad.dpad.right.isPressed { names.append("pad right") }
+        return names.isEmpty ? "" : names.joined(separator: ", ")
     }
 
-    private var shelves: some View {
-        ScrollViewReader { vertical in
-            ScrollView(.vertical, showsIndicators: false) {
-                VStack(alignment: .leading, spacing: 8) {
-                    ForEach(Array(model.shelves.enumerated()), id: \.element.id) { index, shelf in
-                        shelfView(index, shelf).id(shelf.id)
-                    }
-                }
-                .padding(.bottom, 200)
-            }
-            .onChange(of: model.row) { row in
-                guard model.shelves.indices.contains(row) else { return }
-                withAnimation(.easeOut(duration: 0.25)) { vertical.scrollTo(model.shelves[row].id, anchor: .top) }
-            }
-        }
-    }
-
-    private func shelfView(_ index: Int, _ shelf: TVShelf) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(shelf.title).font(.system(size: 26, weight: .semibold)).foregroundColor(.white)
-                .padding(.horizontal, 80)
-            ScrollViewReader { horizontal in
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(alignment: .top, spacing: 28) {
-                        ForEach(Array(shelf.games.enumerated()), id: \.element.id) { column, game in
-                            TVCard(game: game, focused: model.row == index && model.columns.indices.contains(index) && model.columns[index] == column)
-                                .id(game.id)
-                        }
-                    }
-                    .padding(.horizontal, 80).padding(.vertical, 24)
-                }
-                .onChange(of: model.columns) { columns in
-                    guard model.row == index, columns.indices.contains(index), shelf.games.indices.contains(columns[index]) else { return }
-                    withAnimation(.easeOut(duration: 0.2)) { horizontal.scrollTo(shelf.games[columns[index]].id, anchor: .center) }
-                }
-            }
-        }
-    }
-
-    private var hints: some View {
-        HStack(spacing: 32) {
-            Label("Play: Return or bottom button", systemImage: "play.fill")
-            Label("Menu: Esc or right button", systemImage: "line.3.horizontal")
-        }
-        .font(.system(size: 18)).foregroundColor(.white.opacity(0.6))
-        .padding(.horizontal, 80).padding(.vertical, 20)
+    private func directional(x: Float, y: Float) {
+        let now = (x: x > 0.6 ? 1 : x < -0.6 ? -1 : 0, y: y > 0.6 ? -1 : y < -0.6 ? 1 : 0)
+        defer { last = now }
+        guard now != last, now != (0, 0) else { return }
+        onMove(now.x, now.y)
     }
 }
 
@@ -300,25 +330,41 @@ final class CubeTVWindow: NSWindow {
 
 /// Couch Cube's own TV mode: a full-screen window, steered by keyboard and every connected controller.
 final class CubeTVController {
+    weak var host: SetupController?
     private var window: CubeTVWindow?
     private let model = CubeTVModel()
+    private let input = TVPadInput()
     private var keyMonitor: Any?
-    private var connectObserver: NSObjectProtocol?
-    private var lastDirection = (x: 0, y: 0)
+    private var cachedItems: [TVGame] = []
+    private var refreshTimer: Timer?
+    private static let favoritesKey = "cubeTVFavorites"
+    private static let recentKey = "cubeTVRecent"
 
     var isOpen: Bool { window != nil }
 
-    func show(items: [LauncherItem]) {
+    private var favorites: [String] {
+        get { UserDefaults.standard.stringArray(forKey: Self.favoritesKey) ?? [] }
+        set { UserDefaults.standard.set(newValue, forKey: Self.favoritesKey) }
+    }
+
+    private var recent: [String] {
+        get { UserDefaults.standard.stringArray(forKey: Self.recentKey) ?? [] }
+        set { UserDefaults.standard.set(newValue, forKey: Self.recentKey) }
+    }
+
+    func show() {
         guard window == nil, let screen = NSScreen.main else { return }
-        model.load(items)
-        model.onClose = { [weak self] in self?.close() }
-        model.onAction = { [weak self] action in self?.perform(action) }
+        wireModel()
+        model.page = .home
         model.menuOpen = false
+        cachedItems = host?.tvItems() ?? []
+        buildHome()
+        refresh()
         let tv = CubeTVWindow(contentRect: screen.frame, styleMask: [.borderless], backing: .buffered, defer: false)
         tv.backgroundColor = .black
         tv.contentView = NSHostingView(rootView: CubeTVView(model: model))
         tv.setFrame(screen.frame, display: true)
-        self.window = tv
+        window = tv
         NSApp.presentationOptions = [.hideDock, .hideMenuBar]
         NSCursor.hide()
         NSApp.activate(ignoringOtherApps: true)
@@ -326,28 +372,145 @@ final class CubeTVController {
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             self?.handle(event) == true ? nil : event
         }
-        for pad in GCController.controllers() { bind(pad) }
-        connectObserver = NotificationCenter.default.addObserver(forName: .GCControllerDidConnect, object: nil, queue: .main) { [weak self] note in
-            if let pad = note.object as? GCController { self?.bind(pad) }
-        }
+        bindInput()
+        refreshTimer = Timer.scheduledTimer(withTimeInterval: 1.5, repeats: true) { [weak self] _ in self?.refresh() }
     }
 
     func close() {
         guard let window else { return }
         if let keyMonitor { NSEvent.removeMonitor(keyMonitor) }
-        if let connectObserver { NotificationCenter.default.removeObserver(connectObserver) }
         keyMonitor = nil
-        connectObserver = nil
-        for pad in GCController.controllers() {
-            pad.extendedGamepad?.dpad.valueChangedHandler = nil
-            pad.extendedGamepad?.leftThumbstick.valueChangedHandler = nil
-            pad.extendedGamepad?.buttonA.pressedChangedHandler = nil
-            pad.extendedGamepad?.buttonB.pressedChangedHandler = nil
-        }
+        refreshTimer?.invalidate()
+        refreshTimer = nil
+        input.unbind()
+        if model.page == .controllers { host?.tvStopControllerSearch() }
         NSCursor.unhide()
         NSApp.presentationOptions = []
         window.orderOut(nil)
         self.window = nil
+    }
+
+    /// A web app took over the controllers while it was open; take them back.
+    func resumeInput() {
+        guard window != nil else { return }
+        bindInput()
+        window?.makeKeyAndOrderFront(nil)
+    }
+
+    private func wireModel() {
+        model.onClose = { [weak self] in self?.close() }
+        model.onAction = { [weak self] action in self?.perform(action) }
+        model.isFavorite = { [weak self] id in self?.favorites.contains(id) ?? false }
+        model.toggleFavorite = { [weak self] id in
+            guard let self else { return }
+            if let index = self.favorites.firstIndex(of: id) { self.favorites.remove(at: index) } else { self.favorites.append(id) }
+            self.buildHome()
+        }
+        model.onLaunched = { [weak self] game in
+            guard let self, game.kind == .game else { return }
+            self.recent = Array(([game.id] + self.recent.filter { $0 != game.id }).prefix(12))
+        }
+        model.onOpenPage = { [weak self] page in
+            if page == .controllers { self?.host?.tvStartControllerSearch() }
+            if page == .store { self?.host?.tvLoadStore() }
+        }
+        model.onClosePage = { [weak self] page in
+            if page == .controllers { self?.host?.tvStopControllerSearch() }
+        }
+        model.onCyclePlayer = { id in
+            guard let pad = GCController.controllers().first(where: { Self.padID($0) == id }) else { return }
+            let next = pad.playerIndex.rawValue + 1
+            pad.playerIndex = GCControllerPlayerIndex(rawValue: next > 3 ? -1 : next) ?? .indexUnset
+        }
+        model.onPair = { [weak self] address in self?.host?.tvPair(address) }
+        model.onToggleWishlist = { [weak self] game in
+            guard let deal = game.deal else { return }
+            self?.host?.tvToggleWishlist(key: deal.key, payload: deal.payload, inWishlist: deal.inWishlist)
+        }
+    }
+
+    private func bindInput() {
+        input.onMove = { [weak self] dx, dy in self?.model.move(dx: dx, dy: dy) }
+        input.onSelect = { [weak self] in self?.select() }
+        input.onBack = { [weak self] in self?.model.back(menuAtHome: false) }
+        input.onStart = { [weak self] in self?.model.openMenu() }
+        input.onChange = { [weak self] pad, text in
+            guard let self, self.model.page == .controllers else { return }
+            self.model.testText = text.isEmpty ? "" : "\(pad.vendorName ?? "Controller"): \(text)"
+        }
+        input.bind()
+    }
+
+    private func select() {
+        let before = model.page
+        model.select()
+        if model.page != before { pageOpened(model.page) }
+    }
+
+    private func pageOpened(_ page: TVPage) {
+        model.padIndex = 0
+        model.onOpenPage(page)
+        refresh()
+    }
+
+    static func padID(_ pad: GCController) -> String { String(UInt(bitPattern: ObjectIdentifier(pad).hashValue)) }
+
+    /// Reads every game and app from the app (disk work, so only when the library changes), then builds the shelves.
+    func reload() {
+        guard let host, window != nil else { return }
+        cachedItems = host.tvItems()
+        buildHome()
+    }
+
+    func buildHome() {
+        guard let host else { return }
+        let items = cachedItems
+        var shelves: [TVShelf] = []
+        func games(_ ids: [String]) -> [TVGame] { ids.compactMap { id in items.first { $0.id == id && $0.kind == .game } } }
+        let continuing = games(recent)
+        if !continuing.isEmpty { shelves.append(TVShelf(id: "recent", title: "Continue", games: continuing)) }
+        let liked = games(favorites)
+        if !liked.isEmpty { shelves.append(TVShelf(id: "favorites", title: "Favorites", games: liked)) }
+        let apps = items.filter { $0.kind == .app }
+        if !apps.isEmpty { shelves.append(TVShelf(id: "apps", title: "Apps", games: apps)) }
+        for section in [LauncherSection.steam, .retro, .windows, .mac] {
+            let group = items.filter { $0.kind == .game && $0.subtitleSection == section.rawValue }
+            if !group.isEmpty { shelves.append(TVShelf(id: section.rawValue, title: section.rawValue, games: group)) }
+        }
+        let pages = [
+            host.tvPageTile(id: "page-controllers", title: "Controllers", subtitle: "Pair, order and test", symbol: "gamecontroller.fill",
+                            color: .systemIndigo) { [weak self] in self?.openPage(.controllers) },
+            host.tvPageTile(id: "page-store", title: "Store", subtitle: "Deals and your wishlist", symbol: "bag.fill",
+                            color: .systemPink) { [weak self] in self?.openPage(.store) }
+        ]
+        shelves.append(TVShelf(id: "cube", title: "Cube TV", games: pages))
+        var next = model.home
+        next.replace(shelves)
+        if next.signature != model.home.signature { model.home = next }
+    }
+
+    /// Controllers, pairing and the store change while Cube TV is open, so they are read every second or two.
+    func refresh() {
+        guard let host else { return }
+        var store = model.store
+        store.replace(host.tvStoreShelves())
+        if store.signature != model.store.signature { model.store = store }
+        if let detail = model.detail, detail.deal != nil,
+           let updated = model.store.shelves.flatMap(\.games).first(where: { $0.id == detail.id }) {
+            model.detail = updated
+        }
+        let pads = GCController.controllers().map { pad -> TVPad in
+            let level = pad.battery.map { "\(Int(($0.batteryLevel * 100).rounded()))%" } ?? ""
+            return TVPad(id: Self.padID(pad), name: pad.vendorName ?? "Controller", battery: level, player: pad.playerIndex.rawValue + 1)
+        }
+        if pads != model.pads { model.pads = pads }
+        let pairable = host.tvPairable().map { TVPairable(id: $0.address, name: $0.name) }
+        if pairable != model.pairable { model.pairable = pairable }
+    }
+
+    private func openPage(_ page: TVPage) {
+        model.page = page
+        pageOpened(page)
     }
 
     private func perform(_ action: TVMenuAction) {
@@ -373,40 +536,16 @@ final class CubeTVController {
     }
 
     private func handle(_ event: NSEvent) -> Bool {
+        guard NSApp.keyWindow === window else { return false }
         switch event.keyCode {
         case 123: model.move(dx: -1, dy: 0)
         case 124: model.move(dx: 1, dy: 0)
         case 125: model.move(dx: 0, dy: 1)
         case 126: model.move(dx: 0, dy: -1)
-        case 36, 76, 49: model.select()
-        case 53: model.back()
+        case 36, 76, 49: select()
+        case 53: model.back(menuAtHome: true)
         default: return false
         }
         return true
-    }
-
-    private func bind(_ pad: GCController) {
-        guard let gamepad = pad.extendedGamepad else { return }
-        let direction: GCControllerDirectionPadValueChangedHandler = { [weak self] _, x, y in
-            self?.directional(x: x, y: y)
-        }
-        gamepad.dpad.valueChangedHandler = direction
-        gamepad.leftThumbstick.valueChangedHandler = direction
-        gamepad.buttonA.pressedChangedHandler = { [weak self] _, _, pressed in if pressed { self?.model.select() } }
-        gamepad.buttonB.pressedChangedHandler = { [weak self] _, _, pressed in if pressed { self?.model.back() } }
-    }
-
-    /// One step per push: the stick or pad must return to center before the next step.
-    private func directional(x: Float, y: Float) {
-        let now = (x: x > 0.6 ? 1 : x < -0.6 ? -1 : 0, y: y > 0.6 ? -1 : y < -0.6 ? 1 : 0)
-        defer { lastDirection = now }
-        guard now != lastDirection, now != (0, 0) else { return }
-        model.move(dx: now.x, dy: now.y)
-    }
-}
-
-extension SetupController {
-    @objc func openCubeTV() {
-        cubeTV.show(items: launcherItems())
     }
 }

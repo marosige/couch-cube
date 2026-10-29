@@ -202,6 +202,7 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
     static let launcherAppsKey = "launcherApps"
     var launcherLibrary: LibraryGames?
     let cubeTV = CubeTVController()
+    var tvControllersOpen = false
     var romArtRounds = 0
     var launcherSignature = 0
     var gameArt: [String: [String: String]] = [:]
@@ -905,7 +906,9 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
         addPage("Console Mode", content: column([
             card("1  Signing in & waking", subtitle: "After a restart, and when the Mac wakes from sleep.", views: [signInChoices, signInGuide]),
             card("2  Open at Login", subtitle: "What starts by itself after you sign in.", views: [afterLoginChoices, consoleDelayRow, autoLaunchStatus]),
-            card("3  On the TV", subtitle: "What Cube TV opens.", views: [tvMenuChoices, tvMenuStatus])
+            card("3  On the TV", subtitle: "What Cube TV opens.", views: [tvMenuChoices, tvMenuStatus]),
+            card("4  Cube TV", subtitle: "Couch Cube's own TV home screen. Start opens its menu; B goes back.",
+                 views: [row([button("Open Cube TV", #selector(openCubeTV)), button("Add Web App\u{2026}", #selector(addWebApp))])])
         ]))
         renderConsoleMode()
         addPage("App Settings", content: column([
@@ -999,6 +1002,10 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
             NotificationCenter.default.addObserver(self, selector: #selector(controllerConnectionChanged), name: name, object: nil)
         }
         refresh()
+        if ProcessInfo.processInfo.arguments.contains("--cube-tv"), !ProcessInfo.processInfo.arguments.contains("--smoke-test") {
+            window.orderOut(nil)
+            openCubeTV()
+        }
         if ProcessInfo.processInfo.arguments.contains("--smoke-test") {
             updateStatus.stringValue = "Startup network check skipped for read-only verification."
         } else {
@@ -1094,7 +1101,7 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
     let homeControllerLimit = 4
 
     var controllerPageVisible: Bool {
-        tabs.selectedTabViewItem === tabs.tabViewItems[0] ||
+        tvControllersOpen || tabs.selectedTabViewItem === tabs.tabViewItems[0] ||
             tabs.selectedTabViewItem === tabs.tabViewItems[8]
     }
 
@@ -1107,6 +1114,7 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
             return appStates.contains { $0.id == id && $0.installed }
         }
         if let preferred = preferredFrontend ?? report?.preferred_frontend {
+            if preferred == "cube-tv" { return preferred }
             return installed(preferred) ? preferred : nil
         }
         return installed("steam") ? "steam" : installed("es-de") ? "es-de" : nil

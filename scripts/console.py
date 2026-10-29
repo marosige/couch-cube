@@ -2301,15 +2301,16 @@ def frontend_preference():
     if not FRONTEND_CONFIG.exists():
         return None
     value = read_json(FRONTEND_CONFIG)
-    if not isinstance(value, dict) or value.get("default") not in {"steam", "es-de"}:
-        raise SetupError("Invalid TV menu preference. Choose Steam or ES-DE in Console Mode.")
+    if not isinstance(value, dict) or value.get("default") not in {"steam", "es-de", "cube-tv"}:
+        raise SetupError("Invalid TV menu preference. Choose Steam, ES-DE or Cube TV in Console Mode.")
     return value["default"]
 
 
 def set_frontend(package, confirm=False):
-    if not confirm or package not in {"steam", "es-de"}:
+    if not confirm or package not in {"steam", "es-de", "cube-tv"}:
         raise SetupError("Choose an installed TV menu and explicitly confirm the change.")
-    app_binary(PACKAGES[package])
+    if package != "cube-tv":  # Cube TV is part of Couch Cube itself.
+        app_binary(PACKAGES[package])
     reject_symlinks(FRONTEND_CONFIG)
     FRONTEND_CONFIG.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.NamedTemporaryFile(dir=FRONTEND_CONFIG.parent, mode="w", delete=False) as file:
@@ -2321,6 +2322,8 @@ def set_frontend(package, confirm=False):
 
 def default_frontend():
     preferred = frontend_preference()
+    if preferred == "cube-tv":
+        return "cube-tv"
     for package in [preferred] if preferred else ["steam", "es-de"]:
         name = PACKAGES[package]
         if any((parent / name).is_dir() for parent in [Path("/Applications"), Path.home() / "Applications"]):
@@ -2331,6 +2334,14 @@ def default_frontend():
     raise SetupError("Install Steam or ES-DE from Couch Cube > Apps first.")
 
 
+def couch_cube_app():
+    """The Couch Cube.app this script runs from (its TV mode opens inside the app)."""
+    for parent in Path(__file__).resolve().parents:
+        if parent.suffix == ".app":
+            return parent
+    raise SetupError("Cube TV opens inside the Couch Cube app; start it from the installed app.")
+
+
 def launch(storage, action, identifier=None):
     storage.check()
     if action == "console":
@@ -2338,6 +2349,8 @@ def launch(storage, action, identifier=None):
     if action == "steam":
         app_binary("Steam.app")
         run(["/usr/bin/open", "steam://open/bigpicture"])
+    elif action == "cube-tv":
+        run(["/usr/bin/open", "-a", str(couch_cube_app()), "--args", "--cube-tv"])
     elif action == "retro":
         state = read_json(storage.target(MARKER))
         refresh_generated(storage, state)
@@ -2894,7 +2907,7 @@ def main():
     windows.add_argument("--confirm", action="store_true")
     windows.add_argument("--root")
     frontend = sub.add_parser("frontend")
-    frontend.add_argument("--default", choices=["steam", "es-de"])
+    frontend.add_argument("--default", choices=["steam", "es-de", "cube-tv"])
     frontend.add_argument("--confirm", action="store_true")
     apps = sub.add_parser("apps")
     apps.add_argument("--updates", action="store_true")
