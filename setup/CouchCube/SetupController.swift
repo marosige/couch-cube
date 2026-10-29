@@ -211,7 +211,7 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
     var comboStart: Date?
     var homeFiredAt = Date.distantPast
     var homeLast: (Date, String)?
-    let homeStatus: NSTextField = {
+    let cubeHomeStatus: NSTextField = {
         let field = NSTextField(wrappingLabelWithString: "")
         field.font = .systemFont(ofSize: 11)
         field.textColor = .secondaryLabelColor
@@ -925,7 +925,7 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
             card("2  Open at Login", subtitle: "What starts by itself after you sign in.", views: [afterLoginChoices, consoleDelayRow, autoLaunchStatus]),
             card("3  On the TV", subtitle: "What Cube TV opens.", views: [tvMenuChoices, tvMenuStatus]),
             card("4  Cube TV", subtitle: "Couch Cube's own TV home screen. Start opens its menu; B goes back; the controller's Home button brings it back over any game.",
-                 views: [row([button("Open Cube TV", #selector(openCubeTV)), button("Add Web App\u{2026}", #selector(addWebApp))]), homeStatus]),
+                 views: [row([button("Open Cube TV", #selector(openCubeTV)), button("Add Web App\u{2026}", #selector(addWebApp))]), cubeHomeStatus]),
             card("5  Preload & running apps", subtitle: "Open launchers like Steam in the background before game night, so they are ready when you sit down.",
                  views: [preloadCardContent()])
         ]))

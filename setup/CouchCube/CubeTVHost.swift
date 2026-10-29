@@ -258,7 +258,7 @@ extension SetupController {
         } else if !pads.isEmpty {
             line += " Press it to test: nothing seen yet."
         }
-        if homeStatus.stringValue != line { homeStatus.stringValue = line }
+        if cubeHomeStatus.stringValue != line { cubeHomeStatus.stringValue = line }
     }
 
     /// Keeps the Play tile and the running list current, and brings Cube TV back when the last game closes.
