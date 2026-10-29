@@ -18,8 +18,8 @@ extension SetupController {
         launcherSearch.target = self
         launcherSearch.action = #selector(launcherSearchChanged)
         launcherSearch.widthAnchor.constraint(equalToConstant: 220).isActive = true
-        let add = headerIconButton("plus", label: "Add a game or app", action: #selector(addLauncherApps))
-        add.toolTip = "Add any game or app to Play"
+        let add = headerIconButton("plus", label: "Add a game or app", action: #selector(showAddLauncherMenu(_:)))
+        add.toolTip = "Add any app or web app to Play"
         let spacer = NSView()
         spacer.setContentHuggingPriority(.init(1), for: .horizontal)
         let header = row([heading, spacer, launcherSearch, add])
@@ -83,6 +83,11 @@ extension SetupController {
                                       section: app.kind == "native" ? .mac : .windows,
                                       artwork: grid ?? NSWorkspace.shared.icon(forFile: app.path), wideArtwork: grid != nil, path: app.path,
                                       launch: { [weak self] in self?.openLauncherApp(app.path, name: app.name) }))
+        }
+        for app in TVWebApps.all {
+            items.append(LauncherItem(id: "web-" + app.id, title: app.name, subtitle: "Web app", section: .apps,
+                                      artwork: NSImage(systemSymbolName: app.id == "youtube" ? "play.rectangle.fill" : "globe", accessibilityDescription: nil),
+                                      wideArtwork: false, path: nil, launch: { [weak self] in self?.openWebApp(app) }))
         }
         for path in launcherAddedPaths where FileManager.default.fileExists(atPath: path) {
             let name = FileManager.default.displayName(atPath: path).replacingOccurrences(of: ".app", with: "")
@@ -261,12 +266,14 @@ extension SetupController {
         for app in launcherLibrary?.apps ?? [] { hasher.combine(app.path) }
         hasher.combine(gameArt.count)
         hasher.combine(launcherAddedPaths)
+        hasher.combine(TVWebApps.all.map(\.id))
         hasher.combine(launcherSearch.stringValue)
         hasher.combine(launcherSmokeItems?.map(\.id))
         return hasher.finalize()
     }
 
     func renderLauncher() {
+        defer { cubeTV.reload() }
         let query = launcherSearch.stringValue.trimmingCharacters(in: .whitespaces)
         let items = launcherItems().filter {
             query.isEmpty || $0.title.localizedCaseInsensitiveContains(query) || $0.subtitle.localizedCaseInsensitiveContains(query)
@@ -299,6 +306,19 @@ extension SetupController {
     }
 
     func launcherMenu(for item: LauncherItem) -> NSMenu? {
+        if item.id.hasPrefix("web-") {
+            let menu = NSMenu()
+            let open = menu.addItem(withTitle: "Open", action: #selector(launcherMenuOpen(_:)), keyEquivalent: "")
+            open.target = self
+            open.representedObject = item.id
+            if item.id != "web-youtube" {
+                menu.addItem(.separator())
+                let remove = menu.addItem(withTitle: "Remove from Play", action: #selector(launcherMenuRemoveWebApp(_:)), keyEquivalent: "")
+                remove.target = self
+                remove.representedObject = item.id
+            }
+            return menu
+        }
         guard let path = item.path else { return nil }
         let menu = NSMenu()
         let open = menu.addItem(withTitle: "Open", action: #selector(launcherMenuOpen(_:)), keyEquivalent: "")

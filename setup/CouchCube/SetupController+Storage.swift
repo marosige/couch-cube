@@ -1083,6 +1083,7 @@ extension SetupController {
 
     @objc func playSteam() {
         guard let drive = selected else { return }
+        if effectiveFrontend == "cube-tv" { openCubeTV(); return }
         let frontend = effectiveFrontend == "es-de" ? "ES-DE" : "Steam Big Picture"
         execute(["console", "--root", drive.root]) { code, _ in
             self.status.stringValue = code == 0 ? "\(frontend) session finished or opened." : "Couldn't open console mode. Check App Store and Activity."

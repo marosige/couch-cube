@@ -163,7 +163,9 @@ class NoSecretsTests(unittest.TestCase):
         for forbidden in ["WKWebView", "WebKit", "WKWebsiteDataStore", "evaluateJavaScript", "UserDefaults",
                           "password", "token", "cookie", "HTTPCookie"]:
             self.assertNotIn(forbidden.lower(), code.lower(), forbidden)
-        self.assertNotIn("import WebKit", "\n".join(path.read_text() for path in (ROOT / "setup/CouchCube").glob("*.swift")))
+        # Only Cube TV's site-restricted web apps may use WebKit; store accounts never open a web view.
+        self.assertNotIn("import WebKit", "\n".join(
+            path.read_text() for path in (ROOT / "setup/CouchCube").glob("*.swift") if path.name != "CubeTVWebApps.swift"))
 
     def test_usernames_are_not_logged(self):
         code = self.store_accounts_swift()

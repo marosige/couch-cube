@@ -13,6 +13,7 @@ enum LauncherSection: String, CaseIterable {
     case retro = "Retro games"
     case windows = "Windows games"
     case mac = "Mac games"
+    case apps = "Apps"
     case added = "Added by you"
 }
 

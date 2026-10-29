@@ -221,9 +221,22 @@ extension SetupController {
                 }
             }, to: tvMenuChoices)
         }
-        addChoice(choiceRow("Cube TV", subtitle: "Couch Cube's own TV home screen. Coming soon.",
-                                                   symbol: "sparkles.tv.fill", color: .systemPurple, selected: false,
-                                                   enabled: false, id: "menu-couchcube") {}, to: tvMenuChoices)
+        addChoice(choiceRow("Cube TV", subtitle: "Couch Cube's own TV home screen: all your games, apps and the store.",
+                                                   symbol: "sparkles.tv.fill", color: .systemPurple, selected: effectiveFrontend == "cube-tv",
+                                                   id: "menu-cube-tv") { [weak self] in self?.chooseCubeTV() }, to: tvMenuChoices)
+    }
+
+    func chooseCubeTV() {
+        execute(["frontend", "--default", "cube-tv", "--confirm"]) { code, _ in
+            if code == 0 {
+                self.preferredFrontend = "cube-tv"
+                self.renderConsoleMode()
+                self.updateSetupSummary()
+            } else {
+                self.tvMenuStatus.isHidden = false
+                self.tvMenuStatus.stringValue = "Couldn't save the TV menu. Open Activity for details."
+            }
+        }
     }
 
     func chooseAfterLogin(_ mode: String) {

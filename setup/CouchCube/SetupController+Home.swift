@@ -23,7 +23,7 @@ extension SetupController {
         let steamInstalled = !report.missing.contains("steam")
         let retroInstalled = !report.missing.contains("es-de")
         let menu = effectiveFrontend
-        playAction.toolTip = menu == "steam" ? "Open Steam Big Picture" : menu == "es-de" ? "Open ES-DE" : "Install your TV menu to play"
+        playAction.toolTip = menu == "steam" ? "Open Steam Big Picture" : menu == "es-de" ? "Open ES-DE" : menu == "cube-tv" ? "Open Cube TV" : "Install your TV menu to play"
         renderStorageLocations()
         setupAppStatus.stringValue = steamInstalled ? "Steam is installed. Optional emulators are managed in App Store." :
             retroInstalled ? "ES-DE is installed and is your console menu." : "Install Steam or ES-DE in App Store to get your TV menu."
@@ -37,7 +37,7 @@ extension SetupController {
         let ready = report?.state == "valid layout" && report?.issues.isEmpty == true
         let frontend = effectiveFrontend
         homeMenuLabel.stringValue = frontend == "steam" ? "Steam Big Picture" :
-            frontend == "es-de" ? "ES-DE" : report == nil ? "Checking your console\u{2026}" : "Choose a TV menu in Console Mode."
+            frontend == "es-de" ? "ES-DE" : frontend == "cube-tv" ? "Cube TV" : report == nil ? "Checking your console\u{2026}" : "Choose a TV menu in Console Mode."
         let checking = !overviewChecks.isEmpty && report == nil
         if checking { homeProgress.startAnimation(nil) }
         else { homeProgress.stopAnimation(nil) }
