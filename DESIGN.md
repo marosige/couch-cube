@@ -694,3 +694,12 @@ not macOS Proton.
 Show in App Store, whether it's shown (in Play and the TV menu) or hidden, how many games, the BIOS summary — then
 **Games** (from `console-detail`: each game with its size and its RetroArch saves and save states, matched by the
 game's file name; standalone emulators say where they keep saves) with Open ROM Folder, then the BIOS files.
+
+## Cube TV (preview)
+
+Couch Cube menu → **Open Cube TV Preview** (⌘T) opens a full-screen, dark, Apple TV-style window with the
+same games as Play (Steam, retro, Windows, Mac, added), one shelf per group, 320 × 180 cards, the focused
+card scaled up with a white ring, and its art blurred behind a large title. Arrow keys / D-pad / left stick
+move one step per push, Return, Space or the bottom button play (the window closes while the game starts),
+Esc or the right button close. Art: Steam header, SteamGridDB grid, libretro cover, else the app icon.
+Code: `CubeTV.swift`. Not yet: collections, controller pairing, store, web apps.
