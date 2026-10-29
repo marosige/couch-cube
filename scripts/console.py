@@ -1167,7 +1167,16 @@ def _remove_empty_tree(folder):
         os.rmdir(directory)
 
 
-def sync_console_folders(storage, base, enabled):
+MANUAL_BIOS_SYSTEMS = {"ps2", "ps3", "switch", "xbox"}
+
+
+def bios_systems():
+    """Consoles that can use BIOS or firmware files: the ones in the BIOS list plus the manual ones (PS2, PS3, Switch, Xbox)."""
+    with BIOS_MAP.open(newline="") as file:
+        return {entry["system"] for entry in csv.DictReader(file)} & set(SYSTEMS) | MANUAL_BIOS_SYSTEMS
+
+
+def sync_console_folders(storage, base, enabled, only=None):
     """One folder per shown console under ROMs/ or BIOS/. A console you hide keeps its files: the folder gets a leading
     dot (hidden in Finder, and ES-DE skips it) and returns when the console is shown again. A hidden console's folder
     with no files in it is removed. Needs no marker files."""
@@ -1175,6 +1184,12 @@ def sync_console_folders(storage, base, enabled):
     for system in SYSTEMS:
         visible = storage.read_path(f"{base}/{system}")
         hidden = storage.read_path(f"{base}/.{system}")
+        if only is not None and system not in only:
+            # A console that has no use for this folder never gets one; an empty one made earlier goes away.
+            for folder, name in ((visible, system), (hidden, "." + system)):
+                if folder.is_dir() and not folder.is_symlink() and not _real_files(folder):
+                    _remove_empty_tree(storage.target(f"{base}/{name}"))
+            continue
         for folder in (visible, hidden):
             marker = folder / "noload.txt"
             if folder.is_dir() and marker.is_file() and not marker.is_symlink() and marker.read_bytes() == LEGACY_NOLOAD:
@@ -1218,7 +1233,7 @@ def select_systems(storage, systems):
     state = read_json(storage.target(MARKER))
     state["systems"] = systems
     sync_console_folders(storage, "ROMs", systems)
-    sync_console_folders(storage, "BIOS", systems)
+    sync_console_folders(storage, "BIOS", systems, only=bios_systems())
     refresh_generated(storage, state)
     print("Console selection saved. Existing ROMs and saves were kept.", flush=True)
 
@@ -1366,7 +1381,7 @@ def initialize(storage, systems=None):
     for folder in folders:
         storage.mkdir(folder)
     sync_console_folders(storage, "ROMs", selected_systems(state))
-    sync_console_folders(storage, "BIOS", selected_systems(state))
+    sync_console_folders(storage, "BIOS", selected_systems(state), only=bios_systems())
     refresh_generated(storage, state)
     if template:
         storage.target(SSD_TEMPLATE).unlink()

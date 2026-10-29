@@ -30,10 +30,17 @@ class BiosFolderTests(unittest.TestCase):
         (self.root / "BIOS/retroarch").mkdir(parents=True)
         self.storage = FakeStorage(self.root)
 
-    def test_every_shown_console_gets_a_bios_folder(self):
-        console.sync_console_folders(self.storage, "BIOS", ["psx", "snes"])
-        self.assertTrue((self.root / "BIOS/psx").is_dir() and (self.root / "BIOS/snes").is_dir())
+    def test_only_consoles_that_use_bios_get_a_folder(self):
+        (self.root / "BIOS/snes").mkdir()
+        (self.root / "BIOS/nes").mkdir()
+        (self.root / "BIOS/nes/notes.txt").write_text("mine")
+        console.sync_console_folders(self.storage, "BIOS", ["psx", "snes", "nes"], only=console.bios_systems())
+        self.assertTrue((self.root / "BIOS/psx").is_dir())
+        self.assertFalse((self.root / "BIOS/snes").exists(), "an empty folder of a console without BIOS goes away")
+        self.assertTrue((self.root / "BIOS/nes/notes.txt").is_file(), "files are never touched")
         self.assertFalse((self.root / "BIOS/ps2").exists())
+        self.assertEqual(console.bios_systems() & {"snes", "nes", "gba"}, set())
+        self.assertTrue({"psx", "saturn", "dreamcast", "ps2", "switch"} <= console.bios_systems())
 
     def test_hidden_console_with_bios_files_keeps_them_in_a_dot_folder(self):
         (self.root / "BIOS/ps2").mkdir()

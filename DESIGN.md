@@ -636,7 +636,7 @@ App Settings...).
 
 ### BIOS folders per console
 
-Every shown console has its own `BIOS/<console>` folder (psx, ps2, switch...). Files put there reach RetroArch's
+Only a shown console that can use BIOS or firmware files has its own `BIOS/<console>` folder (psx, saturn, dreamcast, nds, pcengine, segacd, ps2, ps3, switch, xbox); consoles like NES or SNES get none, and an empty one made earlier is removed. Files put there reach RetroArch's
 system folder when a game starts (never overwriting). Hiding a console that has BIOS files renames its folder to
 `BIOS/.<console>` (hidden in Finder) and showing it again renames it back; a hidden console whose BIOS folder has no
 files has the folder removed (only empty folders, never files). `BIOS/retroarch` stays the shared RetroArch folder.
