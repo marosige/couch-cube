@@ -27,7 +27,7 @@ extension SetupController {
         runningList.spacing = 8
         let auto = NSButton(checkboxWithTitle: "Preload when Couch Cube opens", target: self, action: #selector(preloadAutoChanged(_:)))
         auto.state = UserDefaults.standard.bool(forKey: Self.preloadAutoKey) ? .on : .off
-        let note = text("Preloaded apps stay open in the background and use some memory and power. Close them when game night is over.",
+        let note = text("Preloaded apps stay open in the background and use some memory and power. Close them when game night is over, or when a demanding game is lagging.",
                         size: 11, secondary: true)
         renderPreload()
         return column([preloadList,

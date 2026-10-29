@@ -614,7 +614,7 @@ Console Mode → **Cube TV** (the default Play launcher; also the "Open Cube TV"
 same games as Play (Steam, retro, Windows, Mac, added), one shelf per group, 320 × 180 cards, the focused
 card scaled up with a white ring, and its art blurred behind a large title. Arrow keys / D-pad / left stick
 move one step per push, Return, Space or the bottom button play (the window closes while the game starts),
-Esc or the right button open the power menu (Sleep, Restart, Turn Off, Switch to Desktop, then Preload Apps below a divider; Restart and Turn Off are red and need a second press; the list wraps around). Art: Steam header, SteamGridDB grid, libretro cover, else the app icon.
+Esc or the right button open the power menu (Sleep, Restart, Turn Off, Switch to Desktop, then Preload Apps and Close Preloaded Apps (for a demanding game that lags) below a divider; Restart and Turn Off are red and need a second press; the list wraps around). Art: Steam header, SteamGridDB grid, libretro cover, else the app icon.
 Code: `CubeTV.swift`. Not yet: collections, controller pairing, store, web apps.
 
 ### Cube TV: Home button, running apps, preload
