@@ -54,7 +54,9 @@ extension SetupController {
             homePlayBackground.layer?.contentsGravity = .resizeAspectFill
             homePlayBackground.layer?.contents = art.cgImage(forProposedRect: nil, context: nil, hints: nil)
         }
-        homePlaySubtitle.stringValue = frontend == nil ? homeMenuLabel.stringValue : ""
+        let playing = ProcessInfo.processInfo.arguments.contains("--smoke-test") ? [] : tvRunningApps().filter { !$0.isHidden }
+        homePlaySubtitle.stringValue = frontend == nil ? homeMenuLabel.stringValue
+            : playing.first.map { "Running: \($0.localizedName ?? "app")" + (playing.count > 1 ? " +\(playing.count - 1)" : "") } ?? ""
         playAction.setAccessibilityLabel("Cube TV · \(homeMenuLabel.stringValue)")
         var tasks: [SidebarTask] = []
         if let report = report, !ready {
