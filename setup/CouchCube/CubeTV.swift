@@ -30,12 +30,44 @@ struct TVShelf: Identifiable {
     let games: [TVGame]
 }
 
+/// The power menu (Esc or the right button), like the Steam Deck's: resume, sleep, restart, turn off, quit.
+enum TVMenuAction: CaseIterable {
+    case resume, sleep, restart, turnOff, quit
+
+    var title: String {
+        switch self {
+        case .resume: return "Back to Games"
+        case .sleep: return "Sleep"
+        case .restart: return "Restart"
+        case .turnOff: return "Turn Off"
+        case .quit: return "Quit Cube TV"
+        }
+    }
+
+    var symbol: String {
+        switch self {
+        case .resume: return "play.fill"
+        case .sleep: return "moon.fill"
+        case .restart: return "arrow.clockwise"
+        case .turnOff: return "power"
+        case .quit: return "rectangle.portrait.and.arrow.right"
+        }
+    }
+
+    /// Restart and Turn Off end everyone's session, so they ask for a second press.
+    var needsConfirmation: Bool { self == .restart || self == .turnOff }
+}
+
 /// Cube TV's focus and shelves. Navigation is plain row/column state so keyboard and every controller share it.
 final class CubeTVModel: ObservableObject {
     @Published var shelves: [TVShelf] = []
     @Published var row = 0
     @Published var columns: [Int] = []
+    @Published var menuOpen = false
+    @Published var menuIndex = 0
+    @Published var confirming: TVMenuAction?
     var onClose: () -> Void = {}
+    var onAction: (TVMenuAction) -> Void = { _ in }
 
     func load(_ items: [LauncherItem]) {
         shelves = LauncherSection.allCases.compactMap { section in
@@ -54,13 +86,35 @@ final class CubeTVModel: ObservableObject {
         return shelves[row].games[columns[row]]
     }
 
+    func back() {
+        menuOpen.toggle()
+        menuIndex = 0
+        confirming = nil
+    }
+
     func move(dx: Int, dy: Int) {
+        if menuOpen {
+            menuIndex = min(max(menuIndex + dy, 0), TVMenuAction.allCases.count - 1)
+            confirming = nil
+            return
+        }
         guard !shelves.isEmpty else { return }
         if dy != 0 { row = min(max(row + dy, 0), shelves.count - 1) }
         if dx != 0 { columns[row] = min(max(columns[row] + dx, 0), shelves[row].games.count - 1) }
     }
 
     func select() {
+        if menuOpen {
+            let action = TVMenuAction.allCases[menuIndex]
+            if action.needsConfirmation && confirming != action {
+                confirming = action
+                return
+            }
+            menuOpen = false
+            confirming = nil
+            onAction(action)
+            return
+        }
         guard let game = focused else { return }
         game.launch()
         onClose()
@@ -133,6 +187,37 @@ struct CubeTVView: View {
                     .animation(.easeOut(duration: 0.3), value: game.id)
             }
             LinearGradient(colors: [.clear, .black.opacity(0.85)], startPoint: .top, endPoint: .bottom)
+            browser
+            if model.menuOpen { powerMenu }
+        }
+        .ignoresSafeArea()
+    }
+
+    private var powerMenu: some View {
+        ZStack {
+            Color.black.opacity(0.65)
+            VStack(spacing: 10) {
+                Text("Cube TV").font(.system(size: 34, weight: .bold)).foregroundColor(.white).padding(.bottom, 12)
+                ForEach(Array(TVMenuAction.allCases.enumerated()), id: \.element) { index, action in
+                    let selected = index == model.menuIndex
+                    HStack(spacing: 16) {
+                        Image(systemName: action.symbol).frame(width: 32)
+                        Text(model.confirming == action ? "Press again to \(action.title.lowercased())" : action.title)
+                        Spacer()
+                    }
+                    .font(.system(size: 26, weight: .medium))
+                    .foregroundColor(selected ? .black : .white)
+                    .padding(.horizontal, 24).padding(.vertical, 14)
+                    .frame(width: 520)
+                    .background(RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .fill(selected ? Color.white : Color.white.opacity(0.12)))
+                }
+            }
+        }
+    }
+
+    private var browser: some View {
+        ZStack(alignment: .topLeading) {
             VStack(alignment: .leading, spacing: 0) {
                 hero.frame(height: 300)
                 if model.shelves.isEmpty {
@@ -145,7 +230,6 @@ struct CubeTVView: View {
                 hints
             }
         }
-        .ignoresSafeArea()
     }
 
     private var hero: some View {
@@ -202,7 +286,7 @@ struct CubeTVView: View {
     private var hints: some View {
         HStack(spacing: 32) {
             Label("Play: Return or bottom button", systemImage: "play.fill")
-            Label("Close: Esc or right button", systemImage: "xmark")
+            Label("Menu: Esc or right button", systemImage: "line.3.horizontal")
         }
         .font(.system(size: 18)).foregroundColor(.white.opacity(0.6))
         .padding(.horizontal, 80).padding(.vertical, 20)
@@ -228,6 +312,8 @@ final class CubeTVController {
         guard window == nil, let screen = NSScreen.main else { return }
         model.load(items)
         model.onClose = { [weak self] in self?.close() }
+        model.onAction = { [weak self] action in self?.perform(action) }
+        model.menuOpen = false
         let tv = CubeTVWindow(contentRect: screen.frame, styleMask: [.borderless], backing: .buffered, defer: false)
         tv.backgroundColor = .black
         tv.contentView = NSHostingView(rootView: CubeTVView(model: model))
@@ -264,6 +350,28 @@ final class CubeTVController {
         self.window = nil
     }
 
+    private func perform(_ action: TVMenuAction) {
+        switch action {
+        case .resume: break
+        case .quit: close()
+        case .sleep: run("/usr/bin/pmset", ["sleepnow"])
+        case .restart: systemEvent("aevtrrst")
+        case .turnOff: systemEvent("aevtrsdn")
+        }
+    }
+
+    private func run(_ tool: String, _ arguments: [String]) {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: tool)
+        process.arguments = arguments
+        try? process.run()
+    }
+
+    /// Restart / shut down through loginwindow, the way the Apple menu does it (apps may veto, nothing is forced).
+    private func systemEvent(_ code: String) {
+        run("/usr/bin/osascript", ["-e", "tell application \"loginwindow\" to \u{AB}event \(code)\u{BB}"])
+    }
+
     private func handle(_ event: NSEvent) -> Bool {
         switch event.keyCode {
         case 123: model.move(dx: -1, dy: 0)
@@ -271,7 +379,7 @@ final class CubeTVController {
         case 125: model.move(dx: 0, dy: 1)
         case 126: model.move(dx: 0, dy: -1)
         case 36, 76, 49: model.select()
-        case 53: close()
+        case 53: model.back()
         default: return false
         }
         return true
@@ -285,7 +393,7 @@ final class CubeTVController {
         gamepad.dpad.valueChangedHandler = direction
         gamepad.leftThumbstick.valueChangedHandler = direction
         gamepad.buttonA.pressedChangedHandler = { [weak self] _, _, pressed in if pressed { self?.model.select() } }
-        gamepad.buttonB.pressedChangedHandler = { [weak self] _, _, pressed in if pressed { self?.close() } }
+        gamepad.buttonB.pressedChangedHandler = { [weak self] _, _, pressed in if pressed { self?.model.back() } }
     }
 
     /// One step per push: the stick or pad must return to center before the next step.

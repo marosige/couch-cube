@@ -701,5 +701,5 @@ Couch Cube menu → **Open Cube TV Preview** (⌘T) opens a full-screen, dark, A
 same games as Play (Steam, retro, Windows, Mac, added), one shelf per group, 320 × 180 cards, the focused
 card scaled up with a white ring, and its art blurred behind a large title. Arrow keys / D-pad / left stick
 move one step per push, Return, Space or the bottom button play (the window closes while the game starts),
-Esc or the right button close. Art: Steam header, SteamGridDB grid, libretro cover, else the app icon.
+Esc or the right button open the power menu (Back to Games, Sleep, Restart, Turn Off and Quit Cube TV; Restart and Turn Off need a second press). Art: Steam header, SteamGridDB grid, libretro cover, else the app icon.
 Code: `CubeTV.swift`. Not yet: collections, controller pairing, store, web apps.
