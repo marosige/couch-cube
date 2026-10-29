@@ -202,6 +202,9 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
     static let launcherAppsKey = "launcherApps"
     static let preloadAppsKey = "preloadApps"
     static let preloadAutoKey = "preloadAuto"
+    static let quitAtStartKey = "quitAtStart"
+    static let focusOnKey = "gameNightFocusOn"
+    static let focusOffKey = "gameNightFocusOff"
     var launcherLibrary: LibraryGames?
     let cubeTV = CubeTVController()
     var tvControllersOpen = false
@@ -234,8 +237,8 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
     var sidebarAttention: [Int: NSColor] = [:]
     var sidebarTasks: [SidebarTask] = []
     var sidebarTaskCounts: [Int: SidebarBadge] = [:]
-    /// The sidebar marks one setup step at a time (no setting: it ends by itself once everything is done).
-    var guidedSetup = true
+    /// Off: the sidebar always shows every notification, red and yellow, on every page that has one.
+    var guidedSetup = false
     var couchCubeUpdateAvailable = false
     var controllerInputUnavailable = false
     let inspectorRows = NSStackView()
@@ -509,7 +512,6 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
         appMenu.addItem(withTitle: "About Couch Cube", action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: "")
         appMenu.addItem(.separator())
         appMenu.addItem(withTitle: "Settings…", action: #selector(openSettings), keyEquivalent: ",").target = self
-        appMenu.addItem(withTitle: "Open Cube TV Preview", action: #selector(openCubeTV), keyEquivalent: "t").target = self
         appMenu.addItem(.separator())
         appMenu.addItem(withTitle: "Quit Couch Cube", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         let appItem = NSMenuItem()
@@ -932,7 +934,7 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
             card("3  On the TV", subtitle: "What Cube TV opens.", views: [tvMenuChoices, tvMenuStatus]),
             card("4  Cube TV", subtitle: "Couch Cube's own TV home screen. Start opens its menu; B goes back; the controller's Home button brings it back over any game.",
                  views: [row([button("Open Cube TV", #selector(openCubeTV)), button("Add Web App\u{2026}", #selector(addWebApp))]), cubeHomeStatus]),
-            card("5  Preload & running apps", subtitle: "Open launchers like Steam in the background before game night, so they are ready when you sit down.",
+            card("5  Game Night", subtitle: "Before game night: open launchers like Steam in the background, quit apps that get in the way, and switch on a Focus.",
                  views: [preloadCardContent()])
         ]))
         renderConsoleMode()
@@ -1030,7 +1032,7 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
         if !ProcessInfo.processInfo.arguments.contains("--smoke-test") {
             startHomeWatcher()
             startRunningWatcher()
-            if UserDefaults.standard.bool(forKey: Self.preloadAutoKey) { preloadNow() }
+            if UserDefaults.standard.bool(forKey: Self.preloadAutoKey) { startGameNight() }
         }
         if ProcessInfo.processInfo.arguments.contains("--cube-tv"), !ProcessInfo.processInfo.arguments.contains("--smoke-test") {
             window.orderOut(nil)
@@ -1147,7 +1149,8 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
             if preferred == "cube-tv" { return preferred }
             return installed(preferred) ? preferred : nil
         }
-        return installed("steam") ? "steam" : installed("es-de") ? "es-de" : nil
+        // Nothing chosen yet: Cube TV, Couch Cube's own TV home screen, is the default.
+        return "cube-tv"
     }
 
     var controllerBluetoothNeedsAttention: Bool {

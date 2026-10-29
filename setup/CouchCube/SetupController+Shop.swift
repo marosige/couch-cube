@@ -1043,7 +1043,8 @@ extension SetupController {
         let was = item.best.flatMap { best in best.normalPrice.flatMap { $0 > best.price ? shopPrice($0, best.currency).text : nil } }
         let right = offerColumns(price: bestPrice, priceText: bestPrice == nil ? "\u{2014}" : nil, was: was,
                                  savings: item.onSale ? item.best?.savings : nil, insight: item.insight, normal: item.best?.normalPrice,
-                                 target: targetButton ? targetPill(for: item, reached: reached) : nil)
+                                 target: targetButton ? targetPill(for: item, reached: reached) : nil,
+                                 lowPill: targetButton ? lowTargetPill(for: item) : nil)
         let artURL = steamArtURL(item.steamAppId) ?? item.thumb
         let art: NSView = safeDealURL(artURL ?? "") == nil
             ? symbolArtwork(item.appStoreId != nil ? "apple.logo" : "gamecontroller", size: Self.shopArtworkSize.height, width: Self.shopArtworkSize.width)
@@ -1111,7 +1112,56 @@ extension SetupController {
 
     @objc func wishlistTargetClicked(_ sender: NSButton) {
         guard let key = sender.identifier?.rawValue, let item = wishlist?.items.first(where: { $0.key == key }), wishlistEditable else { return }
-        promptTarget(item)
+        // Smoke tests drive the dialog hook; the real row edits in place.
+        guard !ProcessInfo.processInfo.arguments.contains("--smoke-test"), let stack = sender.superview as? NSStackView,
+              let index = stack.arrangedSubviews.firstIndex(of: sender) else { promptTarget(item); return }
+        let code = targetCurrency(for: item)
+        let places = ShopMoney.minorUnits(code)
+        let field = TargetField()
+        field.placeholderString = places == 0 ? "4000 or 30%" : "9.99 or 30%"
+        field.font = .systemFont(ofSize: 11)
+        field.alignment = .right
+        field.setAccessibilityLabel("Target price in \(code) for \(item.title). Type a price, or a percent off the usual price.")
+        field.toolTip = "Type a price in \(code), or a percent off the usual price such as 30%. Empty removes the target."
+        if item.targetCurrency == code, let current = item.targetPrice { field.stringValue = String(format: "%.\(places)f", current) }
+        field.widthAnchor.constraint(equalToConstant: max(110, sender.frame.width)).isActive = true
+        field.heightAnchor.constraint(equalToConstant: 22).isActive = true
+        field.onCancel = { [weak self] in self?.renderWishlist() }
+        field.onCommit = { [weak self] text in self?.commitWishlistTarget(item, text: text) }
+        stack.insertArrangedSubview(field, at: index)
+        stack.removeArrangedSubview(sender)
+        sender.removeFromSuperview()
+        window.makeFirstResponder(field)
+    }
+
+    /// The usual price of the game's best offer in the target's currency: what a typed "30%" is taken off.
+    func targetBase(_ item: WishlistItem, _ code: String) -> Double? {
+        guard let best = item.best else { return nil }
+        let amount = ShopMoney.decimal(best.normalPrice ?? best.price)
+        if best.currency == code { return NSDecimalNumber(decimal: amount).doubleValue }
+        return ShopMoney.convert(amount, from: best.currency, to: code, rates: exchangeRates, feePercent: shopFeePercent, round: false)
+            .map { NSDecimalNumber(decimal: $0).doubleValue }
+    }
+
+    func commitWishlistTarget(_ item: WishlistItem, text: String) {
+        let code = targetCurrency(for: item)
+        let trimmed = text.trimmingCharacters(in: .whitespaces)
+        if trimmed.isEmpty {
+            changeWishlist(["--target", item.key])
+        } else if let price = parseTargetInput(trimmed, code, base: targetBase(item, code)) {
+            changeWishlist(["--target", item.key, "--price", String(format: "%.\(ShopMoney.minorUnits(code))f", price), "--currency", code])
+        } else {
+            renderWishlist()
+            showReminderNote(trimmed.contains("%") ? "A percent target needs a known price. Try a price instead." : "Type a price like 9.99, or a percent like 30%.", error: true)
+        }
+    }
+
+    /// The all-time low pill on a wishlist row: it reads like the line it replaces and sets that low as the target.
+    @objc func wishlistLowTargetClicked(_ sender: NSButton) {
+        guard let key = sender.identifier?.rawValue, let item = wishlist?.items.first(where: { $0.key == key }),
+              let insight = item.insight, insight.low > 0, wishlistEditable else { return }
+        changeWishlist(["--target", item.key, "--price", String(format: "%.\(ShopMoney.minorUnits(insight.currency))f", insight.low),
+                        "--currency", insight.currency])
     }
 
     func promptTarget(_ item: WishlistItem) {

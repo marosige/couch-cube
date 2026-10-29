@@ -8,11 +8,11 @@ import AppKit
 ///   discount column: (gap)                               · −40% pill      · that low's discount
 /// When today's price is the record, the bottom line reads "All-time low" in green instead.
 extension SetupController {
-    static let shopPriceColumnWidth: CGFloat = 104
+    static let shopPriceColumnWidth: CGFloat = 148
     static let shopDiscountColumnWidth: CGFloat = 58
 
     func offerColumns(price: ShopPrice?, priceText: String? = nil, was: String?, savings: Int?, insight: PriceInsight?,
-                      normal: Double?, target: NSView? = nil) -> NSView {
+                      normal: Double?, target: NSView? = nil, lowPill: NSView? = nil) -> NSView {
         let onSale = (savings ?? 0) > 0
         func label(_ text: String, size: CGFloat, weight: NSFont.Weight = .regular, color: NSColor = .secondaryLabelColor,
                    strike: Bool = false, id: String? = nil) -> NSTextField {
@@ -55,16 +55,14 @@ extension SetupController {
             } else if insight.low == 0 {
                 bottom = label(insight.text, size: 11, id: "shopPriceInsight")
             } else {
-                bottom = label("Lowest " + shopPrice(insight.low, insight.currency).text, size: 11, id: "shopPriceInsight")
-                if let percent = lowestEverDiscount(low: insight.low, normal: normal) {
-                    bottomPercent = label("\u{2212}\(percent)%", size: 10, id: "shopInsightPercent")
-                }
+                bottom = label(lowestText(insight, normal: normal), size: 11, id: "shopPriceInsight")
             }
             for case let field as NSTextField in [bottom, bottomPercent] {
                 field.toolTip = insight.detail
                 field.setAccessibilityLabel(field.stringValue + ". " + insight.detail)
             }
         }
+        if let lowPill { bottom = lowPill }
         let priceColumn = NSStackView(views: [slot(top, height: 14), slot(middle, height: 22), slot(bottom, height: 14)])
         priceColumn.orientation = .vertical
         priceColumn.alignment = .trailing
@@ -153,6 +151,29 @@ extension SetupController {
         if ["dlc", "season pass", "expansion pass", "soundtrack", "add-on"].contains(where: { lowered.contains($0) }) { tags.append("DLC") }
         if lowered.contains("early access") { tags.append("Early Access") }
         return tags
+    }
+
+    /// The all-time low as a small pill: the same text as the line it stands in for, and a click makes it the target.
+    func lowTargetPill(for item: WishlistItem) -> NSButton? {
+        guard let insight = item.insight, insight.low > 0 else { return nil }
+        let pill = RowControlButton(title: "", target: self, action: #selector(wishlistLowTargetClicked(_:)))
+        pill.identifier = NSUserInterfaceItemIdentifier(item.key)
+        pill.isBordered = false
+        pill.wantsLayer = true
+        pill.layer?.cornerRadius = 8
+        pill.layer?.borderWidth = 1
+        let record = insight.kind == "record"
+        let color: NSColor = record ? .systemGreen : .secondaryLabelColor
+        pill.attributedTitle = NSAttributedString(string: lowestText(insight, normal: item.best?.normalPrice), attributes: [
+            .font: NSFont.monospacedDigitSystemFont(ofSize: 10, weight: record ? .semibold : .regular), .foregroundColor: color])
+        pill.layer?.borderColor = color.withAlphaComponent(0.5).cgColor
+        pill.heightAnchor.constraint(equalToConstant: 16).isActive = true
+        pill.widthAnchor.constraint(equalToConstant: min(Self.shopPriceColumnWidth, ceil(pill.attributedTitle.size().width) + 14)).isActive = true
+        pill.isEnabled = wishlistEditable
+        pill.toolTip = insight.detail + "Click to be told when the price drops to this."
+        pill.setAccessibilityIdentifier("wishlistLowTarget")
+        pill.setAccessibilityLabel("Set the target price to the all-time low, " + lowestText(insight, normal: item.best?.normalPrice))
+        return pill
     }
 
     /// The faint "Target price" pill on wishlist rows; stronger once a target is set, green once it's reached.

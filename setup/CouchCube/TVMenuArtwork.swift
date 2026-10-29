@@ -22,6 +22,9 @@ enum TVMenuArtwork {
         case "es-de":
             style = (NSColor(srgbRed: 0.33, green: 0.07, blue: 0.11, alpha: 1), NSColor(srgbRed: 0.09, green: 0.03, blue: 0.06, alpha: 1),
                      NSColor(srgbRed: 0.98, green: 0.36, blue: 0.33, alpha: 1), "es-de", "Retro Games", "ES-DE")
+        case "cube-tv":
+            style = (NSColor(srgbRed: 0.20, green: 0.16, blue: 0.36, alpha: 1), NSColor(srgbRed: 0.06, green: 0.05, blue: 0.12, alpha: 1),
+                     NSColor(srgbRed: 0.62, green: 0.50, blue: 1.0, alpha: 1), "cube-tv", "Cube TV", "COUCH CUBE")
         default:
             style = (NSColor(srgbRed: 0.20, green: 0.16, blue: 0.36, alpha: 1), NSColor(srgbRed: 0.06, green: 0.05, blue: 0.12, alpha: 1),
                      NSColor(srgbRed: 0.62, green: 0.50, blue: 1.0, alpha: 1), nil, "Choose a TV menu", "CUBE TV")

@@ -1688,10 +1688,10 @@ extension SetupController {
                     precondition(self.task == nil, "Storage issues must never start setup")
                     self.report = Assessment(state: "valid layout", issues: [], notes: [], missing: ["steam", "es-de"])
                     self.updateSetupSummary()
-                    precondition(!self.playAction.isEnabled)
+                    precondition(self.playAction.isEnabled && self.homeMenuLabel.stringValue == "Cube TV", "Cube TV is the default TV menu")
                     self.report = Assessment(state: "valid layout", issues: [], notes: [], missing: ["steam"])
                     self.updateSetupSummary()
-                    precondition(self.playAction.isEnabled && self.homeMenuLabel.stringValue == "ES-DE")
+                    precondition(self.playAction.isEnabled && self.homeMenuLabel.stringValue == "Cube TV")
                     self.report = Assessment(state: "valid layout", issues: [], notes: [], missing: [])
                     self.updateSetupSummary()
                     precondition(self.playAction.isEnabled)
@@ -1700,7 +1700,7 @@ extension SetupController {
                     precondition(self.homeMenuLabel.stringValue == "ES-DE")
                     precondition(self.homePlayBackground.layer?.contents != nil && self.homeArtworkMenu == .some("es-de"),
                                  "The Cube TV tile shows the ES-DE artwork")
-                    for menu in ["steam", "es-de", nil] as [String?] {
+                    for menu in ["steam", "es-de", "cube-tv", nil] as [String?] {
                         precondition(TVMenuArtwork.image(for: menu).cgImage(forProposedRect: nil, context: nil, hints: nil) != nil)
                     }
                     self.preferredFrontend = nil
@@ -2794,7 +2794,7 @@ extension SetupController {
         rerenderShop()
         window.contentView!.layoutSubtreeIfNeeded()
         precondition(views(shopDetailContent).contains { $0.accessibilityIdentifier() == "shopGameHero" })
-        precondition(labels(shopDetailContent).contains("$9.99") && labels(shopDetailContent).contains("Lowest $7.99 (\u{2212}47%)"),
+        precondition(labels(shopDetailContent).contains("$9.99") && labels(shopDetailContent).contains("Lowest \u{2212}47% $7.99"),
                      "The all-time low with its price and discount: \(labels(shopDetailContent))")
         let lowest = views(shopDetailContent).compactMap { $0 as? NSTextField }.filter { $0.accessibilityIdentifier() == "shopLowest" }.map(\.stringValue)
         precondition(lowest.map { $0.replacingOccurrences(of: "\u{00A0}", with: " ") } == ["Lowest USD"],
@@ -2922,7 +2922,7 @@ extension SetupController {
         navigateHistory(-1)
         // The all-time low: only CheapShark's record minimum, as a small line under the price, with the record in the tooltip.
         let insights = views(searchList).filter { $0.accessibilityIdentifier() == "shopPriceInsight" }.compactMap { $0 as? NSTextField }
-        precondition(insights.map(\.stringValue).sorted() == ["All-time low", "Lowest $7.99"]
+        precondition(insights.map(\.stringValue).sorted() == ["All-time low", "Lowest \u{2212}47% $7.99"]
                      && insights.allSatisfy { ($0.toolTip ?? "").contains("7.99 USD") || ($0.toolTip ?? "").contains("19.99 USD") }
                      && insights.allSatisfy { !($0.toolTip ?? "").lowercased().contains("average") && ($0.toolTip ?? "").contains("2025") }
                      && !views(searchList).filter { $0.accessibilityIdentifier() == "shopOffer" }.contains { views($0).contains { $0.accessibilityIdentifier() == "shopPriceInsight" } },
@@ -2931,8 +2931,6 @@ extension SetupController {
             precondition(insight.superview?.superview?.accessibilityIdentifier() == "shopPriceColumn",
                          "The all-time low is the price column's bottom line")
         }
-        precondition(views(searchList).compactMap { $0 as? NSTextField }.contains { $0.accessibilityIdentifier() == "shopInsightPercent" && $0.stringValue == "\u{2212}47%" },
-                     "The low's discount sits beside it, under the discount pill")
         precondition(PriceInsight(kind: "above", percent: nil, low: 0, currency: "USD", date: nil).text == "Was free before"
                      && PriceInsight(kind: "above", percent: nil, low: 0, currency: "USD", date: nil).detail.contains("free"))
         precondition(Self.storeIconID("Steam") == "steam" && Self.storeIconID("GOG") == "gog-galaxy" && Self.storeIconID("Epic Games Store") == "epic-games" &&

@@ -112,11 +112,12 @@ enum TVPage { case home, detail, controllers, store }
 
 /// The power menu (Start), like the Steam Deck's: back to games, sleep, restart, turn off, quit.
 enum TVMenuAction: CaseIterable {
-    case sleep, restart, turnOff, quit, preload
+    case sleep, restart, turnOff, quit, preload, closePreloaded
 
     var title: String {
         switch self {
-        case .preload: return "Preload Apps"
+        case .preload: return "Start Game Night"
+        case .closePreloaded: return "End Game Night"
         case .sleep: return "Sleep"
         case .restart: return "Restart"
         case .turnOff: return "Turn Off"
@@ -127,6 +128,7 @@ enum TVMenuAction: CaseIterable {
     var symbol: String {
         switch self {
         case .preload: return "bolt.fill"
+        case .closePreloaded: return "bolt.slash.fill"
         case .sleep: return "moon.fill"
         case .restart: return "arrow.clockwise"
         case .turnOff: return "power"
@@ -566,7 +568,8 @@ final class CubeTVController {
 
     private func perform(_ action: TVMenuAction) {
         switch action {
-        case .preload: host?.preloadNow()
+        case .preload: host?.startGameNight()
+        case .closePreloaded: host?.endGameNight()
         case .quit: close()
         case .sleep: run("/usr/bin/pmset", ["sleepnow"])
         case .restart: systemEvent("aevtrrst")

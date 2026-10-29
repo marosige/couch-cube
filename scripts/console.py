@@ -2385,9 +2385,9 @@ def set_frontend(package, confirm=False):
 
 def default_frontend():
     preferred = frontend_preference()
-    if preferred == "cube-tv":
+    if preferred in (None, "cube-tv"):  # Cube TV is the default TV menu.
         return "cube-tv"
-    for package in [preferred] if preferred else ["steam", "es-de"]:
+    for package in [preferred]:
         name = PACKAGES[package]
         if any((parent / name).is_dir() for parent in [Path("/Applications"), Path.home() / "Applications"]):
             app_binary(name)
