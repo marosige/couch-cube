@@ -116,8 +116,8 @@ enum TVMenuAction: CaseIterable {
 
     var title: String {
         switch self {
-        case .preload: return "Preload Apps"
-        case .closePreloaded: return "Close Preloaded Apps"
+        case .preload: return "Start Game Night"
+        case .closePreloaded: return "End Game Night"
         case .sleep: return "Sleep"
         case .restart: return "Restart"
         case .turnOff: return "Turn Off"
@@ -568,8 +568,8 @@ final class CubeTVController {
 
     private func perform(_ action: TVMenuAction) {
         switch action {
-        case .preload: host?.preloadNow()
-        case .closePreloaded: host?.closePreloadedClicked()
+        case .preload: host?.startGameNight()
+        case .closePreloaded: host?.endGameNight()
         case .quit: close()
         case .sleep: run("/usr/bin/pmset", ["sleepnow"])
         case .restart: systemEvent("aevtrrst")

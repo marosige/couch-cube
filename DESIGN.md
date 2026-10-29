@@ -648,3 +648,11 @@ files has the folder removed (only empty folders, never files). `BIOS/retroarch`
 - On a Cube Shop wishlist row, clicking **Target price** turns the pill into a text field in place (no dialog):
   type a price, a percent off the usual price (`30%`), or nothing to remove it; Return saves, Esc puts the pill back.
   Under the price, a small pill carries the all-time-low text ("Lowest −47% $7.99"); clicking it sets that low as the target.
+
+### Game Night (Console Mode card 5)
+
+**Start Game Night** quits the apps saved to quit (tick "Always quit" on a running app, or Add App to Quit), opens the
+preload apps hidden (Steam and Battle.net by default when installed; installed launchers and emulators are offered as
+one-click "+" suggestions), and runs the optional Focus Shortcut ("Set Focus" action, e.g. Gaming). **End Game Night**
+closes the preload apps and runs the Focus-off Shortcut. The same two actions are in the Cube TV menu.
+Every running app has its Quit button at the end of its row.
