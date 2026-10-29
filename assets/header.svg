@@ -11,11 +11,11 @@
       <stop offset="0" stop-color="#a080ff" stop-opacity="0.45"/>
       <stop offset="1" stop-color="#a080ff" stop-opacity="0"/>
     </radialGradient>
-    <clipPath id="cube-tv-clip"><rect x="-1504" y="-1179" width="2768" height="1758" rx="28"/></clipPath>
+    <clipPath id="cube-tv-clip"><rect x="-1504" y="-999" width="2768" height="1543" rx="28"/></clipPath>
   </defs>
-  <rect x="-1520" y="-1195" width="2800" height="1790" rx="42" fill="#242a2d"/>
-  <rect x="-1504" y="-1179" width="2768" height="1758" rx="28" fill="url(#cube-tv-screen)"/>
-  <rect x="-1504" y="-1179" width="2768" height="1758" rx="28" fill="url(#cube-tv-glow)"/>
+  <rect x="-1520" y="-1015" width="2800" height="1575" rx="42" fill="#242a2d"/>
+  <rect x="-1504" y="-999" width="2768" height="1543" rx="28" fill="url(#cube-tv-screen)"/>
+  <rect x="-1504" y="-999" width="2768" height="1543" rx="28" fill="url(#cube-tv-glow)"/>
   <g id="cube-tv-ui" clip-path="url(#cube-tv-clip)">
     <rect x="-1400" y="-30" width="760" height="76" rx="38" fill="#ffffff" fill-opacity="0.92"/>
     <rect x="-1400" y="76" width="480" height="34" rx="17" fill="#ffffff" fill-opacity="0.45"/>
@@ -31,7 +31,6 @@
     <rect x="478" y="420" width="280" height="22" rx="11" fill="#ffffff" fill-opacity="0.6"/>
     <rect x="1040" y="210" width="560" height="262" rx="24" fill="#6b4a3d"/>
   </g>
-  <rect x="-1504" y="560" width="2768" height="19" fill="#242a2d"/>
   <rect x="-1760" y="823" width="3280" height="185" rx="8" fill="#9c704e"/>
   <path d="M-1760 831a8 8 0 0 1 8-8H1512a8 8 0 0 1 8 8v22H-1760Z" fill="#b88b62"/>
   <g transform="translate(600 0)">

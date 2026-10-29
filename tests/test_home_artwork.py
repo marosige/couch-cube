@@ -16,7 +16,7 @@ class HomeArtworkTests(unittest.TestCase):
         self.assertEqual(width * 9, height * 16)
         left, top, view_width, view_height = map(float, header.get("viewBox").split())
         self.assertEqual(float(tv.get("x")) + width / 2, left + view_width / 2)
-        self.assertEqual(float(tv.get("y")) + height, 380)
+        self.assertEqual(float(tv.get("y")) + height, 560)
         self.assertEqual(top, -50)
         self.assertEqual(view_height, 1000)
         self.assertGreater((float(tv.get("y")) + height - top) / view_height, 0.4)
