@@ -194,6 +194,9 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
     var homeSessionControllers: [String] = []
     var homeObservedConnections = Set<String>()
     let homePlayBackground = NSView()
+    /// The Play tile's name and dimming layer; Cube TV's picture is the whole tile, so it hides both.
+    var homePlayTitle: NSTextField!
+    var homePlayShade: NSView!
     let launcherSections = NSStackView()
     /// Shown after an app operation fails: macOS's App Management permission is the usual cause.
     let appManagementHint = NSStackView()
@@ -670,6 +673,8 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
         homePlaySubtitle.font = .systemFont(ofSize: 13, weight: .semibold)
         homePlaySubtitle.textColor = NSColor.white.withAlphaComponent(0.85)
         homePlaySubtitle.shadow = playTitle.shadow
+        homePlayTitle = playTitle
+        homePlayShade = shade
         for view in [homePlayBackground, shade, playTitle, homePlaySubtitle, play] {
             view.translatesAutoresizingMaskIntoConstraints = false
             playCard.contentView!.addSubview(view)

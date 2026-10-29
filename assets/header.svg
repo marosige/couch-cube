@@ -1,10 +1,36 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1680" height="500" viewBox="-1800 -50 3360 1000" role="img" aria-labelledby="title desc">
   <title id="title">Couch Cube</title>
-  <desc id="desc">A narrow oak cabinet scene showing only the bottom of a centered television and a Mac mini. Reveal portable-ssd for the external SSD edition.</desc>
+  <desc id="desc">A narrow oak cabinet scene with a large television showing the Cube TV home screen, and a Mac mini. Reveal portable-ssd for the external SSD edition.</desc>
   <rect x="-1800" y="-650" width="3360" height="1600" fill="#718c91"/>
-  <rect x="-1520" y="-1195" width="2800" height="1575" rx="42" fill="#242a2d"/>
-  <rect x="-1504" y="-1179" width="2768" height="1543" rx="28" fill="#10191e"/>
-  <rect x="500" y="358" width="742" height="8" rx="4" fill="#424d52"/>
+  <defs>
+    <linearGradient id="cube-tv-screen" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#2e225c"/>
+      <stop offset="1" stop-color="#0a0818"/>
+    </linearGradient>
+    <radialGradient id="cube-tv-glow" cx="0.6" cy="0" r="0.6">
+      <stop offset="0" stop-color="#a080ff" stop-opacity="0.45"/>
+      <stop offset="1" stop-color="#a080ff" stop-opacity="0"/>
+    </radialGradient>
+    <clipPath id="cube-tv-clip"><rect x="-1504" y="-999" width="2768" height="1543" rx="28"/></clipPath>
+  </defs>
+  <rect x="-1520" y="-1015" width="2800" height="1575" rx="42" fill="#242a2d"/>
+  <rect x="-1504" y="-999" width="2768" height="1543" rx="28" fill="url(#cube-tv-screen)"/>
+  <rect x="-1504" y="-999" width="2768" height="1543" rx="28" fill="url(#cube-tv-glow)"/>
+  <g id="cube-tv-ui" clip-path="url(#cube-tv-clip)">
+    <rect x="-1400" y="-30" width="760" height="76" rx="38" fill="#ffffff" fill-opacity="0.92"/>
+    <rect x="-1400" y="76" width="480" height="34" rx="17" fill="#ffffff" fill-opacity="0.45"/>
+    <rect x="-1400" y="150" width="260" height="30" rx="15" fill="#ffffff" fill-opacity="0.55"/>
+    <rect x="-1420" y="194" width="632" height="316" rx="34" fill="#ffffff"/>
+    <rect x="-1404" y="210" width="600" height="284" rx="24" fill="#c4302b"/>
+    <rect x="-1366" y="440" width="300" height="22" rx="11" fill="#ffffff" fill-opacity="0.6"/>
+    <rect x="-760" y="210" width="560" height="262" rx="24" fill="#2a475e"/>
+    <rect x="-722" y="420" width="280" height="22" rx="11" fill="#ffffff" fill-opacity="0.6"/>
+    <rect x="-160" y="210" width="560" height="262" rx="24" fill="#7b5cff"/>
+    <rect x="-122" y="420" width="280" height="22" rx="11" fill="#ffffff" fill-opacity="0.6"/>
+    <rect x="440" y="210" width="560" height="262" rx="24" fill="#2e9f6b"/>
+    <rect x="478" y="420" width="280" height="22" rx="11" fill="#ffffff" fill-opacity="0.6"/>
+    <rect x="1040" y="210" width="560" height="262" rx="24" fill="#6b4a3d"/>
+  </g>
   <rect x="-1760" y="823" width="3280" height="185" rx="8" fill="#9c704e"/>
   <path d="M-1760 831a8 8 0 0 1 8-8H1512a8 8 0 0 1 8 8v22H-1760Z" fill="#b88b62"/>
   <g transform="translate(600 0)">

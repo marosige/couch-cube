@@ -64,7 +64,7 @@ Couch Cube includes no games, BIOS, firmware or keys. How each page works in det
 | Nintendo Switch | Manually supplied compatible Ryujinx-based macOS build (`Ryujinx.app`) | No verified automatic download bundled; configure your own legally obtained keys, firmware and game dumps |
 
 These are launch integrations, not game compatibility guarantees. Disabling a
-console preserves its ROMs and saves. A hidden console's ROM and BIOS folders get a leading dot
+console preserves its ROMs and saves. A hidden console's ROM and BIOS folders (BIOS folders exist only for consoles that use BIOS files) get a leading dot
 (for example `ROMs/.nes`), which hides them in Finder and ES-DE; showing the console again renames them back.
 A hidden console with no ROMs or BIOS files has its empty folders removed. Quit ES-DE before changing console selection or
 updating frontend settings. Installed app icons are read from the apps on

@@ -361,6 +361,11 @@ extension SetupController {
                          help: "Copy filename " + $0)
                 }))
             }
+            if names.count > 1 {
+                // One click for every file name in this folder, separated by spaces, to paste into a search.
+                fileRows.addArrangedSubview(pill("Copy all filenames", symbol: "doc.on.doc.fill", action: #selector(copyBIOSNames(_:)),
+                                                 value: names.joined(separator: " "), help: "Copy all filenames: " + names.joined(separator: " ")))
+            }
             let files = row([text("Files", size: 11, secondary: true), fileRows, NSView()])
             files.distribution = .fill
             files.alignment = .top

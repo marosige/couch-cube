@@ -261,7 +261,7 @@ SteamGridDB's wide grid on their tile (before the libretro cover), plus a hero, 
 SteamGridDB's CDN, misses remembered for a week. Drive pages count games
 the same way, not files. Tiles fill the width in a flow grid; click, Return or
 VoiceOver opens them, and their menu offers Open, Show in Finder and, for added apps, Remove from Play. The search field filters by name.
-The Cube TV tile's artwork is drawn in code (`TVMenuArtwork.swift`) so it stays sharp at any size: the
+The Cube TV tile's artwork (other menus) is drawn in code (`TVMenuArtwork.swift`) so it stays sharp at any size: the
 chosen menu's colors (Steam blue, ES-DE red, Cube TV purple when none is chosen), a soft glow and
 scanlines, the installed app's own icon (bundled icon as fallback) and its name ("STEAM / Big Picture",
 "ES-DE / Retro Games"), all centered in a square safe area so nothing is cut off however narrow the
@@ -636,7 +636,7 @@ App Settings...).
 
 ### BIOS folders per console
 
-Every shown console has its own `BIOS/<console>` folder (psx, ps2, switch...). Files put there reach RetroArch's
+Only a shown console that can use BIOS or firmware files has its own `BIOS/<console>` folder (psx, saturn, dreamcast, nds, pcengine, segacd, ps2, ps3, switch, xbox); consoles like NES or SNES get none, and an empty one made earlier is removed. Files put there reach RetroArch's
 system folder when a game starts (never overwriting). Hiding a console that has BIOS files renames its folder to
 `BIOS/.<console>` (hidden in Finder) and showing it again renames it back; a hidden console whose BIOS folder has no
 files has the folder removed (only empty folders, never files). `BIOS/retroarch` stays the shared RetroArch folder.
@@ -656,3 +656,15 @@ preload apps hidden (Steam and Battle.net by default when installed; installed l
 one-click "+" suggestions), and runs the optional Focus Shortcut ("Set Focus" action, e.g. Gaming). **End Game Night**
 closes the preload apps and runs the Focus-off Shortcut. The same two actions are in the Cube TV menu.
 Every running app has its Quit button at the end of its row.
+
+### Cube TV picture and home header
+
+When Cube TV is the TV menu, the **Play tile is just its picture** (`assets/app-icons/cube-tv-tile.png`: a wall-mounted TV
+showing a made-up Cube TV home screen, the Mac mini bottom right on the oak cabinet), with no logo, name or dimming.
+`scripts/cube-tv-icon.py` draws it and the square app-style icon (`cube-tv.png`). `assets/header.svg` (the non-SSD
+header, exported to `header.png`) now shows the TV larger, with the same home screen on it.
+
+### Retro Consoles: BIOS shortcuts
+
+A console that uses BIOS files has **Open BIOS Folder** next to **Open ROM Folder** on its page. Under the missing files, the
+per-file copy pills stay, and **Copy all filenames** copies every missing name of that folder in one string, separated by spaces.

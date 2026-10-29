@@ -729,7 +729,13 @@ extension SetupController {
             add(separator())
             let open = button("Open ROM Folder", #selector(openBIOSFolder(_:)))
             open.identifier = NSUserInterfaceItemIdentifier(detail.folder)
-            add(row([heading("Games"), NSView(), open]))
+            var openButtons: [NSView] = [open]
+            if let bios = system.bios, bios.state != "not-needed", let root = selected?.root {
+                let openBIOS = button("Open BIOS Folder", #selector(openBIOSFolder(_:)))
+                openBIOS.identifier = NSUserInterfaceItemIdentifier(root + "/BIOS/" + system.id)
+                openButtons.insert(openBIOS, at: 0)
+            }
+            add(row([heading("Games"), NSView()] + openButtons))
             if detail.games.isEmpty {
                 add(text("No games yet. Put this console's games in its ROM folder.", size: 12, secondary: true))
             }
