@@ -401,13 +401,13 @@ extension SetupController {
         return tag
     }
 
-    /// The all-time low in shop terms: "Lowest $0.99 (−90%)", or "All-time low" in green when today's price
+    /// The all-time low in shop terms: "Lowest −90% $0.99" (the percent needs the usual price), or "All-time low" in green when today's price
     /// is the record. `normal` is the usual price, needed for the percent.
     func lowestText(_ insight: PriceInsight, normal: Double?) -> String {
         if insight.kind == "record" { return "All-time low" }
         if insight.low == 0 { return insight.text }
-        let percent = lowestEverDiscount(low: insight.low, normal: normal).map { " (\u{2212}\($0)%)" } ?? ""
-        return "Lowest " + shopPrice(insight.low, insight.currency).text + percent
+        let percent = lowestEverDiscount(low: insight.low, normal: normal).map { " \u{2212}\($0)%" } ?? ""
+        return "Lowest" + percent + " " + shopPrice(insight.low, insight.currency).text
     }
 
     func insightLabel(_ insight: PriceInsight?, normal: Double? = nil) -> NSView? {
@@ -592,7 +592,7 @@ extension SetupController {
         block.setHuggingPriority(.required, for: .horizontal)
         for line in lines { line.widthAnchor.constraint(equalTo: block.widthAnchor).isActive = true }
         // The pill column is reserved in every row, so prices line up whether or not a game is on sale:
-        // the discount pill, and under it the all-time low ("All-time low" or "Lowest $7.99 (−47%)").
+        // the discount pill, and under it the all-time low ("All-time low" or "Lowest −47% $7.99").
         let pillColumn = NSStackView()
         pillColumn.orientation = .vertical
         pillColumn.alignment = .trailing

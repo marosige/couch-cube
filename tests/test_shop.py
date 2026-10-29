@@ -58,6 +58,10 @@ class Opener:
         elif parts.path == "/api/featuredcategories":
             return Response(json.dumps({"top_sellers": {"items": [{"id": 1675200}, {"id": 367520}, {"id": 367520}, {"id": 367520, "type": 1}]},
                                         "new_releases": {"items": [{"id": 367520}]}}).encode(), url)
+        elif parts.path == "/v1/catalog":
+            catalog = {"products": [{"title": "Hollow Expired", "coverHorizontal": "https://images.gog-statics.com/abc.png"}]} \
+                if "Hollow" in query["query"][0] else {"products": []}
+            return Response(json.dumps(catalog).encode(), url)
         elif parts.path in ("/search", "/lookup"):
             name = FIX / "itunes-search.json"
         else:

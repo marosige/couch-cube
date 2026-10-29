@@ -182,6 +182,12 @@ def games_by_ids(ids, refresh=False, now=None, opener=None, stores=None):
                               "steam_app_id": app_id if app_id.isdigit() and app_id != "0" else None,
                               "thumb": deals.https_url(info.get("thumb")), "offers": offers, "history": history,
                               "insight": wishlist.price_insight(offers[0]["price"], "USD", history) if offers else None}
+    for game in games.values():
+        if game["offers"] and not game.get("thumb"):
+            game["offers_store"] = game["offers"][0].get("store")
+    deals.add_gog_covers(list(games.values()), refresh, now, opener)
+    for game in games.values():
+        game.pop("offers_store", None)
     return games, error
 
 

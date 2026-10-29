@@ -8,7 +8,7 @@ import AppKit
 ///   discount column: (gap)                               · −40% pill      · that low's discount
 /// When today's price is the record, the bottom line reads "All-time low" in green instead.
 extension SetupController {
-    static let shopPriceColumnWidth: CGFloat = 104
+    static let shopPriceColumnWidth: CGFloat = 148
     static let shopDiscountColumnWidth: CGFloat = 58
 
     func offerColumns(price: ShopPrice?, priceText: String? = nil, was: String?, savings: Int?, insight: PriceInsight?,
@@ -55,10 +55,7 @@ extension SetupController {
             } else if insight.low == 0 {
                 bottom = label(insight.text, size: 11, id: "shopPriceInsight")
             } else {
-                bottom = label("Lowest " + shopPrice(insight.low, insight.currency).text, size: 11, id: "shopPriceInsight")
-                if let percent = lowestEverDiscount(low: insight.low, normal: normal) {
-                    bottomPercent = label("\u{2212}\(percent)%", size: 10, id: "shopInsightPercent")
-                }
+                bottom = label(lowestText(insight, normal: normal), size: 11, id: "shopPriceInsight")
             }
             for case let field as NSTextField in [bottom, bottomPercent] {
                 field.toolTip = insight.detail

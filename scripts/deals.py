@@ -22,13 +22,18 @@ CHEAPSHARK = "https://www.cheapshark.com/api/1.0/"
 GAMERPOWER = "https://www.gamerpower.com/api/"
 CHEAPSHARK_HOSTS = {"www.cheapshark.com"}
 GAMERPOWER_HOSTS = {"www.gamerpower.com"}
+GOG_CATALOG = "https://catalog.gog.com/v1/catalog"
+GOG_HOSTS = {"catalog.gog.com"}
+GOG_IMAGE_HOSTS = {"images.gog-statics.com"}
+# Cover lookups per request: the rest fill in on later loads, because every answer is cached for a month.
+GOG_LOOKUPS = 12
 RESPONSE_LIMIT = 4 * 1024 ** 2
 PAGE_SIZE = 60
 # Fresh enough to reuse without asking: CheapShark refreshes prices about hourly and caches for 5–10 minutes.
 FRESH_SECONDS = {"deals": 10 * 60, "stores": 24 * 3600, "giveaways": 30 * 60, "search": 30 * 60, "games": 10 * 60,
                  "appstore": 6 * 3600, "rates": 12 * 3600, "platforms": 7 * 24 * 3600,
                  "steamdetails": 7 * 24 * 3600, "steamwishlist": 30 * 60, "steamapp": 7 * 24 * 3600,
-                 "steamfeatured": 6 * 3600}
+                 "steamfeatured": 6 * 3600, "gogcover": 30 * 24 * 3600}
 # A manual refresh inside this window reuses the cache, so repeated clicks never become repeated requests.
 REFRESH_FLOOR = 60
 SORTS = {"rating": "Deal Rating", "savings": "Savings", "price": "Price", "price-desc": "Price", "recent": "Recent",
@@ -181,6 +186,45 @@ def normalize_store(item):
     return {"id": store_id, "name": name.strip(), "active": item.get("isActive") in (1, "1", True)}
 
 
+def _title_words(title):
+    return re.sub(r"[^a-z0-9]+", " ", re.sub(r"[\u2122\u00ae\u00a9]", "", str(title).lower())).strip()
+
+
+def gog_cover(title, refresh=False, now=None, opener=None):
+    """GOG's wide cover for a game of exactly this title (GOG has pictures for games Steam does not sell), or None."""
+    words = _title_words(title)
+    if not words or len(str(title)) > 120:
+        return None
+    query = {"limit": 5, "query": "like:" + str(title), "order": "desc:score", "productType": "in:game,pack",
+             "page": 1, "countryCode": "US", "locale": "en-US", "currencyCode": "USD"}
+    url = GOG_CATALOG + "?" + urllib.parse.urlencode(query)
+    reply = cached_fetch("gogcover", "gog", url, GOG_HOSTS, refresh, now, opener)
+    data = reply.get("data")
+    for product in (data.get("products") if isinstance(data, dict) else None) or []:
+        if isinstance(product, dict) and _title_words(product.get("title")) == words:
+            return https_url(product.get("coverHorizontal"), GOG_IMAGE_HOSTS) or https_url(product.get("coverVertical"), GOG_IMAGE_HOSTS)
+    return None
+
+
+def add_gog_covers(items, refresh=False, now=None, opener=None, budget=GOG_LOOKUPS):
+    """Gives games that have no Steam picture (and GOG's own deals) GOG's cover as their thumb. Titles only, no credentials."""
+    for item in items:
+        if budget <= 0:
+            break
+        if not isinstance(item, dict) or item.get("steam_app_id"):
+            continue
+        if item.get("thumb") and item.get("store") != "GOG":
+            continue
+        budget -= 1
+        try:
+            cover = gog_cover(item.get("title"), refresh, now, opener)
+        except DealsError:
+            continue
+        if cover:
+            item["thumb"] = cover
+    return items
+
+
 def normalize_deal(item, stores, installed):
     if not isinstance(item, dict):
         return None
@@ -242,6 +286,7 @@ def store_deals(page=0, sort="rating", store=None, search=None, refresh=False, i
     deals = [deal for deal in (normalize_deal(item, stores, installed) for item in (raw if isinstance(raw, list) else []))
              if deal]
     total_pages = reply.get("pages")
+    add_gog_covers(deals, refresh, now, opener)
     return {
         "source": "cheapshark", "page": page, "pages": total_pages,
         "more": bool(deals) and (page + 1 < total_pages if total_pages else len(raw or []) >= PAGE_SIZE),
