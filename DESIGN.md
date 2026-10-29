@@ -624,7 +624,7 @@ Code: `CubeTV.swift`. Not yet: collections, controller pairing, store, web apps.
   app override its own Home gesture in the background is unverified on real hardware.
 - **Running Now.** The first Cube TV shelf lists open apps (not Couch Cube or Finder): Switch to, Quit, and
   Force Quit (asks for a second press). Launching a game hides Cube TV; when the last game quits, Cube TV
-  returns by itself. The Play tile shows "Running: <name>".
+  returns by itself.
 - **Preload** (Console Mode, card 5, and Cube TV menu → Preload Apps). Apps the owner picks (Steam by
   default) open hidden before game night; Close Preloaded quits them. "Running now" below lists every open app with Quit.
 
