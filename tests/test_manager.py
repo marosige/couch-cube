@@ -970,21 +970,28 @@ class DefaultFrontendTests(unittest.TestCase):
         with self.assertRaises(manager.SetupError):
             manager.frontend_preference()
 
-    def test_steam_preferred_when_both_installed(self):
+    def test_cube_tv_is_the_default_menu(self):
+        with patch.object(manager.Path, "is_dir", return_value=False):
+            self.assertEqual(manager.default_frontend(), "cube-tv")
+
+    def test_steam_chosen_and_installed(self):
+        self.config.write_text('{"default": "steam"}')
         with patch.object(manager.Path, "is_dir", return_value=True), \
                 patch.object(manager, "app_binary") as binary:
             self.assertEqual(manager.default_frontend(), "steam")
             binary.assert_called_once_with("Steam.app")
 
-    def test_es_de_selected_without_steam(self):
+    def test_es_de_chosen_and_installed(self):
+        self.config.write_text('{"default": "es-de"}')
         with patch.object(manager.Path, "is_dir", lambda path: path.name == "ES-DE.app"), \
                 patch.object(manager, "app_binary") as binary:
             self.assertEqual(manager.default_frontend(), "retro")
             binary.assert_called_once_with("ES-DE.app")
 
-    def test_no_frontend_reports_error(self):
+    def test_chosen_menu_missing_reports_error(self):
+        self.config.write_text('{"default": "steam"}')
         with patch.object(manager.Path, "is_dir", return_value=False):
-            with self.assertRaisesRegex(manager.SetupError, "Steam or ES-DE"):
+            with self.assertRaisesRegex(manager.SetupError, "missing"):
                 manager.default_frontend()
 
     def test_console_dispatches_to_retro_with_managed_home(self):

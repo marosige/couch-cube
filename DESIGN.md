@@ -610,7 +610,7 @@ game's file name; standalone emulators say where they keep saves) with Open ROM 
 
 ## Cube TV (preview)
 
-Couch Cube menu → **Open Cube TV Preview** (⌘T) opens a full-screen, dark, Apple TV-style window with the
+Console Mode → **Cube TV** (the default Play launcher; also the "Open Cube TV" button there) opens a full-screen, dark, Apple TV-style window with the
 same games as Play (Steam, retro, Windows, Mac, added), one shelf per group, 320 × 180 cards, the focused
 card scaled up with a white ring, and its art blurred behind a large title. Arrow keys / D-pad / left stick
 move one step per push, Return, Space or the bottom button play (the window closes while the game starts),
@@ -640,3 +640,11 @@ Every shown console has its own `BIOS/<console>` folder (psx, ps2, switch...). F
 system folder when a game starts (never overwriting). Hiding a console that has BIOS files renames its folder to
 `BIOS/.<console>` (hidden in Finder) and showing it again renames it back; a hidden console whose BIOS folder has no
 files has the folder removed (only empty folders, never files). `BIOS/retroarch` stays the shared RetroArch folder.
+
+### Cube TV is the default launcher; wishlist targets
+
+- The Play tile opens **Cube TV** unless Console Mode names Steam Big Picture or ES-DE. The "Open Cube TV Preview"
+  app-menu item is gone; Console Mode → Cube TV has an Open button.
+- On a Cube Shop wishlist row, clicking **Target price** turns the pill into a text field in place (no dialog):
+  type a price, a percent off the usual price (`30%`), or nothing to remove it; Return saves, Esc puts the pill back.
+  Under the price, a small pill carries the all-time-low text ("Lowest −47% $7.99"); clicking it sets that low as the target.

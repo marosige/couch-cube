@@ -509,7 +509,6 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
         appMenu.addItem(withTitle: "About Couch Cube", action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: "")
         appMenu.addItem(.separator())
         appMenu.addItem(withTitle: "Settings…", action: #selector(openSettings), keyEquivalent: ",").target = self
-        appMenu.addItem(withTitle: "Open Cube TV Preview", action: #selector(openCubeTV), keyEquivalent: "t").target = self
         appMenu.addItem(.separator())
         appMenu.addItem(withTitle: "Quit Couch Cube", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         let appItem = NSMenuItem()
@@ -1147,7 +1146,8 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
             if preferred == "cube-tv" { return preferred }
             return installed(preferred) ? preferred : nil
         }
-        return installed("steam") ? "steam" : installed("es-de") ? "es-de" : nil
+        // Nothing chosen yet: Cube TV, Couch Cube's own TV home screen, is the default.
+        return "cube-tv"
     }
 
     var controllerBluetoothNeedsAttention: Bool {

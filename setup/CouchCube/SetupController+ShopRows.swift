@@ -12,7 +12,7 @@ extension SetupController {
     static let shopDiscountColumnWidth: CGFloat = 58
 
     func offerColumns(price: ShopPrice?, priceText: String? = nil, was: String?, savings: Int?, insight: PriceInsight?,
-                      normal: Double?, target: NSView? = nil) -> NSView {
+                      normal: Double?, target: NSView? = nil, lowPill: NSView? = nil) -> NSView {
         let onSale = (savings ?? 0) > 0
         func label(_ text: String, size: CGFloat, weight: NSFont.Weight = .regular, color: NSColor = .secondaryLabelColor,
                    strike: Bool = false, id: String? = nil) -> NSTextField {
@@ -62,6 +62,7 @@ extension SetupController {
                 field.setAccessibilityLabel(field.stringValue + ". " + insight.detail)
             }
         }
+        if let lowPill { bottom = lowPill }
         let priceColumn = NSStackView(views: [slot(top, height: 14), slot(middle, height: 22), slot(bottom, height: 14)])
         priceColumn.orientation = .vertical
         priceColumn.alignment = .trailing
@@ -150,6 +151,29 @@ extension SetupController {
         if ["dlc", "season pass", "expansion pass", "soundtrack", "add-on"].contains(where: { lowered.contains($0) }) { tags.append("DLC") }
         if lowered.contains("early access") { tags.append("Early Access") }
         return tags
+    }
+
+    /// The all-time low as a small pill: the same text as the line it stands in for, and a click makes it the target.
+    func lowTargetPill(for item: WishlistItem) -> NSButton? {
+        guard let insight = item.insight, insight.low > 0 else { return nil }
+        let pill = RowControlButton(title: "", target: self, action: #selector(wishlistLowTargetClicked(_:)))
+        pill.identifier = NSUserInterfaceItemIdentifier(item.key)
+        pill.isBordered = false
+        pill.wantsLayer = true
+        pill.layer?.cornerRadius = 8
+        pill.layer?.borderWidth = 1
+        let record = insight.kind == "record"
+        let color: NSColor = record ? .systemGreen : .secondaryLabelColor
+        pill.attributedTitle = NSAttributedString(string: lowestText(insight, normal: item.best?.normalPrice), attributes: [
+            .font: NSFont.monospacedDigitSystemFont(ofSize: 10, weight: record ? .semibold : .regular), .foregroundColor: color])
+        pill.layer?.borderColor = color.withAlphaComponent(0.5).cgColor
+        pill.heightAnchor.constraint(equalToConstant: 16).isActive = true
+        pill.widthAnchor.constraint(equalToConstant: min(Self.shopPriceColumnWidth, ceil(pill.attributedTitle.size().width) + 14)).isActive = true
+        pill.isEnabled = wishlistEditable
+        pill.toolTip = insight.detail + "Click to be told when the price drops to this."
+        pill.setAccessibilityIdentifier("wishlistLowTarget")
+        pill.setAccessibilityLabel("Set the target price to the all-time low, " + lowestText(insight, normal: item.best?.normalPrice))
+        return pill
     }
 
     /// The faint "Target price" pill on wishlist rows; stronger once a target is set, green once it's reached.
