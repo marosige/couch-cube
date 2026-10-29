@@ -1358,9 +1358,9 @@ extension SetupController {
                                  biosButtons.first?.identifier?.rawValue == "/BIOS/dc",
                                  "BIOS details must show the destination folder")
                     let copies = biosButtons.filter { $0.action == #selector(self.copyBIOSNames(_:)) }
-                    precondition(copies.map { $0.title } == ["dc_boot.bin", "dc_flash.bin", "Copy"])
+                    precondition(copies.map { $0.title } == ["dc_boot.bin", "dc_flash.bin", "Copy all filenames", "Copy"])
                     precondition(copies.map { $0.identifier!.rawValue } ==
-                                 ["dc_boot.bin", "dc_flash.bin", "Dreamcast BIOS"])
+                                 ["dc_boot.bin", "dc_flash.bin", "dc_boot.bin dc_flash.bin", "Dreamcast BIOS"])
                     precondition(!biosButtons.contains { $0.title.contains("Google") || $0.title == "Copy all" })
                     precondition(biosCopyButtons(self.biosStatusView(BIOSStatus(state: "present",
                         summary: "BIOS found", files: biosPreview.files))).isEmpty)
