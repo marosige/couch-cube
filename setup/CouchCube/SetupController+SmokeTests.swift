@@ -2794,7 +2794,7 @@ extension SetupController {
         rerenderShop()
         window.contentView!.layoutSubtreeIfNeeded()
         precondition(views(shopDetailContent).contains { $0.accessibilityIdentifier() == "shopGameHero" })
-        precondition(labels(shopDetailContent).contains("$9.99") && labels(shopDetailContent).contains("Lowest $7.99 (\u{2212}47%)"),
+        precondition(labels(shopDetailContent).contains("$9.99") && labels(shopDetailContent).contains("Lowest \u{2212}47% $7.99"),
                      "The all-time low with its price and discount: \(labels(shopDetailContent))")
         let lowest = views(shopDetailContent).compactMap { $0 as? NSTextField }.filter { $0.accessibilityIdentifier() == "shopLowest" }.map(\.stringValue)
         precondition(lowest.map { $0.replacingOccurrences(of: "\u{00A0}", with: " ") } == ["Lowest USD"],
