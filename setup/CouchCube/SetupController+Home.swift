@@ -56,6 +56,7 @@ extension SetupController {
             let art = tilePicture ?? TVMenuArtwork.image(for: frontend, appIcon: path.map { NSWorkspace.shared.icon(forFile: $0) })
             homePlayBackground.layer?.contentsGravity = .resizeAspectFill
             homePlayBackground.layer?.contents = art.cgImage(forProposedRect: nil, context: nil, hints: nil)
+            homePlayBackground.imageAspect = tilePicture.map { $0.size.height > 0 ? $0.size.width / $0.size.height : 0 } ?? 0
             homePlayTitle.isHidden = tilePicture != nil
             homePlayShade.isHidden = tilePicture != nil
         }

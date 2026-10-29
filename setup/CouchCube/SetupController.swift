@@ -193,7 +193,7 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
     var homeControllerImages: [String: [NSImageView]] = [:]
     var homeSessionControllers: [String] = []
     var homeObservedConnections = Set<String>()
-    let homePlayBackground = NSView()
+    let homePlayBackground = PlayPictureView()
     /// The Play tile's name and dimming layer; Cube TV's picture is the whole tile, so it hides both.
     var homePlayTitle: NSTextField!
     var homePlayShade: NSView!
