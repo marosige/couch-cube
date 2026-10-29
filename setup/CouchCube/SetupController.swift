@@ -234,8 +234,8 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
     var sidebarAttention: [Int: NSColor] = [:]
     var sidebarTasks: [SidebarTask] = []
     var sidebarTaskCounts: [Int: SidebarBadge] = [:]
-    /// The sidebar marks one setup step at a time (no setting: it ends by itself once everything is done).
-    var guidedSetup = true
+    /// Off: the sidebar always shows every notification, red and yellow, on every page that has one.
+    var guidedSetup = false
     var couchCubeUpdateAvailable = false
     var controllerInputUnavailable = false
     let inspectorRows = NSStackView()
