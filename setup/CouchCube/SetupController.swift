@@ -17,7 +17,7 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
     let sidebar = NSTableView()
     var selectingPage = false
     let sidebarPages = [-1, 0, 8, 13, -1, 6, 1, 7, 10, 11]
-    let sidebarTitles = ["Couch Cube", "Play", "Controllers", "Cube Shop", "Settings", "Game library", "App Store", "Retro consoles", "Console Mode", "App Settings"]
+    let sidebarTitles = ["Couch Cube", "Play", "Controllers", "Cube Shop", "Settings", "Game Library", "App Store", "Retro Consoles", "Console Mode", "App Settings"]
     let sidebarSymbols = ["", "play.rectangle.fill", "gamecontroller.fill", "bag.fill", "", "books.vertical.fill", "storefront", "tv", "power", "gearshape"]
     let screenTitle = NSTextField(labelWithString: "Play")
     // Deals: lazy, cached, read-only views of CheapShark store deals and GamerPower giveaways.
@@ -329,7 +329,7 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
     var lastAppsData: Data?
     var appsLoadGeneration = 0
     var consoleLoadGeneration = 0
-    /// Read-only backend reads for App Store and Retro consoles; smoke tests replace it to control completion order.
+    /// Read-only backend reads for App Store and Retro Consoles; smoke tests replace it to control completion order.
     lazy var backendRead: (_ arguments: [String], _ done: @escaping (Int32, Data) -> Void) -> Void = { arguments, done in
         self.execute(arguments, capture: true, completed: done)
     }
@@ -376,6 +376,11 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
     var appRefreshPending = false
     let appMenuRows = NSStackView()
     let appPCRows = NSStackView()
+    let appToolRows = NSStackView()
+    /// Every App Store card, in page order.
+    var appCategoryStacks: [NSStackView] { [appMenuRows, appPCRows, appToolRows, appWindowsRows, appRetroRows] }
+    /// Apps that sit next to games rather than play them: addons and chat.
+    let companionApps: Set<String> = ["curseforge", "discord"]
     let appWindowsRows = NSStackView()
     let appRetroRows = NSStackView()
     let consoleRows = NSStackView()
@@ -403,7 +408,7 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
         self.runBackendInBackground(["systems", "--root", root]) { code, data, _ in done(code, data) }
     }
     let appsStatus = NSTextField(wrappingLabelWithString: "")
-    let consoleStatus = NSTextField(wrappingLabelWithString: "Create your game folders in Settings → Game library first.")
+    let consoleStatus = NSTextField(wrappingLabelWithString: "Create your game folders in Settings → Game Library first.")
     let setupFolderStatus = NSTextField(wrappingLabelWithString: "Choose where to keep your games.")
     let gameLibraryOverviewRows = NSStackView()
     var storageOverviewRendered: [ObjectIdentifier: [StorageOverviewEntry]] = [:]
@@ -717,7 +722,7 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
             launcherSection()
         ]))
 
-        for rows in [appMenuRows, appPCRows, appWindowsRows, appRetroRows] {
+        for rows in appCategoryStacks {
             rows.orientation = .vertical
             rows.alignment = .leading
             rows.spacing = 0
@@ -737,6 +742,7 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
             appManagementHint,
             appCategoryCard("TV menus", rows: appMenuRows),
             appCategoryCard("PC games", rows: appPCRows),
+            appCategoryCard("Game Companions", rows: appToolRows),
             appCategoryCard("Windows games", rows: appWindowsRows, extra: [windowsGuideButton()]),
             appCategoryCard("Retro game emulators", rows: appRetroRows),
             helperAdvice,
@@ -765,7 +771,7 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
         transferLibraryButton = button("Move library\u{2026}", #selector(moveLibrary))
         retireLibraryButton = button("Move old library to Trash\u{2026}", #selector(retireOldLibrary))
         retireLibraryButton.isHidden = true
-        // Library storage is part of Game library; the index stays so page numbers remain stable.
+        // Library storage is part of Game Library; the index stays so page numbers remain stable.
         addPage("Library storage", content: column([]))
         updateButton.title = "View release\u{2026}"
         updateButton.target = self
@@ -834,7 +840,7 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
         gameLibraryOverviewRows.orientation = .vertical
         gameLibraryOverviewRows.alignment = .leading
         gameLibraryOverviewRows.spacing = 0
-        addPage("Game library", content: column([
+        addPage("Game Library", content: column([
             card("", subtitle: nil, views: [
                 storageHeader,
                 text("Keep games on this Mac or an external SSD. Choose a drive to see what's on it.", size: 12, secondary: true),
@@ -1109,7 +1115,7 @@ final class SetupController: NSObject, NSApplicationDelegate, NSWindowDelegate, 
 
     var steamOverviewSummary: String {
         guard let report = steamReport else { return "Not checked" }
-        if !report.errors.isEmpty { return "Couldn't read some games · Open Game library" }
+        if !report.errors.isEmpty { return "Couldn't read some games · Open Game Library" }
         let online = report.libraries.filter { $0.available }
         let local = online.filter { steamStorageKind($0) == "Local" }.reduce(0) { $0 + $1.games.filter { $0.installed }.count }
         let external = online.filter { steamStorageKind($0) == "External" }.reduce(0) { $0 + $1.games.filter { $0.installed }.count }

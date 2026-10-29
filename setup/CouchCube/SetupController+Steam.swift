@@ -18,7 +18,7 @@ extension SetupController {
         finishAdvice.stringValue = report?.issues.isEmpty != true
             ? "Your library still needs attention. Go back to storage before continuing."
             : missing.contains("steam")
-            ? "Using ES-DE only? Skip Steam setup. Configure your selected emulators in App Store and add your ROMs in Game library."
+            ? "Using ES-DE only? Skip Steam setup. Configure your selected emulators in App Store and add your ROMs in Game Library."
             : "Steam is installed. The steps below happen in Steam; they are not changed by Couch Cube."
         if let drive = selected {
             let path = (drive.root as NSString).appendingPathComponent("SteamLibrary")
@@ -241,7 +241,7 @@ extension SetupController {
         guard let drive = selected else { return }
         let folder = URL(fileURLWithPath: drive.root).appendingPathComponent("SteamLibrary")
         guard FileManager.default.fileExists(atPath: folder.path) else {
-            status.stringValue = "Create your game folders in Game library before connecting Steam storage."
+            status.stringValue = "Create your game folders in Game Library before connecting Steam storage."
             return
         }
         NSWorkspace.shared.activateFileViewerSelecting([folder])

@@ -21,7 +21,7 @@ collection with **ES-DE**, and connect up to **4 controllers** in supported game
 | On this Mac | On an external SSD |
 |---|---|
 | One Mac, one cozy gaming spot. | More room for games on smaller Macs, such as 256 GB models — or take your app and games between Macs. |
-| Open the **DMG** and drag **Couch Cube** onto **Applications**. | Unzip the **SSD pack** onto the SSD and configure **Settings → Game library**. Or use the installed app → **Settings → Game library → Add or prepare an SSD** to copy the app or explicitly prepare a new SSD. |
+| Open the **DMG** and drag **Couch Cube** onto **Applications**. | Unzip the **SSD pack** onto the SSD and configure **Settings → Game Library**. Or use the installed app → **Settings → Game Library → Add or prepare an SSD** to copy the app or explicitly prepare a new SSD. |
 
 Downloads are on the [Releases](https://github.com/marosige/couch-cube/releases) page.
 Couch Cube is in early testing (alpha): back up your data first. Some game players require newer macOS.
@@ -41,9 +41,9 @@ This only removes the "downloaded from the internet" mark from Couch Cube; nothi
 - **Play** — open your TV menu (Steam Big Picture or ES-DE), or start any game from one launcher:
   Steam games, Windows launchers like Battle.net, Mac launchers, emulators and apps you add.
 - **Controllers** — see, name, order and test up to 4 controllers; pairing stays in macOS Bluetooth settings.
-- **Game library** — keep games on this Mac or on an external SSD you can take to another Mac.
+- **Game Library** — keep games on this Mac or on an external SSD you can take to another Mac.
 - **App Store** — install, update and remove Steam, store launchers and emulators (via Homebrew where possible).
-- **Retro consoles** — choose which consoles appear in ES-DE and check which BIOS files are still missing.
+- **Retro Consoles** — choose which consoles appear in ES-DE and check which BIOS files are still missing.
 - **Console Mode** — optionally open your TV menu automatically when a controller is connected at login.
 - **Cube Shop** — browse PC game deals, free giveaways and Mac App Store games, keep a wishlist with target
   prices. It never buys anything or signs in; every link opens in your browser.
@@ -82,7 +82,7 @@ helps install optional game players. This isn't a bootable OS or macOS Proton.
 **Your library:** APFS or Mac OS Extended storage. Files live in
 `~/Games/Couch Cube` locally, or `<SSD>/Couch Cube` for portable
 setups. Keep the portable app beside that folder. After moving it, use
-**Game library → Update library links**; Steam links may need reconnecting too.
+**Game Library → Update library links**; Steam links may need reconnecting too.
 Storage checks aren't speed tests or game-compatibility guarantees.
 
 **SSD preparation:** stages this running app on another disk and verifies its

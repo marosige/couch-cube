@@ -81,12 +81,13 @@ extension SetupController {
                 self.renderGeneral()
                 if self.collapsedAppCategories.isEmpty {
                     precondition(self.appMenuRows.arrangedSubviews.count == 4)
-                    precondition(self.appPCRows.arrangedSubviews.count == 14)
+                    precondition(self.appPCRows.arrangedSubviews.count == 10)
+                    precondition(self.appToolRows.arrangedSubviews.count == 4)
                     precondition(self.appWindowsRows.arrangedSubviews.count == 4 + 2 * self.windowsDownloads.count)
                     precondition(self.appRetroRows.arrangedSubviews.count == 16)
                 }
-                precondition(Set([self.appMenuRows, self.appPCRows, self.appWindowsRows, self.appRetroRows]
-                    .compactMap { $0.superview?.superview }.map { ObjectIdentifier($0) }).count == 4,
+                precondition(Set(self.appCategoryStacks
+                    .compactMap { $0.superview?.superview }.map { ObjectIdentifier($0) }).count == 5,
                     "Each Apps category must have its own card")
                 self.appsStatus.stringValue = ""
                 self.backendRead(["frontend"]) { code, data in
@@ -124,7 +125,7 @@ extension SetupController {
     }
 
     func appCategoryTitle(for rows: NSStackView) -> String {
-        rows === appMenuRows ? "TV menus" : rows === appPCRows ? "PC games" :
+        rows === appMenuRows ? "TV menus" : rows === appPCRows ? "PC games" : rows === appToolRows ? "Game Companions" :
             rows === appWindowsRows ? "Windows games" : "Retro game emulators"
     }
 
@@ -161,7 +162,7 @@ extension SetupController {
     }
 
     func renderApps() {
-        for rows in [appMenuRows, appPCRows, appWindowsRows, appRetroRows] { clearRows(rows) }
+        for rows in appCategoryStacks { clearRows(rows) }
         var hiddenApps: [ObjectIdentifier: Int] = [:]
         for (index, app) in appStates.enumerated() {
             for placement in appPlacements(app) {
@@ -180,10 +181,10 @@ extension SetupController {
             addRow(makeWindowsDownloadRow(item), to: appWindowsRows)
         }
         // No divider under a card's last app (kept in the stack, just hidden, so row positions stay put).
-        for rows in [appMenuRows, appPCRows, appWindowsRows, appRetroRows] {
+        for rows in appCategoryStacks {
             (rows.arrangedSubviews.last as? NSBox)?.isHidden = true
         }
-        for rows in [appMenuRows, appPCRows, appWindowsRows, appRetroRows] {
+        for rows in appCategoryStacks {
             guard let hidden = hiddenApps[ObjectIdentifier(rows)] else { continue }
             let note = text("\(hidden) more app\(hidden == 1 ? "" : "s") to get · Expand to show",
                             size: 11, secondary: true)
@@ -200,6 +201,7 @@ extension SetupController {
     func appPlacements(_ app: ManagedApp) -> [(rows: NSStackView, title: String?, purpose: String?)] {
         if app.id == "steam" { return [(appMenuRows, "Steam Big Picture", "TV menu for Steam games"), (appPCRows, nil, nil)] }
         let rows = app.id == "es-de" ? appMenuRows :
+            companionApps.contains(app.id) ? appToolRows :
             computerGameApps.contains(app.id) ? appPCRows :
             ["sikarugir", "crossover"].contains(app.id) ? appWindowsRows : appRetroRows
         return [(rows, nil, nil)]
@@ -297,7 +299,7 @@ extension SetupController {
         guard let index = appStates.firstIndex(where: { $0.id == id }) else { return }
         let app = appStates[index]
         let placements = appPlacements(app).filter { appPlacementVisible(app, $0) }
-        let existing = [appMenuRows, appPCRows, appWindowsRows, appRetroRows].flatMap { rows in
+        let existing = appCategoryStacks.flatMap { rows in
             rows.arrangedSubviews.filter { $0.identifier?.rawValue == "app-row-" + id }.map { (rows, $0) }
         }
         // A row appeared or disappeared (for example in a collapsed category): rebuild the list instead.
@@ -708,7 +710,7 @@ extension SetupController {
             ("Emulator", row([statusIndicator(emulatorStatus(system).title, color: emulatorStatus(system).color),
                               text(installed == true ? "Installed" : installed == false ? "Not installed" : "Not checked yet", size: 12, secondary: true),
                               store])),
-            ("Shown", text(system.enabled ? "Yes, in Play and the TV menu" : "No. Turn it on in Retro consoles.", size: 13, secondary: !system.enabled)),
+            ("Shown", text(system.enabled ? "Yes, in Play and the TV menu" : "No. Turn it on in Retro Consoles.", size: 13, secondary: !system.enabled)),
             ("Games", text(detail.map { $0.games.count == 1 ? "1 game" : "\($0.games.count) games" } ?? (selected == nil ? "No game library" : "Counting\u{2026}"),
                            size: 13))
         ]
@@ -780,7 +782,8 @@ extension SetupController {
 
     func showAppInStore(_ id: String) {
         highlightedAppID = id
-        let category = id == "steam" || id == "es-de" ? "TV menus" : computerGameApps.contains(id) ? "PC games" :
+        let category = id == "steam" || id == "es-de" ? "TV menus" : companionApps.contains(id) ? "Game Companions" :
+            computerGameApps.contains(id) ? "PC games" :
             ["sikarugir", "crossover"].contains(id) ? "Windows games" : "Retro game emulators"
         if appStates.first(where: { $0.id == id })?.installed != true && collapsedAppCategories.contains(category),
            let toggle = appCategoryToggles[category] {
@@ -797,7 +800,7 @@ extension SetupController {
             for child in view.subviews { if let match = find(child) { return match } }
             return nil
         }
-        guard let line = [appMenuRows, appPCRows, appWindowsRows, appRetroRows].lazy.compactMap({ find($0) }).first else { return }
+        guard let line = appCategoryStacks.lazy.compactMap({ find($0) }).first else { return }
         if !appsChecking { highlightedAppID = nil }
         window.contentView?.layoutSubtreeIfNeeded()
         line.scrollToVisible(line.bounds.insetBy(dx: 0, dy: -120))

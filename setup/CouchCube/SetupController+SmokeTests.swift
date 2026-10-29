@@ -9,7 +9,7 @@ import UniformTypeIdentifiers
 
 
 extension SetupController {
-    /// Game library and Library storage share one drive overview; each drive opens a read-only detail page.
+    /// Game Library and Library storage share one drive overview; each drive opens a read-only detail page.
     func smokeTestDriveOverview() {
         func views(_ root: NSView) -> [NSView] { [root] + root.subviews.flatMap(views) }
         func labels(_ root: NSView) -> [String] { views(root).compactMap { ($0 as? NSTextField)?.stringValue } }
@@ -62,7 +62,7 @@ extension SetupController {
             precondition(rows[1].driveID == nil && rows[1].alphaValue < 1 && labels(rows[1]).contains("External SSD") &&
                          labels(rows[1]).contains("Connect one"), "Without a drive, External SSD is a disabled Connect one row")
         }
-        precondition(gameLibraryOverviewRows.isDescendant(of: tabs.tabViewItems[6].view!), "Game library shows the drive overview")
+        precondition(gameLibraryOverviewRows.isDescendant(of: tabs.tabViewItems[6].view!), "Game Library shows the drive overview")
         storageStatus = StorageStatus(locations: [
             .init(drive: local, configured: true, issue: nil, environment: "ready"),
             .init(drive: ssd(1), configured: false, issue: nil, environment: "absent"),
@@ -105,7 +105,7 @@ extension SetupController {
         rows[1].onOpen?("ssd1")
         precondition(currentPage == 12 && driveDetailID == "ssd1" && driveDetailParent == 6 &&
                      sidebar.selectedRow == sidebarPages.firstIndex(of: 6) && screenTitle.stringValue == "Game SSD 1",
-                     "A drive row opens its detail page under Game library")
+                     "A drive row opens its detail page under Game Library")
         precondition(reads.last?.0 == ["drive-detail", "--drive", "ssd1"])
         precondition(views(driveDetailRows).contains { ($0 as? NSButton)?.identifier?.rawValue == "drive-initialize" && ($0 as? NSButton)?.isEnabled == true },
                      "A drive without a library offers Initialize")
@@ -511,12 +511,12 @@ extension SetupController {
                             ], active: StorageStatus.Active(id: sample.id, uuid: sample.uuid), transfer: nil)
                             self.renderStorageLocations()
                             precondition(self.gameLibraryOverviewRows.arrangedSubviews.contains { ($0 as? StorageOverviewRow)?.driveID == sample.id },
-                                         "Game library lists drives with the shared overview rows")
+                                         "Game Library lists drives with the shared overview rows")
                             precondition(self.setupFolderStatus.stringValue.hasPrefix("Active · "))
                             let library = self.tabs.tabViewItems[6].view!
                             precondition([self.setupFolderStatus, self.gameLibraryOverviewRows, self.transferLibraryButton, self.retireLibraryButton]
                                             .allSatisfy { $0.isDescendant(of: library) },
-                                         "Game library includes the former Library storage controls")
+                                         "Game Library includes the former Library storage controls")
                             // A button's own title only: newer AppKit draws it with an internal text field subview.
                             func texts(_ view: NSView) -> [String] {
                                 if let button = view as? NSButton { return [button.title] }
@@ -1504,7 +1504,7 @@ extension SetupController {
                         precondition(self.selectedStorageMode.stringValue.hasPrefix(expected) && !self.selectedStorageIcon.isHidden &&
                                      self.selectedStorageIcon.image != nil && self.selectedStorageIcon.accessibilityLabel() == self.selectedStorageMode.stringValue &&
                                      self.storageMode(drive.mode).symbol == (drive.mode == "local" ? "macmini" : "externaldrive"),
-                                     "Game library storage uses the Library Settings mode name and icon")
+                                     "Game Library storage uses the Library Settings mode name and icon")
                     } else {
                         precondition(self.selectedStorageMode.stringValue == "No storage selected" ||
                                      self.selectedStorageMode.stringValue.hasSuffix("· Disconnected"))
@@ -1629,7 +1629,7 @@ extension SetupController {
                         precondition(colorTiles(in: cell).isEmpty, "Sidebar symbols must not have colored tiles")
                         precondition((cell as? NSTableCellView)?.imageView?.contentTintColor == .secondaryLabelColor)
                     }
-                    precondition(!self.sidebarPages.contains(5), "Steam guide is part of Game library, not a sidebar destination")
+                    precondition(!self.sidebarPages.contains(5), "Steam guide is part of Game Library, not a sidebar destination")
                     precondition(!self.homeControllerStatus.arrangedSubviews.isEmpty)
                     let homeReport = self.report
                     self.report = Assessment(state: "valid layout", issues: [], notes: [], missing: [])
@@ -1654,11 +1654,11 @@ extension SetupController {
                     self.report = countReport
                     self.window.contentView!.layoutSubtreeIfNeeded()
                     self.selectPage(2)
-                    precondition(self.tabs.selectedTabViewItem === self.tabs.tabViewItems[6], "Library storage opens the merged Game library")
+                    precondition(self.tabs.selectedTabViewItem === self.tabs.tabViewItems[6], "Library storage opens the merged Game Library")
                     self.goBack()
                     precondition(self.screenTitle.stringValue == "Play")
                     self.goForward()
-                    precondition(self.screenTitle.stringValue == "Game library")
+                    precondition(self.screenTitle.stringValue == "Game Library")
                     self.showTVMenus()
                     precondition(self.tabs.selectedTabViewItem === self.tabs.tabViewItems[10])
                     precondition(self.screenTitle.stringValue == "Console Mode")
@@ -1829,7 +1829,7 @@ extension SetupController {
                  "managed": app.managed, "manual": app.manual, "brew": app.brew]
             })
         }
-        // Retro consoles: refresh keeps rows, ignores stale and wrong-library results, keeps unsaved toggle intent.
+        // Retro Consoles: refresh keeps rows, ignores stale and wrong-library results, keeps unsaved toggle intent.
         consoleRoot = { "/smoke" }
         report = Assessment(state: "valid layout", issues: [], notes: [], missing: [], preferred_frontend: preferredFrontend)
         consolesLoaded = true
@@ -1838,7 +1838,7 @@ extension SetupController {
         let ids = consoleSystems.map(\.id)
         loadSystems()
         precondition(reads.count == 1 && consoleRows.arrangedSubviews.map(ObjectIdentifier.init) == rows,
-                     "Opening Retro consoles refreshes in the background without a loading rebuild")
+                     "Opening Retro Consoles refreshes in the background without a loading rebuild")
         loadSystems()
         precondition(reads.count == 2)
         reads[1].done(0, systemsJSON([ids[0]]))
@@ -2386,7 +2386,7 @@ extension SetupController {
 
         // Steam is one app listed twice (TV menus: Steam Big Picture, PC games: Steam): both rows share one state.
         func steamRows() -> [(NSStackView, NSView)] {
-            [appMenuRows, appPCRows, appWindowsRows, appRetroRows].flatMap { rows in
+            appCategoryStacks.flatMap { rows in
                 rows.arrangedSubviews.filter { $0.identifier?.rawValue == "app-row-steam" }.map { (rows, $0) } }
         }
         func steam(installed: Bool, update: String? = nil) -> ManagedApp {

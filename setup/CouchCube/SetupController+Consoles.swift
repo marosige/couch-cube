@@ -41,7 +41,7 @@ extension SetupController {
         guard task == nil, let root = consoleRoot(), report?.state == "valid layout" else {
             consolesChecking = false
             renderSystems()
-            consoleStatus.stringValue = "Create game folders in Settings → Game library first. Wait for any current operation to finish."
+            consoleStatus.stringValue = "Create game folders in Settings → Game Library first. Wait for any current operation to finish."
             return
         }
         consoleRefreshPending = false
@@ -312,7 +312,7 @@ extension SetupController {
         guard installed else { return (.systemRed, "Install \(emulatorName(system)) in App Store, then return here.") }
         guard let bios = system.bios else { return (.systemGray, "Emulator installed. Reopen Consoles to check BIOS requirements.") }
         switch bios.state {
-        case "present", "not-needed": return (.systemGreen, "Emulator ready. Add your own games in Game library.")
+        case "present", "not-needed": return (.systemGreen, "Emulator ready. Add your own games in Game Library.")
         case "optional": return (.systemYellow, "BIOS recommended. A fallback is available; open help for optional filenames.")
         case "missing", "partial": return (.systemRed, "Required BIOS files are missing. Open help to copy filenames and see where they go.")
         default: return (.systemGray, bios.summary + ". Open the emulator to check its setup.")
@@ -486,7 +486,7 @@ extension SetupController {
             return
         }
         guard let root = consoleRoot(), !consoleSystems.isEmpty else {
-            revertConsoleSelection("Load your console selection first. Create game folders in Settings → Game library if needed.")
+            revertConsoleSelection("Load your console selection first. Create game folders in Settings → Game Library if needed.")
             return
         }
         if esdeRunning {
@@ -544,7 +544,7 @@ extension SetupController {
         consoleRefresher(root) { code, data in
             guard generation == self.consoleEditGeneration, !self.consoleSaveInFlight, self.consoleSaveTimer == nil else { return }
             guard code == 0, let systems = try? JSONDecoder().decode([ConsoleSystem].self, from: data) else {
-                self.consoleStatus.stringValue = "Saved. Couldn't refresh console status; reopen Retro consoles to check again."
+                self.consoleStatus.stringValue = "Saved. Couldn't refresh console status; reopen Retro Consoles to check again."
                 return
             }
             self.consolePersistedEnabled = Set(systems.filter(\.enabled).map(\.id))

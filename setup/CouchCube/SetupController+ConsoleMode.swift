@@ -59,7 +59,7 @@ extension SetupController {
         }
         let enabled = autoLaunchToggle.state == .on
         guard !enabled || (selected != nil && report?.state == "valid layout" && report?.issues.isEmpty == true) else {
-            autoLaunchStatus.stringValue = "Choose Settings → Game library before enabling automatic console mode."
+            autoLaunchStatus.stringValue = "Choose Settings → Game Library before enabling automatic console mode."
             autoLaunchStatus.isHidden = false
             loadAutoLaunch()
             return
@@ -249,7 +249,7 @@ extension SetupController {
         switch mode {
         case "tv", "tv-always":
             guard selected != nil, report?.state == "valid layout", report?.issues.isEmpty == true else {
-                autoLaunchStatus.stringValue = "Set up your game library first (Settings \u{203A} Game library)."
+                autoLaunchStatus.stringValue = "Set up your game library first (Settings \u{203A} Game Library)."
                 autoLaunchStatus.isHidden = false
                 return
             }

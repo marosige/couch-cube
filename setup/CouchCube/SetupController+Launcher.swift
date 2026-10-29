@@ -187,7 +187,7 @@ extension SetupController {
         runBackendInBackground(libraryCommand(["game-art-key", "--set", key])) { [weak self] code, _, errors in
             guard let self else { return }
             guard code == 0 else {
-                self.gameArtStatus.stringValue = "Couldn't save the key: " + backendErrorMessage(errors, fallback: "check Game library.")
+                self.gameArtStatus.stringValue = "Couldn't save the key: " + backendErrorMessage(errors, fallback: "check Game Library.")
                 self.gameArtStatus.textColor = .systemOrange
                 return
             }
